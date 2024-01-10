@@ -33,6 +33,12 @@ const MarkupLine = struct {
                 continue;
             }
 
+            if (byte == '"') {
+                try self.buffer.append('\\');
+                try self.buffer.append('"');
+                continue;
+            }
+
             if (self.escape and !self.open) {
                 try self.buffer.append(byte);
                 self.escape = false;

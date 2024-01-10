@@ -1,2 +1,3 @@
 /zig-cache/
 /zig-out/
+/src/templates/.*.compiled.zig

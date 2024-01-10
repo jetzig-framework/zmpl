@@ -4,8 +4,9 @@ pub const Writer = std.ArrayList(u8).Writer;
 
 const Self = @This();
 
-// arena: std.heap.ArenaAllocator,
-allocator: std.mem.Allocator = undefined,
+_allocator: std.mem.Allocator,
+arena: ?std.heap.ArenaAllocator = null,
+arena_allocator: std.mem.Allocator = undefined,
 writer_array: std.ArrayList(u8),
 nested_value: Value = undefined,
 value: ?Value = null,
@@ -15,28 +16,46 @@ pub fn init(allocator: std.mem.Allocator) Self {
     const writer_array = std.ArrayList(u8).init(allocator);
 
     return .{
-        .allocator = allocator,
+        ._allocator = allocator,
         .writer_array = writer_array,
     };
 }
 
+pub fn deinit(self: *Self) void {
+    if (self.arena) |arena| arena.deinit();
+}
+
 pub fn getValueString(self: *Self, key: []const u8) !?[]const u8 {
     if (self.value) |val| {
-        switch (val) {
-            .object => |*capture| {
-                var capt = capture.*;
-                var v = capt.get(key) orelse return null;
-                return try v.toString();
-            },
-            else => return "",
+        var tokens = std.mem.splitSequence(u8, key, ".");
+        var current_value = val;
+
+        while (tokens.next()) |token| {
+            switch (current_value) {
+                .object => |*capture| {
+                    var capt = capture.*;
+                    current_value = capt.get(token) orelse return "";
+                },
+                .array => |*capture| {
+                    var capt = capture.*;
+                    current_value = capt.get(try std.fmt.parseInt(usize, token, 10)) orelse return "";
+                },
+                else => |*capture| {
+                    return try capture.toString();
+                },
+            }
+        }
+        switch (current_value) {
+            .object, .array => return "",
+            else => |*capture| return try capture.toString(),
         }
     } else return "";
 }
 
 pub fn object(self: *Self) !*Value {
-    const obj = Object.init(self.allocator);
+    const obj = Object.init(self.getAllocator());
     if (self.value) |_| {
-        const ptr = try self.allocator.create(Value);
+        const ptr = try self.getAllocator().create(Value);
         ptr.* = Value{ .object = obj };
         return ptr;
     } else {
@@ -45,34 +64,33 @@ pub fn object(self: *Self) !*Value {
     }
 }
 
-pub fn array(self: *Self) *Value {
-    var arr = Array.init(self.allocator);
+pub fn array(self: *Self) !*Value {
+    const arr = Array.init(self.getAllocator());
 
     if (self.value) |_| {
-        return &arr;
+        const ptr = try self.getAllocator().create(Value);
+        ptr.* = Value{ .array = arr };
+        return ptr;
     } else {
         self.value = Value{ .array = arr };
-        switch (self.value.?) {
-            .array => |*capture| return capture,
-            else => unreachable,
-        }
+        return &self.value.?;
     }
 }
 
 pub fn string(self: *Self, value: []const u8) Value {
-    return .{ .string = .{ .value = value, .allocator = self.allocator } };
+    return .{ .string = .{ .value = value, .allocator = self.getAllocator() } };
 }
 
 pub fn integer(self: *Self, value: i64) Value {
-    return .{ .integer = .{ .value = value, .allocator = self.allocator } };
+    return .{ .integer = .{ .value = value, .allocator = self.getAllocator() } };
 }
 
 pub fn float(self: *Self, value: f64) Value {
-    return .{ .float = .{ .value = value, .allocator = self.allocator } };
+    return .{ .float = .{ .value = value, .allocator = self.getAllocator() } };
 }
 
 pub fn boolean(self: *Self, value: bool) Value {
-    return .{ .boolean = .{ .value = value, .allocator = self.allocator } };
+    return .{ .boolean = .{ .value = value, .allocator = self.getAllocator() } };
 }
 
 pub fn toJson(self: *Self) ![]const u8 {
@@ -97,9 +115,9 @@ pub const Value = union(enum) {
         }
     }
 
-    pub fn append(self: *Value, key: []const u8, value: Value) !void {
+    pub fn append(self: *Value, value: Value) !void {
         switch (self.*) {
-            .array => |*capture| try capture.append(key, value),
+            .array => |*capture| try capture.append(value),
             inline else => unreachable,
         }
     }
@@ -225,6 +243,14 @@ pub const Array = struct {
         return .{ .array = std.ArrayList(Value).init(allocator), .allocator = allocator };
     }
 
+    pub fn get(self: *Array, index: usize) ?Value {
+        return if (self.array.items.len > index) self.array.items[index] else null;
+    }
+
+    pub fn append(self: *Array, value: Value) !void {
+        try self.array.append(value);
+    }
+
     pub fn toJson(self: *Array, writer: Writer) anyerror!void {
         try writer.writeAll("[");
         for (self.array.items, 0..) |*item, index| {
@@ -234,3 +260,13 @@ pub const Array = struct {
         try writer.writeAll("]");
     }
 };
+
+fn getAllocator(self: *Self) std.mem.Allocator {
+    if (self.arena) |_| {
+        return self.arena_allocator;
+    } else {
+        self.arena = std.heap.ArenaAllocator.init(self._allocator);
+        self.arena_allocator = self.arena.?.allocator();
+        return self.arena_allocator;
+    }
+}
