@@ -112,3 +112,23 @@ test "template with deep nesting" {
 
     try std.testing.expectEqualStrings("<div>Hello :))</div>\n", buf.items);
 }
+
+test "template with iteration" {
+    var buf = std.ArrayList(u8).init(allocator);
+    const writer = buf.writer();
+    defer buf.deinit();
+
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    var object = try data.object();
+    var array = try data.array();
+    try array.append(data.string("yay"));
+    try array.append(data.string("hooray"));
+    try object.add("foo", array.*);
+
+    var context = zmpl.Context{ .allocator = allocator, .writer = writer, .data = &data };
+    try manifest.templates.example_with_iteration.render(&context);
+
+    try std.testing.expectEqualStrings("  <span>yay</span>\n  <span>hooray</span>\n", buf.items);
+}

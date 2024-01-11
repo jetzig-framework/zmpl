@@ -25,7 +25,7 @@ pub fn deinit(self: *Self) void {
     if (self.arena) |arena| arena.deinit();
 }
 
-pub fn getValueString(self: *Self, key: []const u8) !?[]const u8 {
+pub fn getValue(self: *Self, key: []const u8) !?Value {
     if (self.value) |val| {
         var tokens = std.mem.splitSequence(u8, key, ".");
         var current_value = val;
@@ -34,20 +34,29 @@ pub fn getValueString(self: *Self, key: []const u8) !?[]const u8 {
             switch (current_value) {
                 .object => |*capture| {
                     var capt = capture.*;
-                    current_value = capt.get(token) orelse return "";
+                    current_value = capt.get(token) orelse return null;
                 },
                 .array => |*capture| {
                     var capt = capture.*;
-                    current_value = capt.get(try std.fmt.parseInt(usize, token, 10)) orelse return "";
+                    current_value = capt.get(try std.fmt.parseInt(usize, token, 10)) orelse return null;
                 },
                 else => |*capture| {
-                    return try capture.toString();
+                    return capture.*;
                 },
             }
         }
-        switch (current_value) {
-            .object, .array => return "",
-            else => |*capture| return try capture.toString(),
+        return current_value;
+    } else return null;
+}
+
+pub fn getValueString(self: *Self, key: []const u8) !?[]const u8 {
+    if (try self.getValue(key)) |val| {
+        switch (val) {
+            .object, .array => return "", // Implement on Object and Array ?
+            else => |*capture| {
+                var v = capture.*;
+                return try v.toString();
+            },
         }
     } else return "";
 }
@@ -133,6 +142,13 @@ pub const Value = union(enum) {
             .object, .array => unreachable,
             inline else => |*capture| try capture.toString(),
         };
+    }
+
+    pub fn iterator(self: *Value) *Iterator {
+        switch (self.*) {
+            .array => |*capture| return capture.*.iterator(),
+            else => unreachable, // TODO: return error
+        }
     }
 };
 
@@ -238,6 +254,7 @@ pub const Object = struct {
 pub const Array = struct {
     allocator: std.mem.Allocator,
     array: std.ArrayList(Value),
+    it: Iterator = undefined,
 
     pub fn init(allocator: std.mem.Allocator) Array {
         return .{ .array = std.ArrayList(Value).init(allocator), .allocator = allocator };
@@ -258,6 +275,22 @@ pub const Array = struct {
             if (index < self.array.items.len - 1) try writer.writeAll(",");
         }
         try writer.writeAll("]");
+    }
+
+    pub fn iterator(self: *Array) *Iterator {
+        self.it = .{ .array = self.array };
+        return &self.it;
+    }
+};
+
+pub const Iterator = struct {
+    array: std.ArrayList(Value),
+    index: usize = 0,
+
+    pub fn next(self: *Iterator) ?Value {
+        self.index += 1;
+        if (self.index > self.array.items.len) return null;
+        return self.array.items[self.index - 1];
     }
 };
 

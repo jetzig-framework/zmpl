@@ -16,6 +16,7 @@ const MarkupLine = struct {
     line: []const u8,
     open: bool = false,
     escape: bool = false,
+    item: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, line: []const u8) MarkupLine {
         return .{
@@ -30,6 +31,11 @@ const MarkupLine = struct {
         for (self.line) |byte| {
             if (byte == '\\' and !self.escape) {
                 self.escape = true;
+                continue;
+            }
+
+            if (byte == ':' and self.open) {
+                self.item = true;
                 continue;
             }
 
@@ -98,10 +104,13 @@ const MarkupLine = struct {
         );
         try self.buffer.appendSlice(buf);
         self.open = false;
+        self.item = false;
     }
 
     fn compileReference(self: *MarkupLine) ![]const u8 {
-        if (std.mem.startsWith(u8, self.reference_buffer.items, ".")) {
+        if (self.item) {
+            return try self.compileValueReference();
+        } else if (std.mem.startsWith(u8, self.reference_buffer.items, ".")) {
             return try self.compileDataReference();
         } else {
             return try self.compileDeclReference();
@@ -118,14 +127,51 @@ const MarkupLine = struct {
     }
 
     fn compileDeclReference(self: *MarkupLine) ![]const u8 {
+        var buf: [32]u8 = undefined;
+        self.generateVariableName(&buf);
         return std.mem.concat(self.allocator, u8, &[_][]const u8{
-            \\var foo = try zmpl.formatDecl(
+            \\const 
+            ,
+            &buf,
+            \\ = try zmpl.formatDecl(
             ,
             self.reference_buffer.items,
+            \\); try zmpl.write(
+            ,
+            &buf,
+            \\); zmpl.allocator.free(
+            ,
+            &buf,
             \\);
-            \\try zmpl.write(foo);
-            \\allocator.free(foo);
         });
+    }
+
+    fn compileValueReference(self: *MarkupLine) ![]const u8 {
+        var buf: [32]u8 = undefined;
+        self.generateVariableName(&buf);
+        return std.mem.concat(self.allocator, u8, &[_][]const u8{
+            \\var 
+            ,
+            &buf,
+            \\ = 
+            ,
+            self.reference_buffer.items,
+            \\;
+            ,
+            \\try zmpl.write(try 
+            ,
+            &buf,
+            \\.toString());
+        });
+    }
+
+    fn generateVariableName(self: *MarkupLine, buf: *[32]u8) void {
+        _ = self;
+        const chars = "abcdefghijklmnopqrstuvwxyz";
+
+        for (0..32) |index| {
+            buf[index] = chars[std.crypto.random.intRangeAtMost(u8, 0, 25)];
+        }
     }
 };
 

@@ -11,6 +11,10 @@ pub fn write(self: *Self, slice: []const u8) !void {
     try self.writer.writeAll(slice);
 }
 
+pub fn get(self: *Self, key: []const u8) !root.Data.Value {
+    return (try self.data.getValue(key)) orelse unreachable;
+}
+
 pub fn getValueString(self: *Self, key: []const u8) ![]const u8 {
     return (try self.data.getValueString(key)) orelse "";
 }
