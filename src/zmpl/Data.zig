@@ -7,22 +7,28 @@ const Self = @This();
 _allocator: std.mem.Allocator,
 arena: ?std.heap.ArenaAllocator = null,
 arena_allocator: std.mem.Allocator = undefined,
-writer_array: std.ArrayList(u8),
+json_buf: std.ArrayList(u8),
+output_buf: std.ArrayList(u8),
+output_writer: ?std.ArrayList(u8).Writer = null,
 nested_value: Value = undefined,
 value: ?Value = null,
 Null: Value = .{ .Null = NullType{} },
 
 pub fn init(allocator: std.mem.Allocator) Self {
-    const writer_array = std.ArrayList(u8).init(allocator);
+    const json_buf = std.ArrayList(u8).init(allocator);
+    const output_buf = std.ArrayList(u8).init(allocator);
 
     return .{
         ._allocator = allocator,
-        .writer_array = writer_array,
+        .json_buf = json_buf,
+        .output_buf = output_buf,
     };
 }
 
 pub fn deinit(self: *Self) void {
     if (self.arena) |arena| arena.deinit();
+    self.output_buf.deinit();
+    self.json_buf.deinit();
 }
 
 pub fn getValue(self: *Self, key: []const u8) !?Value {
@@ -49,7 +55,7 @@ pub fn getValue(self: *Self, key: []const u8) !?Value {
     } else return null;
 }
 
-pub fn getValueString(self: *Self, key: []const u8) !?[]const u8 {
+pub fn getValueString(self: *Self, key: []const u8) ![]const u8 {
     if (try self.getValue(key)) |val| {
         switch (val) {
             .object, .array => return "", // Implement on Object and Array ?
@@ -102,10 +108,35 @@ pub fn boolean(self: *Self, value: bool) Value {
     return .{ .boolean = .{ .value = value, .allocator = self.getAllocator() } };
 }
 
+pub fn write(self: *Self, slice: []const u8) !void {
+    if (self.output_writer) |writer| {
+        try writer.writeAll(slice);
+    } else {
+        self.output_writer = self.output_buf.writer();
+        try (self.output_writer.?).writeAll(slice);
+    }
+}
+
+pub fn read(self: *Self) []const u8 {
+    return self.output_buf.items;
+}
+
+pub fn get(self: *Self, key: []const u8) !Value {
+    return (try self.getValue(key)) orelse .{ .Null = NullType{} }; // XXX: Raise an error here ?
+}
+
+pub fn formatDecl(self: *Self, comptime decl: anytype) ![]const u8 {
+    if (comptime std.meta.trait.isZigString(@TypeOf(decl))) {
+        return try std.fmt.allocPrint(self.allocator, "{s}", .{decl});
+    } else {
+        return try std.fmt.allocPrint(self.allocator, "{}", .{decl});
+    }
+}
+
 pub fn toJson(self: *Self) ![]const u8 {
-    const writer = self.writer_array.writer();
+    const writer = self.json_buf.writer();
     try self.value.?.toJson(writer);
-    return self.writer_array.items[0..self.writer_array.items.len];
+    return self.json_buf.items[0..self.json_buf.items.len];
 }
 
 pub const Value = union(enum) {
@@ -294,7 +325,7 @@ pub const Iterator = struct {
     }
 };
 
-fn getAllocator(self: *Self) std.mem.Allocator {
+pub fn getAllocator(self: *Self) std.mem.Allocator {
     if (self.arena) |_| {
         return self.arena_allocator;
     } else {

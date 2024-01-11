@@ -139,7 +139,7 @@ const MarkupLine = struct {
             \\); try zmpl.write(
             ,
             &buf,
-            \\); zmpl.allocator.free(
+            \\); allocator.free(
             ,
             &buf,
             \\);
@@ -198,8 +198,8 @@ pub fn compile(self: *Self) ![]const u8 {
     try self.buffer.append(
         \\const std = @import("std");
         \\const __zmpl = @import("zmpl");
-        \\const __Context = __zmpl.Context;
-        \\pub fn render(zmpl: *__Context) anyerror!void {
+        \\const __Data = __zmpl.Data;
+        \\pub fn render(zmpl: *__Data) anyerror![]const u8 {
     );
 
     var it = std.mem.split(u8, self.content, "\n");
@@ -218,6 +218,7 @@ pub fn compile(self: *Self) ![]const u8 {
         }
     }
 
+    try self.buffer.append("return zmpl._allocator.dupe(u8, zmpl.output_buf.items);");
     try self.buffer.append("}");
 
     return try std.mem.join(self.allocator, "\n", self.buffer.items);
