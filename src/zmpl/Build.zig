@@ -35,7 +35,7 @@ pub fn compile(self: *Self) !void {
         switch (err) {
             error.TemplateDirectoryNotFound => {
                 std.debug.print(
-                    "[zmpl] Template directory `{s}` not found, skipping rendering.\n",
+                    "[zmpl] Template directory `{s}` not found, skipping compilation.\n",
                     .{self.templates_path},
                 );
                 return;

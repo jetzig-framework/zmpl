@@ -127,3 +127,23 @@ test "template with iteration" {
 
     try std.testing.expectEqualStrings("  <span>yay</span>\n  <span>hooray</span>\n", output);
 }
+
+test "template with local variable reference" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const output = try manifest.templates.example_with_local_variable_reference.render(&data);
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings("<div>Hello there!</div>\n", output);
+}
+
+test "template with [slug]" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const output = try manifest.templates.example_with_slug.render(&data);
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings("<div>A template with a slug</div>\n", output);
+}

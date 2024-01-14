@@ -1,6 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
-const ZmplBuild = @import("src/zmpl/Build.zig");
+const zmpl = @import("src/zmpl.zig");
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -35,8 +36,10 @@ pub fn build(b: *std.Build) !void {
     const manifest_path = std.os.getenv("ZMPL_MANIFEST_PATH") orelse
         try std.fs.path.join(b.allocator, &[_][]const u8{ templates_path, "manifest.zig" });
 
-    var zmpl_build = ZmplBuild.init(b, lib, manifest_path, templates_path);
-    try zmpl_build.compile();
+    try zmpl.init(b, lib, .{
+        .manifest_path = manifest_path,
+        .templates_path = templates_path,
+    });
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when

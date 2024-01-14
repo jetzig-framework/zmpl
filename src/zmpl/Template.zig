@@ -16,7 +16,7 @@ const MarkupLine = struct {
     line: []const u8,
     open: bool = false,
     escape: bool = false,
-    item: bool = false,
+    decl: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, line: []const u8) MarkupLine {
         return .{
@@ -35,7 +35,7 @@ const MarkupLine = struct {
             }
 
             if (byte == ':' and self.open) {
-                self.item = true;
+                self.decl = true;
                 continue;
             }
 
@@ -104,16 +104,15 @@ const MarkupLine = struct {
         );
         try self.buffer.appendSlice(buf);
         self.open = false;
-        self.item = false;
     }
 
     fn compileReference(self: *MarkupLine) ![]const u8 {
-        if (self.item) {
-            return try self.compileValueReference();
+        if (self.decl) {
+            return try self.compileDeclReference();
         } else if (std.mem.startsWith(u8, self.reference_buffer.items, ".")) {
             return try self.compileDataReference();
         } else {
-            return try self.compileDeclReference();
+            return try self.compileValueReference();
         }
     }
 
@@ -129,6 +128,7 @@ const MarkupLine = struct {
     fn compileDeclReference(self: *MarkupLine) ![]const u8 {
         var buf: [32]u8 = undefined;
         self.generateVariableName(&buf);
+        self.decl = false;
         return std.mem.concat(self.allocator, u8, &[_][]const u8{
             \\const 
             ,
@@ -185,12 +185,19 @@ pub fn init(allocator: std.mem.Allocator, name: []const u8, content: []const u8)
 }
 
 pub fn identifier(self: *Self) ![]const u8 {
-    var ptr: []u8 = try self.allocator.dupe(u8, self.name);
-    // TODO: Sanitize names - must be valid variable names.
-    std.mem.replaceScalar(u8, ptr, '/', '_');
-    std.mem.replaceScalar(u8, ptr, '.', '_');
+    var sanitized_array = std.ArrayList(u8).init(self.allocator);
+    for (self.name, 0..) |char, index| {
+        if (std.mem.indexOfAny(u8, &[_]u8{char}, "abcdefghijklmnopqrstuvwxyz")) |_| {
+            try sanitized_array.append(char);
+        } else if (index == 0) {
+            try sanitized_array.append('_');
+        } else if (index < self.name.len - 1 and sanitized_array.items[sanitized_array.items.len - 1] != '_') {
+            try sanitized_array.append('_');
+        }
+    }
+
     const extension = std.fs.path.extension(self.name);
-    return ptr[0 .. self.name.len - extension.len];
+    return sanitized_array.items[0 .. sanitized_array.items.len - extension.len];
 }
 
 pub fn compile(self: *Self) ![]const u8 {
