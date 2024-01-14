@@ -198,8 +198,9 @@ pub fn compile(self: *Self) ![]const u8 {
     try self.buffer.append(
         \\const std = @import("std");
         \\const __zmpl = @import("zmpl");
-        \\const __Data = __zmpl.Data;
-        \\pub fn render(zmpl: *__Data) anyerror![]const u8 {
+        \\pub fn render(zmpl: *__zmpl.Data) anyerror![]const u8 {
+        \\  const allocator = zmpl.getAllocator();
+        \\  _ = try allocator.alloc(u8, 0); // no-op to avoid unused local constant
     );
 
     var it = std.mem.split(u8, self.content, "\n");

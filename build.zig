@@ -28,6 +28,7 @@ pub fn build(b: *std.Build) !void {
 
     const zmpl_module = b.createModule(.{ .source_file = .{ .path = "src/zmpl.zig" } });
     lib.addModule("zmpl", zmpl_module);
+    try b.modules.put("zmpl", zmpl_module);
 
     const templates_path = std.os.getenv("ZMPL_TEMPLATES_PATH") orelse
         try std.fs.path.join(b.allocator, &[_][]const u8{ "src", "templates" });

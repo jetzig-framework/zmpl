@@ -1,10 +1,12 @@
 # Zmpl
 
-_Zmpl_ is a templating language for [Zig](https://ziglang) :lizard:
+_Zmpl_ is a templating language for [Zig](https://ziglang.org/) :lizard:
 
 * Use _Zig_ code directly in templates for control flow.
-* Simple and intuitive DSL for building _JSON_-compatible data objects.
+* Simple and intuitive DSL for building flexible, _JSON_-compatible data objects.
 * Compiles to _Zig_ code for syntax and type validation.
+* Used by the [Jetzig](https://github.com/bobf/jetzig) web framework.
+
 
 ```zig
 # src/templates/example.zmpl
@@ -47,3 +49,7 @@ test "readme example" {
 ## License
 
 [MIT](LICENSE)
+
+## Credits
+
+[Templ](https://github.com/a-h/templ) - inspiration for template layout.

@@ -127,9 +127,9 @@ pub fn get(self: *Self, key: []const u8) !Value {
 
 pub fn formatDecl(self: *Self, comptime decl: anytype) ![]const u8 {
     if (comptime std.meta.trait.isZigString(@TypeOf(decl))) {
-        return try std.fmt.allocPrint(self.allocator, "{s}", .{decl});
+        return try std.fmt.allocPrint(self.getAllocator(), "{s}", .{decl});
     } else {
-        return try std.fmt.allocPrint(self.allocator, "{}", .{decl});
+        return try std.fmt.allocPrint(self.getAllocator(), "{}", .{decl});
     }
 }
 
