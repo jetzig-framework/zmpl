@@ -10,7 +10,6 @@ arena_allocator: std.mem.Allocator = undefined,
 json_buf: std.ArrayList(u8),
 output_buf: std.ArrayList(u8),
 output_writer: ?std.ArrayList(u8).Writer = null,
-nested_value: Value = undefined,
 value: ?Value = null,
 Null: Value = .{ .Null = NullType{} },
 
@@ -68,15 +67,19 @@ pub fn getValueString(self: *Self, key: []const u8) ![]const u8 {
 }
 
 pub fn object(self: *Self) !*Value {
-    const obj = Object.init(self.getAllocator());
     if (self.value) |_| {
-        const ptr = try self.getAllocator().create(Value);
-        ptr.* = Value{ .object = obj };
-        return ptr;
+        return try self.createObject();
     } else {
-        self.value = Value{ .object = obj };
+        self.value = (try self.createObject()).*;
         return &self.value.?;
     }
+}
+
+fn createObject(self: *Self) !*Value {
+    const obj = Object.init(self.getAllocator());
+    const ptr = try self.getAllocator().create(Value);
+    ptr.* = Value{ .object = obj };
+    return ptr;
 }
 
 pub fn array(self: *Self) !*Value {
@@ -139,6 +142,35 @@ pub fn toJson(self: *Self) ![]const u8 {
     return self.json_buf.items[0..self.json_buf.items.len];
 }
 
+pub fn fromJson(self: *Self, json: []const u8) !void {
+    const parsed = try std.json.parseFromSlice(std.json.Value, self.getAllocator(), json, .{});
+    self.value = try self.parseJsonValue(parsed.value);
+}
+
+fn parseJsonValue(self: *Self, value: std.json.Value) !Value {
+    return switch (value) {
+        .object => |*val| blk: {
+            var it = val.iterator();
+            const obj = try self.createObject();
+            while (it.next()) |item| {
+                try obj.add(item.key_ptr.*, try self.parseJsonValue(item.value_ptr.*));
+            }
+            break :blk obj.*;
+        },
+        .array => |*val| blk: {
+            var arr = try self.array();
+            for (val.items) |item| try arr.append(try self.parseJsonValue(item));
+            break :blk arr.*;
+        },
+        .string => |val| self.string(val),
+        .number_string => |val| self.string(val), // TODO: Special-case this somehow?
+        .integer => |val| self.integer(val),
+        .float => |val| self.float(val),
+        .bool => |val| self.boolean(val),
+        .null => self.Null,
+    };
+}
+
 pub const Value = union(enum) {
     object: Object,
     array: Array,
@@ -178,6 +210,7 @@ pub const Value = union(enum) {
     pub fn iterator(self: *Value) *Iterator {
         switch (self.*) {
             .array => |*capture| return capture.*.iterator(),
+            .object => unreachable, // TODO
             else => unreachable, // TODO: return error
         }
     }

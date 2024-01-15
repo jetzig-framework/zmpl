@@ -147,3 +147,51 @@ test "template with [slug]" {
 
     try std.testing.expectEqualStrings("<div>A template with a slug</div>\n", output);
 }
+
+test "toJson" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    var object = try data.object();
+    var nested_object = try data.object();
+    try nested_object.add("bar", data.integer(10));
+    try object.add("foo", nested_object.*);
+
+    try std.testing.expectEqualStrings(
+        try data.toJson(),
+        \\{"foo":{"bar":10}}
+        ,
+    );
+}
+
+test "fromJson simple" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const json =
+        \\{"foo":"bar"}
+    ;
+    try data.fromJson(json);
+
+    try std.testing.expectEqualStrings(
+        try data.toJson(),
+        \\{"foo":"bar"}
+        ,
+    );
+}
+
+test "fromJson complex" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const json =
+        \\{"foo":{"bar":["baz",10],"qux":{"quux":1.4123,"corge":true}}}
+    ;
+    try data.fromJson(json);
+
+    try std.testing.expectEqualStrings(
+        try data.toJson(),
+        \\{"foo":{"bar":["baz",10],"qux":{"quux":1.4123e+00,"corge":true}}}
+        ,
+    );
+}
