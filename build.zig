@@ -31,9 +31,9 @@ pub fn build(b: *std.Build) !void {
     lib.addModule("zmpl", zmpl_module);
     try b.modules.put("zmpl", zmpl_module);
 
-    const templates_path = std.os.getenv("ZMPL_TEMPLATES_PATH") orelse
+    const templates_path = b.option([]const u8, "zmpl_templates_path", "Directory to search for .zmpl templates.") orelse
         try std.fs.path.join(b.allocator, &[_][]const u8{ "src", "templates" });
-    const manifest_path = std.os.getenv("ZMPL_MANIFEST_PATH") orelse
+    const manifest_path = b.option([]const u8, "zmpl_manifest_path", "Zmpl auto-generated manifest path.") orelse
         try std.fs.path.join(b.allocator, &[_][]const u8{ templates_path, "manifest.zig" });
 
     try zmpl.init(b, lib, .{
