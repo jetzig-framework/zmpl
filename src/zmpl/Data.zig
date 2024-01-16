@@ -75,7 +75,7 @@ pub fn object(self: *Self) !*Value {
     }
 }
 
-fn createObject(self: *Self) !*Value {
+pub fn createObject(self: *Self) !*Value {
     const obj = Object.init(self.getAllocator());
     const ptr = try self.getAllocator().create(Value);
     ptr.* = Value{ .object = obj };
