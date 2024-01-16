@@ -29,11 +29,11 @@ test "readme example" {
     var user = try data.object();
     var auth = try data.object();
 
-    try user.add("email", data.string("user@example.com"));
-    try auth.add("token", data.string("abc123-456-def"));
+    try user.put("email", data.string("user@example.com"));
+    try auth.put("token", data.string("abc123-456-def"));
 
-    try body.add("user", user.*);
-    try body.add("auth", auth.*);
+    try body.put("user", user.*);
+    try body.put("auth", auth.*);
 
     const output = try manifest.templates.example.render(&data);
     defer allocator.free(output);

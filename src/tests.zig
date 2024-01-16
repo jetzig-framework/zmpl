@@ -11,11 +11,11 @@ test "readme example" {
     var user = try data.object();
     var auth = try data.object();
 
-    try user.add("email", data.string("user@example.com"));
-    try auth.add("token", data.string("abc123-456-def"));
+    try user.put("email", data.string("user@example.com"));
+    try auth.put("token", data.string("abc123-456-def"));
 
-    try body.add("user", user.*);
-    try body.add("auth", auth.*);
+    try body.put("user", user.*);
+    try body.put("auth", auth.*);
 
     const output = try manifest.templates.example.render(&data);
     defer allocator.free(output);
@@ -32,7 +32,7 @@ test "template with if statement" {
     defer data.deinit();
 
     var object = try data.object();
-    try object.add("foo", data.string("bar"));
+    try object.put("foo", data.string("bar"));
 
     const output = try manifest.templates.example_with_if_statement.render(&data);
     defer allocator.free(output);
@@ -56,8 +56,8 @@ test "template with nested data lookup" {
 
     var object = try data.object();
     var nested_object = try data.object();
-    try nested_object.add("bar", data.integer(10));
-    try object.add("foo", nested_object.*);
+    try nested_object.put("bar", data.integer(10));
+    try object.put("foo", nested_object.*);
 
     const output = try manifest.templates.example_with_nested_data_lookup.render(&data);
     defer allocator.free(output);
@@ -72,7 +72,7 @@ test "template with array data lookup" {
     var object = try data.object();
     var nested_array = try data.array();
     try nested_array.append(data.string("nested array value"));
-    try object.add("foo", nested_array.*);
+    try object.put("foo", nested_array.*);
 
     const output = try manifest.templates.example_with_array_data_lookup.render(&data);
     defer allocator.free(output);
@@ -101,10 +101,10 @@ test "template with deep nesting" {
     var nested_object = try data.object();
     var double_nested_object = try data.object();
     var triple_nested_object = try data.object();
-    try triple_nested_object.add("qux", data.string(":))"));
-    try double_nested_object.add("baz", triple_nested_object.*);
-    try nested_object.add("bar", double_nested_object.*);
-    try object.add("foo", nested_object.*);
+    try triple_nested_object.put("qux", data.string(":))"));
+    try double_nested_object.put("baz", triple_nested_object.*);
+    try nested_object.put("bar", double_nested_object.*);
+    try object.put("foo", nested_object.*);
 
     const output = try manifest.templates.example_with_deep_nesting.render(&data);
     defer allocator.free(output);
@@ -120,7 +120,7 @@ test "template with iteration" {
     var array = try data.array();
     try array.append(data.string("yay"));
     try array.append(data.string("hooray"));
-    try object.add("foo", array.*);
+    try object.put("foo", array.*);
 
     const output = try manifest.templates.example_with_iteration.render(&data);
     defer allocator.free(output);
@@ -154,8 +154,8 @@ test "toJson" {
 
     var object = try data.object();
     var nested_object = try data.object();
-    try nested_object.add("bar", data.integer(10));
-    try object.add("foo", nested_object.*);
+    try nested_object.put("bar", data.integer(10));
+    try object.put("foo", nested_object.*);
 
     try std.testing.expectEqualStrings(
         try data.toJson(),

@@ -153,7 +153,7 @@ fn parseJsonValue(self: *Self, value: std.json.Value) !Value {
             var it = val.iterator();
             const obj = try self.createObject();
             while (it.next()) |item| {
-                try obj.add(item.key_ptr.*, try self.parseJsonValue(item.value_ptr.*));
+                try obj.put(item.key_ptr.*, try self.parseJsonValue(item.value_ptr.*));
             }
             break :blk obj.*;
         },
@@ -180,9 +180,9 @@ pub const Value = union(enum) {
     string: String,
     Null: NullType,
 
-    pub fn add(self: *Value, key: []const u8, value: Value) !void {
+    pub fn put(self: *Value, key: []const u8, value: Value) !void {
         switch (self.*) {
-            .object => |*capture| try capture.add(key, value),
+            .object => |*capture| try capture.put(key, value),
             inline else => unreachable,
         }
     }
@@ -288,7 +288,7 @@ pub const Object = struct {
         return .{ .hashmap = std.StringHashMap(Value).init(allocator), .allocator = allocator };
     }
 
-    pub fn add(self: *Object, key: []const u8, value: Value) !void {
+    pub fn put(self: *Object, key: []const u8, value: Value) !void {
         try self.hashmap.put(key, value);
     }
 
