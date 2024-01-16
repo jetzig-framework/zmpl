@@ -157,10 +157,11 @@ test "toJson" {
     try nested_object.put("bar", data.integer(10));
     try object.put("foo", nested_object.*);
 
-    try std.testing.expectEqualStrings(
-        try data.toJson(),
+    const json = try data.toJson();
+    defer allocator.free(json);
+
+    try std.testing.expectEqualStrings(json,
         \\{"foo":{"bar":10}}
-        ,
     );
 }
 
@@ -168,15 +169,15 @@ test "fromJson simple" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const json =
+    const input =
         \\{"foo":"bar"}
     ;
-    try data.fromJson(json);
+    try data.fromJson(input);
 
-    try std.testing.expectEqualStrings(
-        try data.toJson(),
+    const json = try data.toJson();
+    defer allocator.free(json);
+    try std.testing.expectEqualStrings(json,
         \\{"foo":"bar"}
-        ,
     );
 }
 
@@ -184,14 +185,14 @@ test "fromJson complex" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const json =
+    const input =
         \\{"foo":{"bar":["baz",10],"qux":{"quux":1.4123,"corge":true}}}
     ;
-    try data.fromJson(json);
+    try data.fromJson(input);
 
-    try std.testing.expectEqualStrings(
-        try data.toJson(),
+    const json = try data.toJson();
+    defer allocator.free(json);
+    try std.testing.expectEqualStrings(json,
         \\{"foo":{"bar":["baz",10],"qux":{"quux":1.4123e+00,"corge":true}}}
-        ,
     );
 }

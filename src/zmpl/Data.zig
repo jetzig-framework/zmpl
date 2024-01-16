@@ -139,7 +139,7 @@ pub fn formatDecl(self: *Self, comptime decl: anytype) ![]const u8 {
 pub fn toJson(self: *Self) ![]const u8 {
     const writer = self.json_buf.writer();
     try self.value.?.toJson(writer);
-    return self.json_buf.items[0..self.json_buf.items.len];
+    return self._allocator.dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
 }
 
 pub fn fromJson(self: *Self, json: []const u8) !void {
@@ -289,7 +289,9 @@ pub const Object = struct {
     }
 
     pub fn put(self: *Object, key: []const u8, value: Value) !void {
-        try self.hashmap.put(key, value);
+        const ptr = try self.allocator.create(Value);
+        ptr.* = value;
+        try self.hashmap.put(try self.allocator.dupe(u8, key), ptr.*);
     }
 
     pub fn get(self: *Object, key: []const u8) ?Value {
