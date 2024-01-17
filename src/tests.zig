@@ -148,6 +148,31 @@ test "template with [slug]" {
     try std.testing.expectEqualStrings("<div>A template with a slug</div>\n", output);
 }
 
+test "template with string literal" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const output = try manifest.templates.example_with_string_literal.render(&data);
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(
+        \\<button>
+        \\  <span>bar</span>
+        \\</button>
+        \\
+    , output);
+}
+
+test "template with Zig literal" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const output = try manifest.templates.example_with_zig_literal.render(&data);
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings("<span>false</span>\n", output);
+}
+
 test "toJson" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();

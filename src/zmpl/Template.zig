@@ -34,12 +34,12 @@ const MarkupLine = struct {
                 continue;
             }
 
-            if (byte == ':' and self.open) {
+            if (byte == ':' and self.open and self.reference_buffer.items.len == 0) {
                 self.decl = true;
                 continue;
             }
 
-            if (byte == '"') {
+            if (byte == '"' and !self.open) {
                 try self.buffer.append('\\');
                 try self.buffer.append('"');
                 continue;
@@ -111,6 +111,8 @@ const MarkupLine = struct {
             return try self.compileDeclReference();
         } else if (std.mem.startsWith(u8, self.reference_buffer.items, ".")) {
             return try self.compileDataReference();
+        } else if (std.mem.indexOfAny(u8, self.reference_buffer.items, " \"+-/*{}!?")) |_| {
+            return try self.compileZigLiteral(); // Some unexpected characters - assume Zig code evalutaing to a []const u8
         } else {
             return try self.compileValueReference();
         }
@@ -162,6 +164,15 @@ const MarkupLine = struct {
             ,
             &buf,
             \\.toString());
+        });
+    }
+
+    fn compileZigLiteral(self: *MarkupLine) ![]const u8 {
+        return std.mem.concat(self.allocator, u8, &[_][]const u8{
+            \\try zmpl.write(
+            ,
+            self.reference_buffer.items,
+            \\); 
         });
     }
 
@@ -239,19 +250,6 @@ fn compileMarkupLine(self: *Self, line: []const u8) ![]const u8 {
 
 fn compileZigLine(self: *Self, line: []const u8) ![]const u8 {
     _ = self;
-    // const line_z = try std.mem.concatWithSentinel(self.allocator, u8, &[_][]const u8{line}, 0);
-    // const ast = try std.zig.Ast.parse(self.allocator, line_z, .zig);
-    // for (ast.nodes.items(h) |node| {
-    //     std.debug.print("node: {any}\n", .{node});
-    // }
-    // var tokenizer = std.zig.Tokenizer.init(line_z);
-    // while (true) {
-    //     const token = tokenizer.next();
-    //     if (token.tag == .eof) break;
-    //     if (token.tag == .identifier) {
-    //         std.debug.print("identifier: {s}\n", .{line[token.loc.start..token.loc.end]});
-    //     }
-    // }
     return line;
 }
 
