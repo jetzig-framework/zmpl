@@ -111,7 +111,7 @@ const MarkupLine = struct {
             return try self.compileDeclReference();
         } else if (std.mem.startsWith(u8, self.reference_buffer.items, ".")) {
             return try self.compileDataReference();
-        } else if (std.mem.indexOfAny(u8, self.reference_buffer.items, " \"+-/*{}!?")) |_| {
+        } else if (std.mem.indexOfAny(u8, self.reference_buffer.items, " \"+-/*{}!?()")) |_| {
             return try self.compileZigLiteral(); // Some unexpected characters - assume Zig code evalutaing to a []const u8
         } else {
             return try self.compileValueReference();
