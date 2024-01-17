@@ -165,6 +165,15 @@ test "toJson" {
     );
 }
 
+test "toJson with no data" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+    const json = try data.toJson();
+    defer allocator.free(json);
+
+    try std.testing.expectEqualStrings(json, "");
+}
+
 test "fromJson simple" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();

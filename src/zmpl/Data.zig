@@ -137,6 +137,8 @@ pub fn formatDecl(self: *Self, comptime decl: anytype) ![]const u8 {
 }
 
 pub fn toJson(self: *Self) ![]const u8 {
+    if (self.value) |_| {} else return "";
+
     const writer = self.json_buf.writer();
     try self.value.?.toJson(writer);
     return self._allocator.dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
