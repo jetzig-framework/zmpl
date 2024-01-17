@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) !void {
         .name = "zmpl",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = .{ .path = "src/zmpl.zig" },
         .target = target,
         .optimize = optimize,
     });
@@ -31,10 +31,16 @@ pub fn build(b: *std.Build) !void {
     lib.addModule("zmpl", zmpl_module);
     try b.modules.put("zmpl", zmpl_module);
 
-    const templates_path = b.option([]const u8, "zmpl_templates_path", "Directory to search for .zmpl templates.") orelse
-        try std.fs.path.join(b.allocator, &[_][]const u8{ "src", "templates" });
-    const manifest_path = b.option([]const u8, "zmpl_manifest_path", "Zmpl auto-generated manifest path.") orelse
-        try std.fs.path.join(b.allocator, &[_][]const u8{ templates_path, "manifest.zig" });
+    const templates_path = b.option(
+        []const u8,
+        "zmpl_templates_path",
+        "Directory to search for .zmpl templates.",
+    ) orelse try std.fs.path.join(b.allocator, &[_][]const u8{ "src", "templates" });
+    const manifest_path = b.option(
+        []const u8,
+        "zmpl_manifest_path",
+        "Zmpl auto-generated manifest path.",
+    ) orelse try std.fs.path.join(b.allocator, &[_][]const u8{ templates_path, "zmpl.manifest.zig" });
 
     try zmpl.init(b, lib, .{
         .manifest_path = manifest_path,

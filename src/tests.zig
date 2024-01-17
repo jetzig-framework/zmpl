@@ -1,7 +1,7 @@
 const std = @import("std");
 const zmpl = @import("zmpl");
 const allocator = std.testing.allocator;
-const manifest = @import("templates/manifest.zig");
+const manifest = @import("templates/zmpl.manifest.zig");
 
 test "readme example" {
     var data = zmpl.Data.init(allocator);

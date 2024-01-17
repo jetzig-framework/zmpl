@@ -6,7 +6,7 @@ pub const ZmplBuild = @import("./zmpl/Build.zig");
 
 pub const InitOptions = struct {
     templates_path: []const u8 = "src/templates",
-    manifest_path: []const u8 = "src/templates/manifest.zig",
+    manifest_path: []const u8 = "src/templates/zmpl.manifest.zig",
 };
 
 pub fn init(build: *std.Build, lib: *std.Build.Step.Compile, options: InitOptions) !void {

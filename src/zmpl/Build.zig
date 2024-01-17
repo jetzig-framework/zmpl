@@ -116,7 +116,6 @@ fn findTemplates(self: *Self) !std.ArrayList([]const u8) {
         if (entry.kind != .file) continue;
         const extension = std.fs.path.extension(entry.path);
         const basename = std.fs.path.basename(entry.path);
-        if (std.mem.eql(u8, basename, "manifest.zig")) continue;
         if (std.mem.startsWith(u8, basename, ".")) continue;
         if (!std.mem.eql(u8, extension, ".zmpl")) continue;
         try array.append(try self.build.allocator.dupe(u8, entry.path));
