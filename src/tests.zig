@@ -230,3 +230,23 @@ test "fromJson complex" {
         \\{"foo":{"bar":["baz",10],"qux":{"quux":1.4123e+00,"corge":true}}}
     );
 }
+
+test "reset" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const input =
+        \\{"foo":"bar"}
+    ;
+    try data.fromJson(input);
+
+    const json = try data.toJson();
+    defer allocator.free(json);
+    try std.testing.expectEqualStrings(json,
+        \\{"foo":"bar"}
+    );
+    data.reset();
+    const more_json = try data.toJson();
+    defer allocator.free(more_json);
+    try std.testing.expectEqualStrings(more_json, ""); // Maybe this should raise an error or return null ?
+}

@@ -66,6 +66,13 @@ pub fn getValueString(self: *Self, key: []const u8) ![]const u8 {
     } else return "";
 }
 
+pub fn reset(self: *Self) void {
+    if (self.value) |*ptr| {
+        ptr.deinit();
+    }
+    self.value = null;
+}
+
 pub fn object(self: *Self) !*Value {
     if (self.value) |_| {
         return try self.createObject();
@@ -217,6 +224,14 @@ pub const Value = union(enum) {
             else => unreachable, // TODO: return error
         }
     }
+
+    pub fn deinit(self: *Value) void {
+        switch (self.*) {
+            .array => |*ptr| ptr.deinit(),
+            .object => |*ptr| ptr.deinit(),
+            else => {},
+        }
+    }
 };
 
 pub const NullType = struct {
@@ -291,6 +306,15 @@ pub const Object = struct {
         return .{ .hashmap = std.StringHashMap(Value).init(allocator), .allocator = allocator };
     }
 
+    pub fn deinit(self: *Object) void {
+        var it = self.hashmap.iterator();
+        while (it.next()) |entry| {
+            self.allocator.destroy(entry.key_ptr);
+            self.allocator.destroy(entry.value_ptr);
+        }
+        self.hashmap.clearAndFree();
+    }
+
     pub fn put(self: *Object, key: []const u8, value: Value) !void {
         const ptr = try self.allocator.create(Value);
         ptr.* = value;
@@ -327,6 +351,10 @@ pub const Array = struct {
 
     pub fn init(allocator: std.mem.Allocator) Array {
         return .{ .array = std.ArrayList(Value).init(allocator), .allocator = allocator };
+    }
+
+    pub fn deinit(self: *Array) void {
+        self.array.clearAndFree();
     }
 
     pub fn get(self: *Array, index: usize) ?Value {
