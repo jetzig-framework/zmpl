@@ -27,9 +27,8 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    const zmpl_module = b.createModule(.{ .source_file = .{ .path = "src/zmpl.zig" } });
-    lib.addModule("zmpl", zmpl_module);
-    try b.modules.put("zmpl", zmpl_module);
+    const zmpl_module = b.addModule("zmpl", .{ .root_source_file = .{ .path = "src/zmpl.zig" } });
+    lib.root_module.addImport("zmpl", zmpl_module);
 
     const templates_path = b.option(
         []const u8,
@@ -60,7 +59,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    main_tests.addModule("zmpl", zmpl_module);
+    main_tests.root_module.addImport("zmpl", zmpl_module);
     const run_main_tests = b.addRunArtifact(main_tests);
 
     // This creates a build step. It will be visible in the `zig build --help` menu,
