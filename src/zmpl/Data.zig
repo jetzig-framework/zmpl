@@ -136,7 +136,7 @@ pub fn get(self: *Self, key: []const u8) !Value {
 }
 
 pub fn formatDecl(self: *Self, comptime decl: anytype) ![]const u8 {
-    if (comptime std.meta.trait.isZigString(@TypeOf(decl))) {
+    if (comptime isZigString(@TypeOf(decl))) {
         return try std.fmt.allocPrint(self.getAllocator(), "{s}", .{decl});
     } else {
         return try std.fmt.allocPrint(self.getAllocator(), "{}", .{decl});
@@ -399,4 +399,32 @@ pub fn getAllocator(self: *Self) std.mem.Allocator {
         self.arena_allocator = self.arena.?.allocator();
         return self.arena_allocator;
     }
+}
+
+ fn isZigString(comptime T: type) bool {
+    return comptime blk: {
+        // Only pointer types can be strings, no optionals
+        const info = @typeInfo(T);
+        if (info != .Pointer) break :blk false;
+
+        const ptr = &info.Pointer;
+        // Check for CV qualifiers that would prevent coerction to []const u8
+        if (ptr.is_volatile or ptr.is_allowzero) break :blk false;
+
+        // If it's already a slice, simple check.
+        if (ptr.size == .Slice) {
+            break :blk ptr.child == u8;
+        }
+
+        // Otherwise check if it's an array type that coerces to slice.
+        if (ptr.size == .One) {
+            const child = @typeInfo(ptr.child);
+            if (child == .Array) {
+                const arr = &child.Array;
+                break :blk arr.child == u8;
+            }
+        }
+
+        break :blk false;
+    };
 }

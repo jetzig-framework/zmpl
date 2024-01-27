@@ -54,8 +54,8 @@ pub fn compile(self: *Self) !void {
         \\
     );
     for (templates.items) |template| {
-        const module = self.build.createModule(.{ .source_file = .{ .path = template.path } });
-        self.step.addModule(template.name, module);
+        const module = self.build.createModule(.{ .root_source_file = .{ .path = template.path } });
+        self.step.root_module.addImport(template.name, module);
         try file.writeAll(try std.fmt.allocPrint(
             self.build.allocator,
             "  pub const {s} = @import(\"{s}\");\n",
@@ -103,7 +103,7 @@ fn compileTemplates(self: *Self, array: *std.ArrayList(TemplateDef)) !void {
 
 fn findTemplates(self: *Self) !std.ArrayList([]const u8) {
     var array = std.ArrayList([]const u8).init(self.build.allocator);
-    const dir = std.fs.cwd().openIterableDir(self.templates_path, .{}) catch |err| {
+    const dir = std.fs.cwd().openDir(self.templates_path, .{.iterate = true}) catch |err| {
         switch (err) {
             error.FileNotFound => return error.TemplateDirectoryNotFound,
             else => return err,
