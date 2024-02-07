@@ -401,7 +401,7 @@ pub fn getAllocator(self: *Self) std.mem.Allocator {
     }
 }
 
- fn isZigString(comptime T: type) bool {
+fn isZigString(comptime T: type) bool {
     return comptime blk: {
         // Only pointer types can be strings, no optionals
         const info = @typeInfo(T);
