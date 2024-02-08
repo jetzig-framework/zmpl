@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const zmpl = @import("../zmpl.zig");
 
 build: *std.Build,
@@ -59,7 +60,10 @@ pub fn compile(self: *Self) !void {
         try file.writeAll(try std.fmt.allocPrint(
             self.build.allocator,
             "  pub const {s} = @import(\"{s}\");\n",
-            .{ template.name, template.relpath },
+            .{
+                template.name,
+                template.relpath,
+            },
         ));
     }
     try file.writeAll("};\n");
@@ -91,11 +95,18 @@ fn compileTemplates(self: *Self, array: *std.ArrayList(TemplateDef)) !void {
         const output_file = try dir.createFile(output_path, .{ .truncate = true });
         try output_file.writeAll(output);
         output_file.close();
-        try array.append(.{
+        var template_def: TemplateDef = .{
             .path = try dir.realpathAlloc(self.build.allocator, output_path),
             .relpath = output_path,
             .name = try template.identifier(),
-        });
+        };
+
+        if (builtin.os.tag == .windows) {
+            const windows_replacement_buffer = try self.build.allocator.alloc(u8, std.mem.replacementSize(u8, output_path, std.fs.path.sep_str_windows, std.fs.path.sep_str_posix));
+            _ = std.mem.replace(u8, output_path, std.fs.path.sep_str_windows, std.fs.path.sep_str_posix, windows_replacement_buffer);
+            template_def.relpath = try self.build.allocator.dupe(u8, windows_replacement_buffer);
+        }
+        try array.append(template_def);
 
         std.debug.print("[zmpl] Compiled template: {s}\n", .{path});
     }
@@ -103,7 +114,7 @@ fn compileTemplates(self: *Self, array: *std.ArrayList(TemplateDef)) !void {
 
 fn findTemplates(self: *Self) !std.ArrayList([]const u8) {
     var array = std.ArrayList([]const u8).init(self.build.allocator);
-    const dir = std.fs.cwd().openDir(self.templates_path, .{.iterate = true}) catch |err| {
+    const dir = std.fs.cwd().openDir(self.templates_path, .{ .iterate = true }) catch |err| {
         switch (err) {
             error.FileNotFound => return error.TemplateDirectoryNotFound,
             else => return err,
