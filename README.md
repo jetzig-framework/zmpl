@@ -1,4 +1,4 @@
-# Zmpl
+![Zmpl logo](public/zmpl.png)
 
 _Zmpl_ is a templating language for [Zig](https://ziglang.org/) :lizard:
 
