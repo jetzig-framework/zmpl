@@ -9,7 +9,7 @@ _Zmpl_ is a templating language for [Zig](https://ziglang.org/) :lizard:
 
 
 ```zig
-# src/templates/example.zmpl
+// src/templates/example.zmpl
 
 if (std.mem.eql(u8, "zmpl is simple", "zmpl" ++ " is " ++ "simple")) {
   <div>Email: {.user.email}</div>
