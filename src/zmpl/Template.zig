@@ -29,6 +29,8 @@ const MarkupLine = struct {
 
     pub fn compile(self: *MarkupLine) ![]const u8 {
         for (self.line) |byte| {
+            if (byte == '\r') continue;
+
             if (byte == '\\' and !self.escape) {
                 self.escape = true;
                 continue;
