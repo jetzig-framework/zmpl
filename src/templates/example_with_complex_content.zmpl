@@ -1,5 +1,5 @@
 <html>
-  if (std.crypto.random.int(u1) == 0) {
+  if (1 == 0) {
     <div>Hello</div>
   } else {
     <div>Hi</div>

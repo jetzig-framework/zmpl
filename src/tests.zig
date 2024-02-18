@@ -297,3 +297,25 @@ test "reset" {
     defer allocator.free(more_json);
     try std.testing.expectEqualStrings(more_json, ""); // Maybe this should raise an error or return null ?
 }
+
+test "read-only access (simpler interface after casting to const pointers/values)" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    var things = try data.array();
+    try things.append(data.string("foo"));
+
+    if (data.value) |value| {
+        switch (value) {
+            .array => |array| {
+                if (array.get(0)) |item| {
+                    switch (item) {
+                        .string => |string| try std.testing.expectEqualStrings(string.value, "foo"),
+                        else => unreachable,
+                    }
+                }
+            },
+            else => unreachable,
+        }
+    } else unreachable;
+}

@@ -30,7 +30,7 @@ pub fn deinit(self: *Self) void {
     self.json_buf.deinit();
 }
 
-pub fn getValue(self: *Self, key: []const u8) !?Value {
+pub fn getValue(self: Self, key: []const u8) !?Value {
     if (self.value) |val| {
         var tokens = std.mem.splitSequence(u8, key, ".");
         var current_value = val;
@@ -60,7 +60,7 @@ pub fn getValue(self: *Self, key: []const u8) !?Value {
     } else return null;
 }
 
-pub fn getValueString(self: *Self, key: []const u8) ![]const u8 {
+pub fn getValueString(self: Self, key: []const u8) ![]const u8 {
     if (try self.getValue(key)) |val| {
         switch (val) {
             .object, .array => return "", // Implement on Object and Array ?
@@ -133,11 +133,11 @@ pub fn write(self: *Self, slice: []const u8) !void {
     }
 }
 
-pub fn read(self: *Self) []const u8 {
+pub fn read(self: Self) []const u8 {
     return self.output_buf.items;
 }
 
-pub fn get(self: *Self, key: []const u8) !Value {
+pub fn get(self: Self, key: []const u8) !Value {
     return (try self.getValue(key)) orelse .{ .Null = NullType{} }; // XXX: Raise an error here ?
 }
 
@@ -241,12 +241,12 @@ pub const Value = union(enum) {
 };
 
 pub const NullType = struct {
-    pub fn toJson(self: *NullType, writer: Writer) !void {
+    pub fn toJson(self: NullType, writer: Writer) !void {
         _ = self;
         try writer.writeAll("null");
     }
 
-    pub fn toString(self: *NullType) ![]const u8 {
+    pub fn toString(self: NullType) ![]const u8 {
         _ = self;
         return "";
     }
@@ -256,11 +256,11 @@ pub const Float = struct {
     value: f64,
     allocator: std.mem.Allocator,
 
-    pub fn toJson(self: *Float, writer: Writer) !void {
+    pub fn toJson(self: Float, writer: Writer) !void {
         try writer.print("{}", .{self.value});
     }
 
-    pub fn toString(self: *Float) ![]const u8 {
+    pub fn toString(self: Float) ![]const u8 {
         return std.fmt.allocPrint(self.allocator, "{}", .{self.value});
     }
 };
@@ -269,11 +269,11 @@ pub const Integer = struct {
     value: i64,
     allocator: std.mem.Allocator,
 
-    pub fn toJson(self: *Integer, writer: Writer) !void {
+    pub fn toJson(self: Integer, writer: Writer) !void {
         try writer.print("{}", .{self.value});
     }
 
-    pub fn toString(self: *Integer) ![]const u8 {
+    pub fn toString(self: Integer) ![]const u8 {
         return std.fmt.allocPrint(self.allocator, "{}", .{self.value});
     }
 };
@@ -282,11 +282,11 @@ pub const Boolean = struct {
     value: bool,
     allocator: std.mem.Allocator,
 
-    pub fn toJson(self: *Boolean, writer: Writer) !void {
+    pub fn toJson(self: Boolean, writer: Writer) !void {
         try writer.writeAll(if (self.value) "true" else "false");
     }
 
-    pub fn toString(self: *Boolean) ![]const u8 {
+    pub fn toString(self: Boolean) ![]const u8 {
         return std.fmt.allocPrint(self.allocator, "{}", .{self.value});
     }
 };
@@ -295,11 +295,11 @@ pub const String = struct {
     value: []const u8,
     allocator: std.mem.Allocator,
 
-    pub fn toJson(self: *String, writer: Writer) !void {
+    pub fn toJson(self: String, writer: Writer) !void {
         try std.json.encodeJsonString(self.value, .{}, writer);
     }
 
-    pub fn toString(self: *String) ![]const u8 {
+    pub fn toString(self: String) ![]const u8 {
         return self.value;
     }
 };
@@ -327,7 +327,7 @@ pub const Object = struct {
         try self.hashmap.put(try self.allocator.dupe(u8, key), ptr.*);
     }
 
-    pub fn get(self: *Object, key: []const u8) ?Value {
+    pub fn get(self: Object, key: []const u8) ?Value {
         if (self.hashmap.getEntry(key)) |entry| {
             return entry.value_ptr.*;
         } else return null;
@@ -363,7 +363,7 @@ pub const Array = struct {
         self.array.clearAndFree();
     }
 
-    pub fn get(self: *Array, index: usize) ?Value {
+    pub fn get(self: Array, index: usize) ?Value {
         return if (self.array.items.len > index) self.array.items[index] else null;
     }
 
