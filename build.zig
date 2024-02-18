@@ -52,6 +52,15 @@ pub fn build(b: *std.Build) !void {
     // running `zig build`).
     b.installArtifact(lib);
 
+    const docs_step = b.step("docs", "Generate documentation");
+    const docs_install = b.addInstallDirectory(.{
+        .source_dir = lib.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+
+    docs_step.dependOn(&docs_install.step);
+
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const main_tests = b.addTest(.{
