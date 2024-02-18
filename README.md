@@ -7,6 +7,13 @@ _Zmpl_ is a templating language for [Zig](https://ziglang.org/) :lizard:
 * Compiles to _Zig_ code for syntax and type validation.
 * Used by the [Jetzig](https://github.com/bobf/jetzig) web framework.
 
+## Syntax Highlighting
+
+Syntax highlighters are currently community-sourced. Please get in touch if you have created a plugin for your editor of choice and we will gladly list it here.
+
+* [VSCode](https://github.com/z1fire/zmpl-syntax-highlighting-vscode) by [Zackary Housend](https://github.com/z1fire)
+
+## Example
 
 ```zig
 // src/templates/example.zmpl

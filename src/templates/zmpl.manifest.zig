@@ -7,6 +7,7 @@ pub const templates = struct {
   pub const example_with_root_array = @import(".example_with_root_array.zmpl.compiled.zig");
   pub const example_with_deep_nesting = @import(".example_with_deep_nesting.zmpl.compiled.zig");
   pub const example_with_nested_data_lookup = @import(".example_with_nested_data_lookup.zmpl.compiled.zig");
+  pub const example_with_complex_content = @import(".example_with_complex_content.zmpl.compiled.zig");
   pub const example_with_zig_literal = @import(".example_with_zig_literal.zmpl.compiled.zig");
   pub const example_with_string_literal = @import(".example_with_string_literal.zmpl.compiled.zig");
   pub const example_with_if_statement = @import(".example_with_if_statement.zmpl.compiled.zig");

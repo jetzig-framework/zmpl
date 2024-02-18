@@ -43,7 +43,13 @@ pub fn getValue(self: *Self, key: []const u8) !?Value {
                 },
                 .array => |*capture| {
                     var capt = capture.*;
-                    current_value = capt.get(try std.fmt.parseInt(usize, token, 10)) orelse return null;
+                    const index = std.fmt.parseInt(usize, token, 10) catch |err| {
+                        switch (err) {
+                            error.InvalidCharacter => return null,
+                            else => return err,
+                        }
+                    };
+                    current_value = capt.get(index) orelse return null;
                 },
                 else => |*capture| {
                     return capture.*;

@@ -173,6 +173,53 @@ test "template with Zig literal" {
     try std.testing.expectEqualStrings("<span>false</span>\n", output);
 }
 
+test "template with complex content" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    var array = try data.array();
+    try array.append(data.string("hello"));
+    try array.append(data.string("hi"));
+    try array.append(data.string("howdy"));
+    try array.append(data.string("hiya"));
+    try array.append(data.string("good day"));
+    const output = try manifest.templates.example_with_complex_content.render(&data);
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(output,
+        \\<html>
+        \\    <div>Hi</div>
+        \\  <div style="background-color: #ff0000">
+        \\    <ol>
+        \\        <li>This is item number 1, one</li>
+        \\        <li>This is item number 2, two</li>
+        \\        <li>This is item number 3, three</li>
+        \\        <li>This is item number 4, four</li>
+        \\        <li>This is item number 5, five</li>
+        \\        <li>This is item number 6, six</li>
+        \\        <li>This is item number 7, seven</li>
+        \\        <li>This is item number 8, eight</li>
+        \\        <li>This is item number 9, nine</li>
+        \\    </ol>
+        \\  </div>
+        \\  <ol>
+        \\        <div>hello</div>
+        \\        <div>hi</div>
+        \\        <div>howdy</div>
+        \\        <div>hiya</div>
+        \\        <div>good day</div>
+        \\  </ol>
+        \\  <span></span>
+        \\  <span>hello</span>
+        \\  <span>hi</span>
+        \\  <span>howdy</span>
+        \\  <span>hiya</span>
+        \\  <span>good day</span>
+        \\</html>
+        \\
+    );
+}
+
 test "toJson" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
