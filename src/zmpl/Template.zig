@@ -28,11 +28,19 @@ const MarkupLine = struct {
     }
 
     pub fn compile(self: *MarkupLine) ![]const u8 {
-        for (self.line) |byte| {
+        for (self.line, 0..) |byte, index| {
+            _ = index;
             if (byte == '\r') continue;
 
             if (byte == '\\' and !self.escape) {
                 self.escape = true;
+                continue;
+            }
+
+            if (byte == '\\' and self.escape) {
+                try self.buffer.append('\\');
+                try self.buffer.append('\\');
+                self.escape = false;
                 continue;
             }
 
@@ -59,7 +67,7 @@ const MarkupLine = struct {
                 continue;
             }
 
-            if (byte == '{') {
+            if (byte == '{' and !self.escape) {
                 self.openReference();
                 continue;
             }
@@ -229,7 +237,14 @@ pub fn compile(self: *Self) ![]const u8 {
         const index = std.mem.indexOfNone(u8, line, " ");
 
         if (index) |i| {
-            if (line[i] == '<') {
+            if (line[i] == '<' and line.len - 1 >= i + 1 and line[i + 1] == '>') {
+                const stripped = try std.mem.concat(
+                    self.allocator,
+                    u8,
+                    &[_][]const u8{ line[0..i], "  ", line[i + 2 ..] },
+                );
+                try self.buffer.append(try self.compileMarkupLine(stripped));
+            } else if (line[i] == '<') {
                 try self.buffer.append(try self.compileMarkupLine(line));
             } else {
                 try self.buffer.append(try self.compileZigLine(line));

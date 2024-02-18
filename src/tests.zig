@@ -220,6 +220,25 @@ test "template with complex content" {
     );
 }
 
+test "template with fragment tag" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const output = try manifest.templates.example_with_fragment_tag.render(&data);
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(output,
+        \\<div>
+        \\  <pre><code class="language-zig">
+        \\    pub fn main() void {
+        \\      std.debug.print("Hello, World!\n", .{});
+        \\    }
+        \\  </code></pre>
+        \\</div>
+        \\
+    );
+}
+
 test "toJson" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
