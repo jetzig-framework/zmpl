@@ -17,7 +17,7 @@
   </div>
 
   <ol>
-    if (zmpl.value) |*value| {
+    if (zmpl.value) |value| {
       var it = value.array.iterator();
 
       while (it.next()) |item| {
