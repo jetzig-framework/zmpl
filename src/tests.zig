@@ -14,8 +14,8 @@ test "readme example" {
     try user.put("email", data.string("user@example.com"));
     try auth.put("token", data.string("abc123-456-def"));
 
-    try body.put("user", user.*);
-    try body.put("auth", auth.*);
+    try body.put("user", user);
+    try body.put("auth", auth);
 
     const output = try manifest.templates.example.render(&data);
     defer allocator.free(output);
@@ -57,7 +57,7 @@ test "template with nested data lookup" {
     var object = try data.object();
     var nested_object = try data.object();
     try nested_object.put("bar", data.integer(10));
-    try object.put("foo", nested_object.*);
+    try object.put("foo", nested_object);
 
     const output = try manifest.templates.example_with_nested_data_lookup.render(&data);
     defer allocator.free(output);
@@ -72,7 +72,7 @@ test "template with array data lookup" {
     var object = try data.object();
     var nested_array = try data.array();
     try nested_array.append(data.string("nested array value"));
-    try object.put("foo", nested_array.*);
+    try object.put("foo", nested_array);
 
     const output = try manifest.templates.example_with_array_data_lookup.render(&data);
     defer allocator.free(output);
@@ -102,9 +102,9 @@ test "template with deep nesting" {
     var double_nested_object = try data.object();
     var triple_nested_object = try data.object();
     try triple_nested_object.put("qux", data.string(":))"));
-    try double_nested_object.put("baz", triple_nested_object.*);
-    try nested_object.put("bar", double_nested_object.*);
-    try object.put("foo", nested_object.*);
+    try double_nested_object.put("baz", triple_nested_object);
+    try nested_object.put("bar", double_nested_object);
+    try object.put("foo", nested_object);
 
     const output = try manifest.templates.example_with_deep_nesting.render(&data);
     defer allocator.free(output);
@@ -120,7 +120,7 @@ test "template with iteration" {
     var array = try data.array();
     try array.append(data.string("yay"));
     try array.append(data.string("hooray"));
-    try object.put("foo", array.*);
+    try object.put("foo", array);
 
     const output = try manifest.templates.example_with_iteration.render(&data);
     defer allocator.free(output);
@@ -246,7 +246,7 @@ test "toJson" {
     var object = try data.object();
     var nested_object = try data.object();
     try nested_object.put("bar", data.integer(10));
-    try object.put("foo", nested_object.*);
+    try object.put("foo", nested_object);
 
     const json = try data.toJson();
     defer allocator.free(json);
@@ -325,10 +325,10 @@ test "read-only access (simpler interface after casting to const pointers/values
     try things.append(data.string("foo"));
 
     if (data.value) |value| {
-        switch (value) {
+        switch (value.*) {
             .array => |array| {
                 if (array.get(0)) |item| {
-                    switch (item) {
+                    switch (item.*) {
                         .string => |string| try std.testing.expectEqualStrings(string.value, "foo"),
                         else => unreachable,
                     }
@@ -337,4 +337,42 @@ test "read-only access (simpler interface after casting to const pointers/values
             else => unreachable,
         }
     } else unreachable;
+}
+
+test "appending to an array after insertion into object (regression)" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    var object = try data.object();
+    var array = try data.array();
+
+    try array.append(data.string("bar"));
+    try object.put("foo", array);
+    try array.append(data.string("baz"));
+
+    const json = try data.toJson();
+    defer allocator.free(json);
+
+    try std.testing.expectEqualStrings(json,
+        \\{"foo":["bar","baz"]}
+    );
+}
+
+test "inserting to an object after insertion into array (regression)" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    var array = try data.array();
+    var object = try data.object();
+
+    try object.put("bar", data.string("baz"));
+    try array.append(object);
+    try object.put("qux", data.string("quux"));
+
+    const json = try data.toJson();
+    defer allocator.free(json);
+
+    try std.testing.expectEqualStrings(json,
+        \\[{"bar":"baz","qux":"quux"}]
+    );
 }

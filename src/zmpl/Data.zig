@@ -10,7 +10,7 @@ arena_allocator: std.mem.Allocator = undefined,
 json_buf: std.ArrayList(u8),
 output_buf: std.ArrayList(u8),
 output_writer: ?std.ArrayList(u8).Writer = null,
-value: ?Value = null,
+value: ?*Value = null,
 Null: Value = .{ .Null = NullType{} },
 
 pub fn init(allocator: std.mem.Allocator) Self {
@@ -30,13 +30,13 @@ pub fn deinit(self: *Self) void {
     self.json_buf.deinit();
 }
 
-pub fn getValue(self: Self, key: []const u8) !?Value {
+pub fn getValue(self: Self, key: []const u8) !?*Value {
     if (self.value) |val| {
         var tokens = std.mem.splitSequence(u8, key, ".");
         var current_value = val;
 
         while (tokens.next()) |token| {
-            switch (current_value) {
+            switch (current_value.*) {
                 .object => |*capture| {
                     var capt = capture.*;
                     current_value = capt.get(token) orelse return null;
@@ -52,7 +52,7 @@ pub fn getValue(self: Self, key: []const u8) !?Value {
                     current_value = capt.get(index) orelse return null;
                 },
                 else => |*capture| {
-                    return capture.*;
+                    return capture;
                 },
             }
         }
@@ -62,7 +62,7 @@ pub fn getValue(self: Self, key: []const u8) !?Value {
 
 pub fn getValueString(self: Self, key: []const u8) ![]const u8 {
     if (try self.getValue(key)) |val| {
-        switch (val) {
+        switch (val.*) {
             .object, .array => return "", // Implement on Object and Array ?
             else => |*capture| {
                 var v = capture.*;
@@ -74,7 +74,7 @@ pub fn getValueString(self: Self, key: []const u8) ![]const u8 {
 
 pub fn reset(self: *Self) void {
     if (self.value) |*ptr| {
-        ptr.deinit();
+        ptr.*.deinit();
     }
     self.value = null;
 }
@@ -83,8 +83,8 @@ pub fn object(self: *Self) !*Value {
     if (self.value) |_| {
         return try self.createObject();
     } else {
-        self.value = (try self.createObject()).*;
-        return &self.value.?;
+        self.value = try self.createObject();
+        return self.value.?;
     }
 }
 
@@ -96,32 +96,55 @@ pub fn createObject(self: *Self) !*Value {
 }
 
 pub fn array(self: *Self) !*Value {
-    const arr = Array.init(self.getAllocator());
-
     if (self.value) |_| {
-        const ptr = try self.getAllocator().create(Value);
-        ptr.* = Value{ .array = arr };
-        return ptr;
+        return try self.createArray();
     } else {
-        self.value = Value{ .array = arr };
-        return &self.value.?;
+        self.value = try self.createArray();
+        return self.value.?;
     }
 }
 
-pub fn string(self: *Self, value: []const u8) Value {
-    return .{ .string = .{ .value = value, .allocator = self.getAllocator() } };
+pub fn createArray(self: *Self) !*Value {
+    const arr = Array.init(self.getAllocator());
+    const ptr = try self.getAllocator().create(Value);
+    ptr.* = Value{ .array = arr };
+    return ptr;
 }
 
-pub fn integer(self: *Self, value: i64) Value {
-    return .{ .integer = .{ .value = value, .allocator = self.getAllocator() } };
+pub fn string(self: *Self, value: []const u8) *Value {
+    const allocator = self.getAllocator();
+    const duped = allocator.dupe(u8, value) catch @panic("Out of memory");
+    const val = allocator.create(Value) catch @panic("Out of memory");
+    val.* = .{ .string = .{ .value = duped, .allocator = self.getAllocator() } };
+    return val;
 }
 
-pub fn float(self: *Self, value: f64) Value {
-    return .{ .float = .{ .value = value, .allocator = self.getAllocator() } };
+pub fn integer(self: *Self, value: i64) *Value {
+    const allocator = self.getAllocator();
+    const val = allocator.create(Value) catch @panic("Out of memory");
+    val.* = .{ .integer = .{ .value = value, .allocator = self.getAllocator() } };
+    return val;
 }
 
-pub fn boolean(self: *Self, value: bool) Value {
-    return .{ .boolean = .{ .value = value, .allocator = self.getAllocator() } };
+pub fn float(self: *Self, value: f64) *Value {
+    const allocator = self.getAllocator();
+    const val = allocator.create(Value) catch @panic("Out of memory");
+    val.* = .{ .float = .{ .value = value, .allocator = self.getAllocator() } };
+    return val;
+}
+
+pub fn boolean(self: *Self, value: bool) *Value {
+    const allocator = self.getAllocator();
+    const val = allocator.create(Value) catch @panic("Out of memory");
+    val.* = .{ .boolean = .{ .value = value, .allocator = self.getAllocator() } };
+    return val;
+}
+
+fn _null(self: *Self) *Value {
+    const allocator = self.getAllocator();
+    const val = allocator.create(Value) catch @panic("Out of memory");
+    val.* = .{ .Null = NullType{} };
+    return val;
 }
 
 pub fn write(self: *Self, slice: []const u8) !void {
@@ -133,12 +156,12 @@ pub fn write(self: *Self, slice: []const u8) !void {
     }
 }
 
-pub fn read(self: Self) []const u8 {
+pub fn read(self: *Self) []const u8 {
     return self.output_buf.items;
 }
 
-pub fn get(self: Self, key: []const u8) !Value {
-    return (try self.getValue(key)) orelse .{ .Null = NullType{} }; // XXX: Raise an error here ?
+pub fn get(self: *Self, key: []const u8) !*Value {
+    return (try self.getValue(key)) orelse self._null(); // XXX: Raise an error here ?
 }
 
 pub fn formatDecl(self: *Self, comptime decl: anytype) ![]const u8 {
@@ -163,7 +186,7 @@ pub fn fromJson(self: *Self, json: []const u8) !void {
     self.value = try self.parseJsonValue(parsed.value);
 }
 
-fn parseJsonValue(self: *Self, value: std.json.Value) !Value {
+fn parseJsonValue(self: *Self, value: std.json.Value) !*Value {
     return switch (value) {
         .object => |*val| blk: {
             var it = val.iterator();
@@ -171,19 +194,19 @@ fn parseJsonValue(self: *Self, value: std.json.Value) !Value {
             while (it.next()) |item| {
                 try obj.put(item.key_ptr.*, try self.parseJsonValue(item.value_ptr.*));
             }
-            break :blk obj.*;
+            break :blk obj;
         },
         .array => |*val| blk: {
             var arr = try self.array();
             for (val.items) |item| try arr.append(try self.parseJsonValue(item));
-            break :blk arr.*;
+            break :blk arr;
         },
         .string => |val| self.string(val),
         .number_string => |val| self.string(val), // TODO: Special-case this somehow?
         .integer => |val| self.integer(val),
         .float => |val| self.float(val),
         .bool => |val| self.boolean(val),
-        .null => self.Null,
+        .null => self._null(),
     };
 }
 
@@ -196,14 +219,21 @@ pub const Value = union(enum) {
     string: String,
     Null: NullType,
 
-    pub fn put(self: *Value, key: []const u8, value: Value) !void {
+    pub fn get(self: *Value, key: []const u8) ?*Value {
+        switch (self.*) {
+            .object => |*capture| return capture.get(key),
+            inline else => unreachable,
+        }
+    }
+
+    pub fn put(self: *Value, key: []const u8, value: *Value) !void {
         switch (self.*) {
             .object => |*capture| try capture.put(key, value),
             inline else => unreachable,
         }
     }
 
-    pub fn append(self: *Value, value: Value) !void {
+    pub fn append(self: *Value, value: *Value) !void {
         switch (self.*) {
             .array => |*capture| try capture.append(value),
             inline else => unreachable,
@@ -305,11 +335,11 @@ pub const String = struct {
 };
 
 pub const Object = struct {
-    hashmap: std.StringHashMap(Value),
+    hashmap: std.StringHashMap(*Value),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) Object {
-        return .{ .hashmap = std.StringHashMap(Value).init(allocator), .allocator = allocator };
+        return .{ .hashmap = std.StringHashMap(*Value).init(allocator), .allocator = allocator };
     }
 
     pub fn deinit(self: *Object) void {
@@ -321,16 +351,24 @@ pub const Object = struct {
         self.hashmap.clearAndFree();
     }
 
-    pub fn put(self: *Object, key: []const u8, value: Value) !void {
-        const ptr = try self.allocator.create(Value);
-        ptr.* = value;
-        try self.hashmap.put(try self.allocator.dupe(u8, key), ptr.*);
+    pub fn put(self: *Object, key: []const u8, value: *Value) !void {
+        const key_dupe = try self.allocator.dupe(u8, key);
+        switch (value.*) {
+            .object, .array => try self.hashmap.put(key_dupe, value),
+            inline else => {
+                try self.hashmap.put(key_dupe, value);
+            },
+        }
     }
 
-    pub fn get(self: Object, key: []const u8) ?Value {
+    pub fn get(self: Object, key: []const u8) ?*Value {
         if (self.hashmap.getEntry(key)) |entry| {
             return entry.value_ptr.*;
         } else return null;
+    }
+
+    pub fn contains(self: Object, key: []const u8) bool {
+        return self.hashmap.contains(key);
     }
 
     pub fn toJson(self: *Object, writer: Writer) anyerror!void {
@@ -352,29 +390,29 @@ pub const Object = struct {
 
 pub const Array = struct {
     allocator: std.mem.Allocator,
-    array: std.ArrayList(Value),
+    array: std.ArrayList(*Value),
     it: Iterator = undefined,
 
     pub fn init(allocator: std.mem.Allocator) Array {
-        return .{ .array = std.ArrayList(Value).init(allocator), .allocator = allocator };
+        return .{ .array = std.ArrayList(*Value).init(allocator), .allocator = allocator };
     }
 
     pub fn deinit(self: *Array) void {
         self.array.clearAndFree();
     }
 
-    pub fn get(self: Array, index: usize) ?Value {
+    pub fn get(self: *const Array, index: usize) ?*Value {
         return if (self.array.items.len > index) self.array.items[index] else null;
     }
 
-    pub fn append(self: *Array, value: Value) !void {
+    pub fn append(self: *Array, value: *Value) !void {
         try self.array.append(value);
     }
 
     pub fn toJson(self: *Array, writer: Writer) anyerror!void {
         try writer.writeAll("[");
         for (self.array.items, 0..) |*item, index| {
-            try item.toJson(writer);
+            try item.*.toJson(writer);
             if (index < self.array.items.len - 1) try writer.writeAll(",");
         }
         try writer.writeAll("]");
@@ -387,10 +425,10 @@ pub const Array = struct {
 };
 
 pub const Iterator = struct {
-    array: std.ArrayList(Value),
+    array: std.ArrayList(*Value),
     index: usize = 0,
 
-    pub fn next(self: *Iterator) ?Value {
+    pub fn next(self: *Iterator) ?*Value {
         self.index += 1;
         if (self.index > self.array.items.len) return null;
         return self.array.items[self.index - 1];

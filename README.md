@@ -39,8 +39,8 @@ test "readme example" {
     try user.put("email", data.string("user@example.com"));
     try auth.put("token", data.string("abc123-456-def"));
 
-    try body.put("user", user.*);
-    try body.put("auth", auth.*);
+    try body.put("user", user);
+    try body.put("auth", auth);
 
     const output = try manifest.templates.example.render(&data);
     defer allocator.free(output);
