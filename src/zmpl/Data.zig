@@ -253,11 +253,19 @@ pub const Value = union(enum) {
         };
     }
 
+    pub fn count(self: *Value) usize {
+        switch (self.*) {
+            .array => |capture| return capture.array.items.len,
+            .object => |capture| return capture.count(),
+            else => unreachable,
+        }
+    }
+
     pub fn iterator(self: *Value) *Iterator {
         switch (self.*) {
             .array => |*capture| return capture.*.iterator(),
             .object => unreachable, // TODO
-            else => unreachable, // TODO: return error
+            else => unreachable,
         }
     }
 
@@ -371,18 +379,22 @@ pub const Object = struct {
         return self.hashmap.contains(key);
     }
 
+    pub fn count(self: Object) u32 {
+        return self.hashmap.count();
+    }
+
     pub fn toJson(self: *Object, writer: Writer) anyerror!void {
         try writer.writeAll("{");
         var it = self.hashmap.keyIterator();
         var index: i64 = 0;
-        const count = self.hashmap.count();
+        const size = self.hashmap.count();
         while (it.next()) |key| {
             try std.json.encodeJsonString(key.*, .{}, writer);
             try writer.writeAll(":");
             var value = self.hashmap.get(key.*).?;
             try value.toJson(writer);
             index += 1;
-            if (index < count) try writer.writeAll(",");
+            if (index < size) try writer.writeAll(",");
         }
         try writer.writeAll("}");
     }

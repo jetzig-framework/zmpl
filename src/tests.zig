@@ -376,3 +376,23 @@ test "inserting to an object after insertion into array (regression)" {
         \\[{"bar":"baz","qux":"quux"}]
     );
 }
+
+test "array count()" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    var array = try data.array();
+    try std.testing.expectEqual(array.count(), 0);
+    try array.append(data.string("foo"));
+    try std.testing.expectEqual(array.count(), 1);
+}
+
+test "object count()" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    var object = try data.object();
+    try std.testing.expectEqual(object.count(), 0);
+    try object.put("foo", data.string("bar"));
+    try std.testing.expectEqual(object.count(), 1);
+}
