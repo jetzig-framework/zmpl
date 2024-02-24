@@ -396,3 +396,34 @@ test "object count()" {
     try object.put("foo", data.string("bar"));
     try std.testing.expectEqual(object.count(), 1);
 }
+
+test "eql()" {
+    var data1 = zmpl.Data.init(allocator);
+    defer data1.deinit();
+    var object1 = try data1.object();
+    var array1 = try data1.array();
+
+    try object1.put("foo", array1);
+    try array1.append(data1.string("bar"));
+
+    var data2 = zmpl.Data.init(allocator);
+    defer data2.deinit();
+    var object2 = try data2.object();
+    var array2 = try data2.array();
+    try object2.put("foo", array2);
+    try array2.append(data2.string("bar"));
+
+    var data3 = zmpl.Data.init(allocator);
+    defer data3.deinit();
+    var object3 = try data3.object();
+    var object4 = try data3.object();
+    try object3.put("foo", data3.string("bar"));
+    try object4.put("foo", data3.string("baz"));
+
+    try std.testing.expect(data1.eql(&data2));
+    try std.testing.expect(object1.eql(object2));
+    try std.testing.expect(array1.eql(array2));
+    try std.testing.expect(!object1.eql(array2));
+    try std.testing.expect(!object1.eql(array2));
+    try std.testing.expect(!object3.eql(object4));
+}
