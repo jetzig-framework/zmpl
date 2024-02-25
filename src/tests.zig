@@ -26,7 +26,7 @@ test "readme example" {
         \\    <script>
         \\      console.log("add any raw content using multi-line <#> tags");
         \\    </script>
-        \\    Use fragment tags when you don't want to use a specific HTML tag
+        \\    Use fragment tags when you want to output content without a specific HTML tag
         \\
     , output);
 }

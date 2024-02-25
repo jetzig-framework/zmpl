@@ -247,7 +247,7 @@ pub fn compile(self: *Self) ![]const u8 {
         const index = std.mem.indexOfNone(u8, line, " ");
 
         if (index) |i| {
-            if (parseFragment(line[i..])) |fragment| {
+            if (try self.parseFragment(line[i..])) |fragment| {
                 // Preserve indentation, replace "<>" with "  "
                 var buf = std.ArrayList(u8).init(self.allocator);
                 defer buf.deinit();
@@ -280,10 +280,13 @@ pub fn compile(self: *Self) ![]const u8 {
     return try std.mem.join(self.allocator, "\n", self.buffer.items);
 }
 
-fn parseFragment(string: []const u8) ?[]const u8 {
+// TODO: Multi-line fragments - curently just assumes there might be a `</>` on the same line and
+// removes it if present.
+fn parseFragment(self: *Self, string: []const u8) !?[]const u8 {
     const tag = "<>";
     if (std.mem.startsWith(u8, string, tag)) {
-        if (string.len > tag.len) return string[tag.len..] else return "";
+        const replaced = try std.mem.replaceOwned(u8, self.allocator, string, "</>", "");
+        if (replaced.len > tag.len) return replaced[tag.len..] else return "";
     }
     return null;
 }
