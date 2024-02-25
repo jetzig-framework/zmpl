@@ -23,6 +23,10 @@ test "readme example" {
     try std.testing.expectEqualStrings(
         \\  <div>Email: user@example.com</div>
         \\  <div>Token: abc123-456-def</div>
+        \\    <script>
+        \\      console.log("add any raw content using multi-line <#> tags");
+        \\    </script>
+        \\    Use fragment tags when you don't want to use a specific HTML tag
         \\
     , output);
 }
