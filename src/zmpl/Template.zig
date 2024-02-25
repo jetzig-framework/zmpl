@@ -232,23 +232,43 @@ pub fn compile(self: *Self) ![]const u8 {
     );
 
     var it = std.mem.split(u8, self.content, "\n");
+    var multi_line_fragment_open = false;
 
     while (it.next()) |line| {
+        if (multi_line_fragment_open) {
+            if (isMultilineFragmentClose(line)) {
+                multi_line_fragment_open = false;
+            } else {
+                try self.buffer.append(try self.compileRawLine(line, false));
+            }
+            continue;
+        }
+
         const index = std.mem.indexOfNone(u8, line, " ");
 
         if (index) |i| {
-            if (line[i] == '<' and line.len - 1 >= i + 1 and line[i + 1] == '>') {
-                const stripped = try std.mem.concat(
-                    self.allocator,
-                    u8,
-                    &[_][]const u8{ line[0..i], "  ", line[i + 2 ..] },
-                );
-                try self.buffer.append(try self.compileMarkupLine(stripped));
-            } else if (line[i] == '<') {
-                try self.buffer.append(try self.compileMarkupLine(line));
-            } else {
-                try self.buffer.append(try self.compileZigLine(line));
+            if (parseFragment(line[i..])) |fragment| {
+                // Preserve indentation, replace "<>" with "  "
+                var buf = std.ArrayList(u8).init(self.allocator);
+                defer buf.deinit();
+                const writer = buf.writer();
+                for (0..i + "<>".len) |_| try writer.writeByte(' ');
+                try writer.writeAll(fragment);
+                try self.buffer.append(try self.compileMarkupLine(buf.items));
+                continue;
             }
+
+            if (isMultilineFragmentOpen(line[i..])) {
+                multi_line_fragment_open = true;
+                continue;
+            }
+
+            if (line[i] == '<') {
+                try self.buffer.append(try self.compileMarkupLine(line));
+                continue;
+            }
+
+            try self.buffer.append(try self.compileZigLine(line));
         } else {
             try self.buffer.append("\n");
         }
@@ -260,9 +280,61 @@ pub fn compile(self: *Self) ![]const u8 {
     return try std.mem.join(self.allocator, "\n", self.buffer.items);
 }
 
+fn parseFragment(string: []const u8) ?[]const u8 {
+    const tag = "<>";
+    if (std.mem.startsWith(u8, string, tag)) {
+        if (string.len > tag.len) return string[tag.len..] else return "";
+    }
+    return null;
+}
+
+fn isMultilineFragmentOpen(line: []const u8) bool {
+    const tag = "<#>";
+    if (std.mem.indexOf(u8, line, tag)) |index| {
+        if (chompString(line[index + 1 ..]).len > tag.len) {
+            @panic("Found unexpected characters after multi-line raw text open tag <#>");
+        } else {
+            return true;
+        }
+    } else {
+        return false;
+    }
+}
+
+fn isMultilineFragmentClose(line: []const u8) bool {
+    const tag = "</#>";
+    if (std.mem.indexOf(u8, line, tag)) |index| {
+        if (chompString(line[index + 1 ..]).len > tag.len) {
+            @panic("Found unexpected characters after multi-line raw text close tag. <#/>");
+        } else {
+            return true;
+        }
+    } else {
+        return false;
+    }
+}
+
+fn lookAhead(haystack: []const u8, needle: []const u8) bool {
+    if (haystack.len < needle.len) return false;
+    return std.mem.eql(u8, haystack[0..needle.len], needle);
+}
+
 fn compileMarkupLine(self: *Self, line: []const u8) ![]const u8 {
     var markup_line = MarkupLine.init(self.allocator, line);
     return markup_line.compile();
+}
+
+fn compileRawLine(self: *Self, line: []const u8, chomp: bool) ![]const u8 {
+    const chomped = if (chomp) chompString(line) else line;
+    return std.mem.join(
+        self.allocator,
+        "",
+        &[_][]const u8{
+            "try zmpl.write(\"",
+            try std.mem.replaceOwned(u8, self.allocator, chomped, "\"", "\\\""),
+            "\\n\");",
+        },
+    );
 }
 
 fn compileZigLine(self: *Self, line: []const u8) ![]const u8 {
@@ -273,4 +345,12 @@ fn compileZigLine(self: *Self, line: []const u8) ![]const u8 {
 fn escapeText(self: *Self, text: []const u8) ![]const u8 {
     _ = self;
     return text;
+}
+
+fn chompString(string: []const u8) []const u8 {
+    if (std.mem.endsWith(u8, string, "\r\n")) {
+        return string[0 .. string.len - 3];
+    } else if (std.mem.endsWith(u8, string, "\n")) {
+        return string[0 .. string.len - 2];
+    } else return string;
 }

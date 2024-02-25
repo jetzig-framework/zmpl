@@ -227,7 +227,7 @@ test "template with fragment tag" {
     const output = try manifest.templates.example_with_fragment_tag.render(&data);
     defer allocator.free(output);
 
-    try std.testing.expectEqualStrings(output,
+    try std.testing.expectEqualStrings(
         \\<div>
         \\  <pre><code class="language-zig">
         \\    pub fn main() void {
@@ -236,7 +236,39 @@ test "template with fragment tag" {
         \\  </code></pre>
         \\</div>
         \\
-    );
+    , output);
+}
+
+test "template with multi-line fragment tag" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const output = try manifest.templates.example_with_multi_line_fragment_tag.render(&data);
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(
+        \\<pre><code class="language-zig">
+        \\// src/app/views/users.zig
+        \\const std = @import("std");
+        \\const jetzig = @import("jetzig");
+        \\
+        \\const Request = jetzig.http.Request;
+        \\const Data = jetzig.data.Data;
+        \\const View = jetzig.views.View;
+        \\
+        \\pub fn get(id: []const u8, request: *Request, data: *Data) !View {
+        \\  var user = try data.object();
+        \\
+        \\  try user.put("email", data.string("user@example.com"));
+        \\  try user.put("name", data.string("Ziggy Ziguana"));
+        \\  try user.put("id", data.integer(id));
+        \\  try user.put("authenticated", data.boolean(true));
+        \\
+        \\  return request.render(.ok);
+        \\}
+        \\</code></pre>
+        \\
+    , output);
 }
 
 test "toJson" {
