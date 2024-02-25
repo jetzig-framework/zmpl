@@ -15,7 +15,7 @@ Syntax highlighters are currently community-sourced. Please get in touch if you 
 
 ## Example
 
-```zig
+```html
 // src/templates/example.zmpl
 
 if (std.mem.eql(u8, "zmpl is simple", "zmpl" ++ " is " ++ "simple")) {
