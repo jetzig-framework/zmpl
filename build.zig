@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 
 pub const zmpl = @import("src/zmpl.zig");
 pub const Data = zmpl.Data;
+pub const Template = zmpl.Template;
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -36,16 +37,12 @@ pub fn build(b: *std.Build) !void {
         "zmpl_templates_path",
         "Directory to search for .zmpl templates.",
     ) orelse try std.fs.path.join(b.allocator, &[_][]const u8{ "src", "templates" });
-    const manifest_path = b.option(
-        []const u8,
-        "zmpl_manifest_path",
-        "Zmpl auto-generated manifest path.",
-    ) orelse try std.fs.path.join(b.allocator, &[_][]const u8{ templates_path, "zmpl.manifest.zig" });
 
-    try zmpl.init(b, lib, .{
-        .manifest_path = manifest_path,
-        .templates_path = templates_path,
-    });
+    const ZmplBuild = @import("src/zmpl/Build.zig");
+    var zmpl_build = ZmplBuild.init(b, lib, templates_path);
+    const manifest_module = try zmpl_build.compile(Template);
+
+    zmpl_module.addImport("zmpl.manifest", manifest_module);
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
@@ -70,6 +67,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     main_tests.root_module.addImport("zmpl", zmpl_module);
+    main_tests.root_module.addImport("zmpl.manifest", manifest_module);
     const run_main_tests = b.addRunArtifact(main_tests);
 
     // This creates a build step. It will be visible in the `zig build --help` menu,

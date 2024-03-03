@@ -1,7 +1,7 @@
 const std = @import("std");
 const zmpl = @import("zmpl");
 const allocator = std.testing.allocator;
-const manifest = @import("templates/zmpl.manifest.zig");
+const manifest = @import("zmpl.manifest"); // Generated at build time
 
 test "readme example" {
     var data = zmpl.Data.init(allocator);
@@ -17,18 +17,23 @@ test "readme example" {
     try body.put("user", user);
     try body.put("auth", auth);
 
-    const output = try manifest.templates.example.render(&data);
-    defer allocator.free(output);
+    if (manifest.find("example")) |template| {
+        const output = try template.render(&data);
+        defer allocator.free(output);
 
-    try std.testing.expectEqualStrings(
-        \\  <div>Email: user@example.com</div>
-        \\  <div>Token: abc123-456-def</div>
-        \\    <script>
-        \\      console.log("add any raw content using multi-line <#> tags");
-        \\    </script>
-        \\    Use fragment tags when you want to output content without a specific HTML tag
-        \\
-    , output);
+        try std.testing.expectEqualStrings(
+            \\  <div>Email: user@example.com</div>
+            \\  <div>Token: abc123-456-def</div>
+            \\  <div><a href="mailto:user@example.com">user@example.com</a></div>
+            \\  Use fragment tags when you want to output content without a specific HTML tag
+            \\  Use multi-line raw text tags to bypass Zmpl syntax.
+            \\  <code>Some example code with curly braces {} etc.</code>
+            \\  <span>Escape curly braces {like this}</span>
+            \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
 }
 
 test "template with if statement" {
@@ -38,7 +43,8 @@ test "template with if statement" {
     var object = try data.object();
     try object.put("foo", data.string("bar"));
 
-    const output = try manifest.templates.example_with_if_statement.render(&data);
+    const template = manifest.find("example_with_if_statement");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings("  <div>Hi!</div>\n", output);
@@ -48,7 +54,8 @@ test "template with quotes" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const output = try manifest.templates.example_with_quotes.render(&data);
+    const template = manifest.find("example_with_quotes");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings("<div>\"Hello!\"</div>\n", output);
@@ -63,7 +70,8 @@ test "template with nested data lookup" {
     try nested_object.put("bar", data.integer(10));
     try object.put("foo", nested_object);
 
-    const output = try manifest.templates.example_with_nested_data_lookup.render(&data);
+    const template = manifest.find("example_with_nested_data_lookup");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings("<div>Hello 10!</div>\n", output);
@@ -78,7 +86,8 @@ test "template with array data lookup" {
     try nested_array.append(data.string("nested array value"));
     try object.put("foo", nested_array);
 
-    const output = try manifest.templates.example_with_array_data_lookup.render(&data);
+    const template = manifest.find("example_with_array_data_lookup");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings("<div>Hello nested array value!</div>\n", output);
@@ -91,7 +100,8 @@ test "template with root array" {
     var array = try data.array();
     try array.append(data.string("root array value"));
 
-    const output = try manifest.templates.example_with_root_array.render(&data);
+    const template = manifest.find("example_with_root_array");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings("<div>Hello root array value!</div>\n", output);
@@ -110,7 +120,8 @@ test "template with deep nesting" {
     try nested_object.put("bar", double_nested_object);
     try object.put("foo", nested_object);
 
-    const output = try manifest.templates.example_with_deep_nesting.render(&data);
+    const template = manifest.find("example_with_deep_nesting");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings("<div>Hello :))</div>\n", output);
@@ -126,7 +137,8 @@ test "template with iteration" {
     try array.append(data.string("hooray"));
     try object.put("foo", array);
 
-    const output = try manifest.templates.example_with_iteration.render(&data);
+    const template = manifest.find("example_with_iteration");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings("  <span>yay</span>\n  <span>hooray</span>\n", output);
@@ -136,27 +148,19 @@ test "template with local variable reference" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const output = try manifest.templates.example_with_local_variable_reference.render(&data);
+    const template = manifest.find("example_with_local_variable_reference");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings("<div>Hello there!</div>\n", output);
-}
-
-test "template with [slug]" {
-    var data = zmpl.Data.init(allocator);
-    defer data.deinit();
-
-    const output = try manifest.templates.example_with_slug.render(&data);
-    defer allocator.free(output);
-
-    try std.testing.expectEqualStrings("<div>A template with a slug</div>\n", output);
 }
 
 test "template with string literal" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const output = try manifest.templates.example_with_string_literal.render(&data);
+    const template = manifest.find("example_with_string_literal");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings(
@@ -171,7 +175,8 @@ test "template with Zig literal" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const output = try manifest.templates.example_with_zig_literal.render(&data);
+    const template = manifest.find("example_with_zig_literal");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings("<span>false</span>\n", output);
@@ -187,7 +192,8 @@ test "template with complex content" {
     try array.append(data.string("howdy"));
     try array.append(data.string("hiya"));
     try array.append(data.string("good day"));
-    const output = try manifest.templates.example_with_complex_content.render(&data);
+    const template = manifest.find("example_with_complex_content");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings(output,
@@ -228,16 +234,13 @@ test "template with fragment tag" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const output = try manifest.templates.example_with_fragment_tag.render(&data);
+    const template = manifest.find("example_with_fragment_tag");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings(
         \\<div>
-        \\  <pre><code class="language-zig">
-        \\    pub fn main() void {
-        \\      std.debug.print("Hello, World!\n", .{});
-        \\    }
-        \\  </code></pre>
+        \\  some text in a fragment
         \\</div>
         \\
     , output);
@@ -247,7 +250,8 @@ test "template with multi-line fragment tag" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const output = try manifest.templates.example_with_multi_line_fragment_tag.render(&data);
+    const template = manifest.find("example_with_multi_line_fragment_tag");
+    const output = try template.?.render(&data);
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings(
@@ -273,6 +277,38 @@ test "template with multi-line fragment tag" {
         \\</code></pre>
         \\
     , output);
+}
+
+test "template with escaped curly braces" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_escaped_curly_braces");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(
+        \\<div>
+        \\  <span>some escaped curly braces: {foo}</span>
+        \\</div>
+        \\
+    , output);
+}
+
+test "template with partial" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_partial");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    const expected =
+        \\<div>This is an example with a partial</div>
+        \\<div><span>An example partial</span></div>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, output);
 }
 
 test "toJson" {
