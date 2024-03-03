@@ -6,7 +6,7 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 content: []const u8,
-name: []const u8,
+path: []const u8,
 buffer: std.ArrayList([]const u8),
 
 const MarkupLine = struct {
@@ -17,6 +17,7 @@ const MarkupLine = struct {
     open: bool = false,
     escape: bool = false,
     decl: bool = false,
+    partial: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, line: []const u8) MarkupLine {
         return .{
@@ -27,9 +28,18 @@ const MarkupLine = struct {
         };
     }
 
+    // TODO: For now we somehow get away with a stackless parser by relying on lookahead but this
+    // is limiting and fragile. Build a proper syntax grammar and AST.
     pub fn compile(self: *MarkupLine) ![]const u8 {
-        for (self.line, 0..) |byte, index| {
-            _ = index;
+        var position: isize = -1;
+
+        for (self.line) |_| {
+            const index: usize = @intCast(position + 1);
+            if (index >= self.line.len) break;
+            position += 1;
+
+            const byte = self.line[index];
+
             if (byte == '\r') continue;
 
             if (byte == '\\' and !self.escape) {
@@ -46,6 +56,11 @@ const MarkupLine = struct {
 
             if (byte == ':' and self.open and self.reference_buffer.items.len == 0) {
                 self.decl = true;
+                continue;
+            }
+
+            if (byte == '^' and self.open and self.reference_buffer.items.len == 0) {
+                self.partial = true;
                 continue;
             }
 
@@ -67,12 +82,24 @@ const MarkupLine = struct {
                 continue;
             }
 
-            if (byte == '{' and !self.escape) {
+            if (byte == '{' and lookAhead(self.line[index..], "{{")) {
+                position += 1;
+                try self.buffer.append('{');
+                continue;
+            }
+
+            if (byte == '}' and lookAhead(self.line[index..], "}}")) {
+                position += 1;
+                try self.buffer.append('}');
+                continue;
+            }
+
+            if (byte == '{') {
                 self.openReference();
                 continue;
             }
 
-            if (byte == '}' and self.open) {
+            if (byte == '}') {
                 try self.closeReference();
                 continue;
             }
@@ -119,6 +146,8 @@ const MarkupLine = struct {
     fn compileReference(self: *MarkupLine) ![]const u8 {
         if (self.decl) {
             return try self.compileDeclReference();
+        } else if (self.partial) {
+            return try self.compilePartial();
         } else if (std.mem.startsWith(u8, self.reference_buffer.items, ".")) {
             return try self.compileDataReference();
         } else if (std.mem.indexOfAny(u8, self.reference_buffer.items, " \"+-/*{}!?()")) |_| {
@@ -126,6 +155,21 @@ const MarkupLine = struct {
         } else {
             return try self.compileValueReference();
         }
+    }
+
+    // Convert `foo/bar/baz` into `_foo_bar_baz` to match template name.
+    fn compilePartial(self: *MarkupLine) ![]const u8 {
+        self.partial = false;
+        if (self.reference_buffer.items.len == 0) return error.ZmplPartialNameError;
+
+        std.mem.replaceScalar(u8, self.reference_buffer.items, '/', '_');
+
+        const template =
+            \\
+            \\try zmpl.renderPartial("_{s}");
+            \\
+        ;
+        return try std.fmt.allocPrint(self.allocator, template, .{self.reference_buffer.items});
     }
 
     fn compileDataReference(self: *MarkupLine) ![]const u8 {
@@ -196,29 +240,63 @@ const MarkupLine = struct {
     }
 };
 
-pub fn init(allocator: std.mem.Allocator, name: []const u8, content: []const u8) Self {
+pub fn init(allocator: std.mem.Allocator, path: []const u8, content: []const u8) Self {
     return .{
         .allocator = allocator,
-        .name = name,
+        .path = path,
         .content = content,
         .buffer = std.ArrayList([]const u8).init(allocator),
     };
 }
 
 pub fn identifier(self: *Self) ![]const u8 {
-    var sanitized_array = std.ArrayList(u8).init(self.allocator);
-    for (self.name, 0..) |char, index| {
-        if (std.mem.indexOfAny(u8, &[_]u8{char}, "abcdefghijklmnopqrstuvwxyz")) |_| {
-            try sanitized_array.append(char);
-        } else if (index == 0) {
-            try sanitized_array.append('_');
-        } else if (index < self.name.len - 1 and sanitized_array.items[sanitized_array.items.len - 1] != '_') {
-            try sanitized_array.append('_');
+    var segments = std.ArrayList([]const u8).init(self.allocator);
+    defer segments.deinit();
+
+    var it = std.mem.splitScalar(u8, self.path, std.fs.path.sep);
+    while (it.next()) |segment| {
+        try segments.append(segment);
+    }
+    const basename = segments.pop();
+    defer self.allocator.free(basename);
+
+    var partial = false;
+
+    if (basename.len > 0 and std.mem.startsWith(u8, basename, "_")) {
+        partial = true;
+        try segments.append(basename[1..]);
+    } else {
+        try segments.append(basename);
+    }
+
+    const name = try std.mem.join(self.allocator, "_", segments.items);
+    defer self.allocator.free(name);
+
+    var valid_name_array = std.ArrayList(u8).init(self.allocator);
+    defer valid_name_array.deinit();
+
+    const valid_anywhere = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY_";
+    const valid_after_zero = valid_anywhere ++ "0123456789";
+    const substitutable = ".";
+
+    const extension = std.fs.path.extension(self.path);
+    const base_path = name[0 .. name.len - extension.len];
+
+    for (base_path, 0..) |char, index| {
+        if (index == 0 and partial) try valid_name_array.append('_');
+        if (index == 0 and std.mem.containsAtLeast(u8, valid_anywhere, 1, &[_]u8{char})) {
+            try valid_name_array.append(char);
+        } else if (index > 0 and std.mem.containsAtLeast(u8, valid_after_zero, 1, &[_]u8{char})) {
+            try valid_name_array.append(char);
+        } else if (std.mem.containsAtLeast(u8, substitutable, 1, &[_]u8{char})) {
+            try valid_name_array.append('_');
+        } else {
+            std.debug.print("[zmpl] Invalid filename (must be '[a-zA-Z0-9_]+.zmpl'): {s}\n", .{self.path});
+            return error.ZmplInvalidFileNameError;
         }
     }
 
-    const extension = std.fs.path.extension(self.name);
-    return sanitized_array.items[0 .. sanitized_array.items.len - extension.len];
+    return try self.allocator.dupe(u8, valid_name_array.items);
 }
 
 pub fn compile(self: *Self) ![]const u8 {
@@ -226,6 +304,7 @@ pub fn compile(self: *Self) ![]const u8 {
     try self.buffer.append(
         \\const std = @import("std");
         \\const __zmpl = @import("zmpl");
+        \\
         \\pub fn render(zmpl: *__zmpl.Data) anyerror![]const u8 {
         \\  const allocator = zmpl.getAllocator();
         \\  _ = try allocator.alloc(u8, 0); // no-op to avoid unused local constant
@@ -247,12 +326,12 @@ pub fn compile(self: *Self) ![]const u8 {
         const index = std.mem.indexOfNone(u8, line, " ");
 
         if (index) |i| {
-            if (try self.parseFragment(line[i..])) |fragment| {
-                // Preserve indentation, replace "<>" with "  "
+            if (parseFragment(line[i..])) |fragment| {
                 var buf = std.ArrayList(u8).init(self.allocator);
                 defer buf.deinit();
                 const writer = buf.writer();
-                for (0..i + "<>".len) |_| try writer.writeByte(' ');
+                // Preserve indentation
+                for (0..i) |_| try writer.writeByte(' ');
                 try writer.writeAll(fragment);
                 try self.buffer.append(try self.compileMarkupLine(buf.items));
                 continue;
@@ -274,7 +353,10 @@ pub fn compile(self: *Self) ![]const u8 {
         }
     }
 
-    try self.buffer.append("return zmpl._allocator.dupe(u8, zmpl.output_buf.items);");
+    try self.buffer.append(
+        \\if (zmpl.partial) zmpl.chompOutputBuffer();
+        \\return zmpl._allocator.dupe(u8, if (zmpl.partial) "" else zmpl.output_buf.items);
+    );
     try self.buffer.append("}");
 
     return try std.mem.join(self.allocator, "\n", self.buffer.items);
@@ -282,11 +364,11 @@ pub fn compile(self: *Self) ![]const u8 {
 
 // TODO: Multi-line fragments - curently just assumes there might be a `</>` on the same line and
 // removes it if present.
-fn parseFragment(self: *Self, string: []const u8) !?[]const u8 {
+fn parseFragment(string: []const u8) ?[]const u8 {
     const tag = "<>";
     if (std.mem.startsWith(u8, string, tag)) {
-        const replaced = try std.mem.replaceOwned(u8, self.allocator, string, "</>", "");
-        if (replaced.len > tag.len) return replaced[tag.len..] else return "";
+        const close_index = std.mem.lastIndexOf(u8, string, "</>") orelse string.len - 1;
+        return string[tag.len..close_index];
     }
     return null;
 }

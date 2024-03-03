@@ -33,6 +33,7 @@
 /// data tree (for Zmpl templates, use the `{.nested_object.key}` syntax to do this
 /// automatically.
 const std = @import("std");
+const manifest = @import("zmpl.manifest");
 
 /// Output stream for writing values into a rendered template.
 pub const Writer = std.ArrayList(u8).Writer;
@@ -47,6 +48,7 @@ output_buf: std.ArrayList(u8),
 output_writer: ?std.ArrayList(u8).Writer = null,
 value: ?*Value = null,
 Null: Value = .{ .Null = NullType{} },
+partial: bool = false,
 
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
 pub fn init(allocator: std.mem.Allocator) Self {
@@ -65,6 +67,31 @@ pub fn deinit(self: *Self) void {
     if (self.arena) |arena| arena.deinit();
     self.output_buf.deinit();
     self.json_buf.deinit();
+}
+
+/// Render a partial template. Do not invoke directly, use `{^partial_name}` syntax instead.
+pub fn renderPartial(self: *Self, name: []const u8) !void {
+    if (manifest.find(name)) |template| {
+        // Partials return an empty string as they share the same writer as parent template.
+        self.partial = true;
+        errdefer self.partial = false;
+        _ = try template.render(self);
+        self.partial = false;
+    } else {
+        return error.ZmplPartialNotFound;
+    }
+}
+
+/// Chomps output buffer. Used for partials to allow user to add an explicit blank line at the
+/// end of a template if needed, otherwise `<div>{^partial_name}</div>` should not output a
+/// newline.
+pub fn chompOutputBuffer(self: *Self) void {
+    if (std.mem.endsWith(u8, self.output_buf.items, "\r\n")) {
+        _ = self.output_buf.pop();
+        _ = self.output_buf.pop();
+    } else if (std.mem.endsWith(u8, self.output_buf.items, "\n")) {
+        _ = self.output_buf.pop();
+    }
 }
 
 pub fn eql(self: *const Self, other: *const Self) bool {
