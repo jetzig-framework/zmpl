@@ -24,10 +24,14 @@ test "readme example" {
         try std.testing.expectEqualStrings(
             \\  <div>Email: user@example.com</div>
             \\  <div>Token: abc123-456-def</div>
+            \\
             \\  <div><a href="mailto:user@example.com">user@example.com</a></div>
+            \\
             \\  Use fragment tags when you want to output content without a specific HTML tag
+            \\
             \\  Use multi-line raw text tags to bypass Zmpl syntax.
             \\  <code>Some example code with curly braces {} etc.</code>
+            \\
             \\  <span>Escape curly braces {like this}</span>
             \\
         , output);
@@ -48,6 +52,25 @@ test "template with if statement" {
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings("  <div>Hi!</div>\n", output);
+}
+
+test "template with multi-line tag" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_multi_line_tag");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(
+        \\<div>
+        \\  <div foo="bar"
+        \\       bar="baz"
+        \\       qux="foo bar baz
+        \\            qux quux corge">hello</div>
+        \\</div>
+        \\
+    , output);
 }
 
 test "template with quotes" {
@@ -199,6 +222,7 @@ test "template with complex content" {
     try std.testing.expectEqualStrings(output,
         \\<html>
         \\    <div>Hi</div>
+        \\
         \\  <div style="background-color: #ff0000">
         \\    <ol>
         \\        <li>This is item number 1, one</li>
@@ -212,13 +236,16 @@ test "template with complex content" {
         \\        <li>This is item number 9, nine</li>
         \\    </ol>
         \\  </div>
+        \\
         \\  <ol>
+        \\
         \\        <div>hello</div>
         \\        <div>hi</div>
         \\        <div>howdy</div>
         \\        <div>hiya</div>
         \\        <div>good day</div>
         \\  </ol>
+        \\
         \\  <span></span>
         \\  <span>hello</span>
         \\  <span>hi</span>
