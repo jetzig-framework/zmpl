@@ -15,7 +15,6 @@ const MarkupLine = struct {
     reference_buffer: std.ArrayList(u8),
     line: []const u8,
     open: bool = false,
-    escape: bool = false,
     decl: bool = false,
     partial: bool = false,
 
@@ -40,19 +39,7 @@ const MarkupLine = struct {
 
             const byte = self.line[index];
 
-            if (byte == '\r') continue;
-
-            if (byte == '\\' and !self.escape) {
-                self.escape = true;
-                continue;
-            }
-
-            if (byte == '\\' and self.escape) {
-                try self.buffer.append('\\');
-                try self.buffer.append('\\');
-                self.escape = false;
-                continue;
-            }
+            if (byte == '\r' or byte == '\n') continue;
 
             if (byte == ':' and self.open and self.reference_buffer.items.len == 0) {
                 self.decl = true;
@@ -67,18 +54,6 @@ const MarkupLine = struct {
             if (byte == '"' and !self.open) {
                 try self.buffer.append('\\');
                 try self.buffer.append('"');
-                continue;
-            }
-
-            if (self.escape and !self.open) {
-                try self.buffer.append(byte);
-                self.escape = false;
-                continue;
-            }
-
-            if (self.escape and self.open) {
-                try self.reference_buffer.append(byte);
-                self.escape = false;
                 continue;
             }
 
@@ -134,6 +109,7 @@ const MarkupLine = struct {
             u8,
             &[_][]const u8{
                 \\");
+                \\
                 ,
                 try self.compileReference(),
                 \\try zmpl.write("
@@ -178,6 +154,7 @@ const MarkupLine = struct {
             ,
             self.reference_buffer.items[1..self.reference_buffer.items.len],
             \\"));
+            \\
         });
     }
 
@@ -310,48 +287,153 @@ pub fn compile(self: *Self) ![]const u8 {
         \\  _ = try allocator.alloc(u8, 0); // no-op to avoid unused local constant
     );
 
-    var it = std.mem.split(u8, self.content, "\n");
-    var multi_line_fragment_open = false;
+    var line_buf = std.ArrayList([]const u8).init(self.allocator);
+    defer line_buf.deinit();
 
-    while (it.next()) |line| {
-        if (multi_line_fragment_open) {
-            if (isMultilineFragmentClose(line)) {
-                multi_line_fragment_open = false;
-            } else {
-                try self.buffer.append(try self.compileRawLine(line, false));
-            }
+    var char_buf = std.ArrayList(u8).init(self.allocator);
+    defer char_buf.deinit();
+
+    var tag_open = false;
+    var quote_open = false;
+    var is_zig_line = false;
+    var is_raw = false;
+    var index: usize = 0;
+
+    const raw_tag_open = "<#>";
+    const raw_tag_close = "</#>";
+    const fragment_tag_open = "<>";
+    const fragment_tag_close = "</>";
+
+    while (index < self.content.len) : (index += 1) {
+        const char = self.content[index];
+
+        if (is_raw and !lookAhead(self.content[index..], raw_tag_close)) {
+            try char_buf.append(char);
             continue;
         }
 
-        const index = std.mem.indexOfNone(u8, line, " ");
-
-        if (index) |i| {
-            if (parseFragment(line[i..])) |fragment| {
-                var buf = std.ArrayList(u8).init(self.allocator);
-                defer buf.deinit();
-                const writer = buf.writer();
-                // Preserve indentation
-                for (0..i) |_| try writer.writeByte(' ');
-                try writer.writeAll(fragment);
-                try self.buffer.append(try self.compileMarkupLine(buf.items));
-                continue;
+        if (char_buf.items.len == 0) {
+            if (firstToken(self.content[index..])) |token| {
+                switch (token) {
+                    .markup => is_zig_line = false,
+                    .zig => is_zig_line = if (tag_open or quote_open) false else true,
+                }
             }
-
-            if (isMultilineFragmentOpen(line[i..])) {
-                multi_line_fragment_open = true;
-                continue;
-            }
-
-            if (line[i] == '<') {
-                try self.buffer.append(try self.compileMarkupLine(line));
-                continue;
-            }
-
-            try self.buffer.append(try self.compileZigLine(line));
-        } else {
-            try self.buffer.append("\n");
         }
+
+        if (is_zig_line and char != '\n') {
+            try char_buf.append(char);
+            continue;
+        }
+
+        if (is_zig_line and char == '\n') {
+            try line_buf.append(try self.compileZigLine(char_buf.items));
+            char_buf.clearAndFree();
+            is_zig_line = false;
+            continue;
+        }
+
+        if (char == '<' and !tag_open and !quote_open) {
+            if (lookAhead(self.content[index..], raw_tag_open)) {
+                is_raw = true;
+
+                // When line includes *only* the raw tag `<#>` (with optional leading
+                // whitespace), skip that line in output:
+                //
+                // ```
+                // <#>
+                // some raw text
+                // </#>
+                // ```
+                //
+                // becomes:
+                // ```
+                // some raw text
+                // ```
+                //
+                // and not:
+                // ```
+                //
+                // some raw text
+                //
+                // ```
+
+                if (isWhitespace(char_buf.items)) char_buf.clearAndFree();
+
+                if (char_buf.items.len == 0) {
+                    if (lookAhead(self.content[index..], raw_tag_open ++ "\n")) {
+                        index += (raw_tag_open ++ "\n").len - 1;
+                    } else if (lookAhead(self.content[index..], raw_tag_open ++ "\r\n")) {
+                        index += (raw_tag_open ++ "\r\n").len - 1;
+                    }
+                } else {
+                    index += raw_tag_open.len - 1;
+                }
+
+                continue;
+            }
+
+            if (is_raw and lookAhead(self.content[index..], raw_tag_close)) {
+                is_raw = false;
+
+                if (lookAhead(self.content[index..], raw_tag_close ++ "\n")) {
+                    index += (raw_tag_close ++ "\n").len - 1;
+                    clearDanglingWhitespace(&char_buf);
+                } else if (lookAhead(self.content[index..], raw_tag_close ++ "\r\n")) {
+                    index += (raw_tag_close ++ "\r\n").len - 1;
+                    clearDanglingWhitespace(&char_buf);
+                } else {
+                    index += raw_tag_close.len - 1;
+                }
+                try line_buf.append(try self.compileRaw(char_buf.items, true));
+                char_buf.clearAndFree();
+                continue;
+            }
+
+            if (lookAhead(self.content[index..], fragment_tag_open)) {
+                index = index + fragment_tag_open.len - 1;
+                continue;
+            }
+
+            if (lookAhead(self.content[index..], fragment_tag_close)) {
+                index = index + fragment_tag_close.len - 1;
+                continue;
+            }
+
+            tag_open = true;
+            try char_buf.append(char);
+            continue;
+        }
+
+        if (char == '>' and tag_open and !quote_open) {
+            tag_open = false;
+            try char_buf.append(char);
+            continue;
+        }
+
+        if (char == '"' and !quote_open) {
+            quote_open = true;
+            try char_buf.append(char);
+            continue;
+        }
+
+        if (char == '"' and quote_open) {
+            quote_open = false;
+            try char_buf.append(char);
+            continue;
+        }
+
+        if (!tag_open and !quote_open and char == '\n') {
+            try line_buf.append(try self.compileMarkupLine(char_buf.items));
+            try line_buf.append("\n");
+            char_buf.clearAndFree();
+            continue;
+        }
+
+        for (escapeChar(char)) |escaped_char| try char_buf.append(escaped_char);
     }
+
+    for (line_buf.items) |line| try self.buffer.append(line);
 
     try self.buffer.append(
         \\if (zmpl.partial) zmpl.chompOutputBuffer();
@@ -360,6 +442,15 @@ pub fn compile(self: *Self) ![]const u8 {
     try self.buffer.append("}");
 
     return try std.mem.join(self.allocator, "\n", self.buffer.items);
+}
+
+fn firstToken(string: []const u8) ?enum { markup, zig } {
+    for (string) |char| {
+        if (char == '\n') return null;
+        if (char == '\t' or char == ' ') continue;
+        return if (char == '<') .markup else .zig;
+    }
+    return null;
 }
 
 // TODO: Multi-line fragments - curently just assumes there might be a `</>` on the same line and
@@ -409,27 +500,64 @@ fn compileMarkupLine(self: *Self, line: []const u8) ![]const u8 {
     return markup_line.compile();
 }
 
-fn compileRawLine(self: *Self, line: []const u8, chomp: bool) ![]const u8 {
-    const chomped = if (chomp) chompString(line) else line;
+fn compileRaw(self: *Self, string: []const u8, chomp: bool) ![]const u8 {
+    const chomped = if (chomp) chompString(string) else string;
+    const escaped_backslash = try std.mem.replaceOwned(
+        u8,
+        self.allocator,
+        chomped,
+        "\"",
+        "\\\"",
+    );
+    defer self.allocator.free(escaped_backslash);
+
+    const escaped_linebreak_rn = try std.mem.replaceOwned(
+        u8,
+        self.allocator,
+        escaped_backslash,
+        "\r\n",
+        "\\r\\n",
+    );
+    defer self.allocator.free(escaped_linebreak_rn);
+
+    const escaped_linebreak_n = try std.mem.replaceOwned(
+        u8,
+        self.allocator,
+        escaped_linebreak_rn,
+        "\n",
+        "\\n",
+    );
+    defer self.allocator.free(escaped_linebreak_n);
+
+    const compiled = escaped_linebreak_n;
+
     return std.mem.join(
         self.allocator,
         "",
         &[_][]const u8{
             "try zmpl.write(\"",
-            try std.mem.replaceOwned(u8, self.allocator, chomped, "\"", "\\\""),
+            compiled,
             "\\n\");",
         },
     );
 }
 
 fn compileZigLine(self: *Self, line: []const u8) ![]const u8 {
-    _ = self;
-    return line;
+    return try self.allocator.dupe(u8, line);
 }
 
 fn escapeText(self: *Self, text: []const u8) ![]const u8 {
     _ = self;
     return text;
+}
+
+fn escapeChar(char: u8) []const u8 {
+    if (char == '\r') return "\\r";
+    if (char == '\n') return "\\n";
+    if (char == '"') return "\"";
+    if (char == '\\') return "\\\\";
+
+    return &[_]u8{char};
 }
 
 fn chompString(string: []const u8) []const u8 {
@@ -438,4 +566,28 @@ fn chompString(string: []const u8) []const u8 {
     } else if (std.mem.endsWith(u8, string, "\n")) {
         return string[0 .. string.len - 2];
     } else return string;
+}
+
+fn isWhitespace(string: []const u8) bool {
+    for (string) |char| {
+        if (char == ' ' or char == '\t') continue;
+        return false;
+    }
+    return true;
+}
+
+fn clearDanglingWhitespace(buf: *std.ArrayList(u8)) void {
+    var index: ?usize = null;
+
+    if (std.mem.lastIndexOf(u8, buf.items, "\r\n")) |linebreak_index| index = linebreak_index;
+    if (std.mem.lastIndexOf(u8, buf.items, "\n")) |linebreak_index| index = linebreak_index;
+
+    if (index) |capture| {
+        for (buf.items[capture..buf.items.len]) |char| {
+            if (char == '\t' or char == ' ' or char == '\r' or char == '\n') continue;
+            return;
+        }
+
+        for (capture..buf.items.len) |_| _ = buf.pop();
+    }
 }
