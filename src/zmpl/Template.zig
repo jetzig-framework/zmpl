@@ -252,7 +252,7 @@ pub fn identifier(self: *Self) ![]const u8 {
     var valid_name_array = std.ArrayList(u8).init(self.allocator);
     defer valid_name_array.deinit();
 
-    const valid_anywhere = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY_";
+    const valid_anywhere = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
     const valid_after_zero = valid_anywhere ++ "0123456789";
     const substitutable = ".";
 
