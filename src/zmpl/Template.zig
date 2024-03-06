@@ -221,7 +221,7 @@ pub fn init(allocator: std.mem.Allocator, path: []const u8, content: []const u8)
     return .{
         .allocator = allocator,
         .path = path,
-        .content = content,
+        .content = std.mem.replaceOwned(u8, allocator, content, "\r\n", "\n") catch @panic("OOM"),
         .buffer = std.ArrayList([]const u8).init(allocator),
     };
 }
@@ -363,8 +363,6 @@ pub fn compile(self: *Self) ![]const u8 {
                 if (char_buf.items.len == 0) {
                     if (lookAhead(self.content[index..], raw_tag_open ++ "\n")) {
                         index += (raw_tag_open ++ "\n").len - 1;
-                    } else if (lookAhead(self.content[index..], raw_tag_open ++ "\r\n")) {
-                        index += (raw_tag_open ++ "\r\n").len - 1;
                     }
                 } else {
                     index += raw_tag_open.len - 1;
@@ -378,9 +376,6 @@ pub fn compile(self: *Self) ![]const u8 {
 
                 if (lookAhead(self.content[index..], raw_tag_close ++ "\n")) {
                     index += (raw_tag_close ++ "\n").len - 1;
-                    clearDanglingWhitespace(&char_buf);
-                } else if (lookAhead(self.content[index..], raw_tag_close ++ "\r\n")) {
-                    index += (raw_tag_close ++ "\r\n").len - 1;
                     clearDanglingWhitespace(&char_buf);
                 } else {
                     index += raw_tag_close.len - 1;
@@ -481,7 +476,7 @@ fn isMultilineFragmentClose(line: []const u8) bool {
     const tag = "</#>";
     if (std.mem.indexOf(u8, line, tag)) |index| {
         if (chompString(line[index + 1 ..]).len > tag.len) {
-            @panic("Found unexpected characters after multi-line raw text close tag. <#/>");
+            @panic("Found unexpected characters after multi-line raw text close tag. </#>");
         } else {
             return true;
         }
@@ -511,25 +506,16 @@ fn compileRaw(self: *Self, string: []const u8, chomp: bool) ![]const u8 {
     );
     defer self.allocator.free(escaped_backslash);
 
-    const escaped_linebreak_rn = try std.mem.replaceOwned(
+    const escaped_linebreak = try std.mem.replaceOwned(
         u8,
         self.allocator,
         escaped_backslash,
-        "\r\n",
-        "\\r\\n",
-    );
-    defer self.allocator.free(escaped_linebreak_rn);
-
-    const escaped_linebreak_n = try std.mem.replaceOwned(
-        u8,
-        self.allocator,
-        escaped_linebreak_rn,
         "\n",
         "\\n",
     );
-    defer self.allocator.free(escaped_linebreak_n);
+    defer self.allocator.free(escaped_linebreak);
 
-    const compiled = escaped_linebreak_n;
+    const compiled = escaped_linebreak;
 
     return std.mem.join(
         self.allocator,
@@ -561,9 +547,7 @@ fn escapeChar(char: u8) []const u8 {
 }
 
 fn chompString(string: []const u8) []const u8 {
-    if (std.mem.endsWith(u8, string, "\r\n")) {
-        return string[0 .. string.len - 3];
-    } else if (std.mem.endsWith(u8, string, "\n")) {
+    if (std.mem.endsWith(u8, string, "\n")) {
         return string[0 .. string.len - 2];
     } else return string;
 }
@@ -579,7 +563,6 @@ fn isWhitespace(string: []const u8) bool {
 fn clearDanglingWhitespace(buf: *std.ArrayList(u8)) void {
     var index: ?usize = null;
 
-    if (std.mem.lastIndexOf(u8, buf.items, "\r\n")) |linebreak_index| index = linebreak_index;
     if (std.mem.lastIndexOf(u8, buf.items, "\n")) |linebreak_index| index = linebreak_index;
 
     if (index) |capture| {

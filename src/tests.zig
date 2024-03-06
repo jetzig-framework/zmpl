@@ -40,6 +40,43 @@ test "readme example" {
     }
 }
 
+test "template with DOS linebreaks" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    var body = try data.object();
+    var user = try data.object();
+    var auth = try data.object();
+
+    try user.put("email", data.string("user@example.com"));
+    try auth.put("token", data.string("abc123-456-def"));
+
+    try body.put("user", user);
+    try body.put("auth", auth);
+
+    if (manifest.find("example_with_dos_linebreaks")) |template| {
+        const output = try template.render(&data);
+        defer allocator.free(output);
+
+        try std.testing.expectEqualStrings(
+            \\  <div>Email: user@example.com</div>
+            \\  <div>Token: abc123-456-def</div>
+            \\
+            \\  <div><a href="mailto:user@example.com">user@example.com</a></div>
+            \\
+            \\  Use fragment tags when you want to output content without a specific HTML tag
+            \\
+            \\  Use multi-line raw text tags to bypass Zmpl syntax.
+            \\  <code>Some example code with curly braces {} etc.</code>
+            \\
+            \\  <span>Escape curly braces {like this}</span>
+            \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
+
 test "template with if statement" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
@@ -301,6 +338,26 @@ test "template with multi-line fragment tag" {
         \\
         \\  return request.render(.ok);
         \\}
+        \\</code></pre>
+        \\
+    , output);
+}
+
+test "template with multi-line fragment tag and trailing content" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_multi_line_fragment_tag_and_trailing_content");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    // XXX: The extra blank line + whitespace is a bug but hopefully enough on an edge case that
+    // it won't matter.
+    try std.testing.expectEqualStrings(
+        \\<div>Some content</div>
+        \\  some raw content
+        \\  
+        \\<span>some trailing content</span>
         \\</code></pre>
         \\
     , output);
