@@ -120,11 +120,13 @@ fn compileTemplates(
         var template = Template.init(self.build.allocator, path, content);
         const output = try template.compile();
 
+        const module_name = try std.mem.replaceOwned(u8, self.build.allocator, output_path, "\\", "/");
+
         const lazy_path = write_files.add(output_path, output);
         const template_def: TemplateDef = .{
             .lazy_path = lazy_path,
             .name = try template.identifier(),
-            .module_name = output_path,
+            .module_name = module_name,
         };
 
         try array.append(template_def);
