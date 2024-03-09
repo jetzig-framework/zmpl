@@ -12,6 +12,7 @@ _Zmpl_ is a templating language for [Zig](https://ziglang.org/) :lizard:
 Syntax highlighters are currently community-sourced. Please get in touch if you have created a plugin for your editor of choice and we will gladly list it here.
 
 * [VSCode](https://github.com/z1fire/zmpl-syntax-highlighting-vscode) by [Zackary Housend](https://github.com/z1fire)
+* _NeoVim_ syntax highlighting can be achieved by using the above _VSCode_ grammar with the [nvim-textmate](https://github.com/icedman/nvim-textmate) plugin. You may need to use [this fork](https://github.com/bobf/nvim-textmate) if you have issues compiling the UTF-8 extension.
 
 ## Example
 
