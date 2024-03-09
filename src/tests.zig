@@ -395,6 +395,23 @@ test "template with partial" {
     try std.testing.expectEqualStrings(expected, output);
 }
 
+test "template with partial with no terminating linebreak" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_partial_with_no_terminating_linebreak");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    const expected =
+        \\<div>
+        \\  <div><h1>test of the thing</h1></div>
+        \\</div>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, output);
+}
+
 test "toJson" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();

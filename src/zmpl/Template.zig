@@ -221,7 +221,7 @@ pub fn init(allocator: std.mem.Allocator, path: []const u8, content: []const u8)
     return .{
         .allocator = allocator,
         .path = path,
-        .content = std.mem.replaceOwned(u8, allocator, content, "\r\n", "\n") catch @panic("OOM"),
+        .content = normalizeInput(allocator, content),
         .buffer = std.ArrayList([]const u8).init(allocator),
     };
 }
@@ -428,6 +428,21 @@ pub fn compile(self: *Self) ![]const u8 {
         for (escapeChar(char)) |escaped_char| try char_buf.append(escaped_char);
     }
 
+    if (char_buf.items.len > 0) {
+        std.debug.print(
+            \\Char buffer has unparsed content.
+            \\This is a parser bug, please report to https://github.com/jetzig-framework/zmpl/issues
+            \\
+            \\Content:
+            \\{s}
+            \\
+            \\Buffer:
+            \\{s}
+        ,
+            .{ self.content, char_buf.items },
+        );
+    }
+
     for (line_buf.items) |line| try self.buffer.append(line);
 
     try self.buffer.append(
@@ -573,4 +588,14 @@ fn clearDanglingWhitespace(buf: *std.ArrayList(u8)) void {
 
         for (capture..buf.items.len) |_| _ = buf.pop();
     }
+}
+
+// Normalize input by swapping DOS linebreaks for Unix linebreaks and ensuring that the input is
+// closed by a `\n`.
+fn normalizeInput(allocator: std.mem.Allocator, input: []const u8) []const u8 {
+    const normalized = std.mem.replaceOwned(u8, allocator, input, "\r\n", "\n") catch @panic("OOM");
+    if (std.mem.endsWith(u8, normalized, "\n")) return normalized;
+
+    defer allocator.free(normalized);
+    return std.mem.concat(allocator, u8, &[_][]const u8{ input, "\n" }) catch @panic("OOM");
 }
