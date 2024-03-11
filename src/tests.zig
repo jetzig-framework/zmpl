@@ -432,6 +432,27 @@ test "template with layout" {
     try std.testing.expectEqualStrings(expected, output);
 }
 
+test "template with partial with layout" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_for_layout_with_partial");
+    const layout = manifest.find("layout");
+    const output = try template.?.renderWithLayout(layout.?, &data);
+    defer allocator.free(output);
+
+    const expected =
+        \\<html>
+        \\  <body>
+        \\    <main><div>This is an example for a layout with a partial</div>
+        \\<div><span>An example partial</span></div></main>
+        \\  </body>
+        \\</html>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, output);
+}
+
 test "layout direct render" {
     // Layouts should not be rendered directly, but a layout is just a template that _might_
     // reference `zmpl.content`, so this test ensures that this works even if it's not intended
