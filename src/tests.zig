@@ -412,6 +412,48 @@ test "template with partial with no terminating linebreak" {
     try std.testing.expectEqualStrings(expected, output);
 }
 
+test "template with layout" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_for_layout");
+    const layout = manifest.find("layout");
+    const output = try template.?.renderWithLayout(layout.?, &data);
+    defer allocator.free(output);
+
+    const expected =
+        \\<html>
+        \\  <body>
+        \\    <main><div>content inside a layout</div></main>
+        \\  </body>
+        \\</html>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, output);
+}
+
+test "layout direct render" {
+    // Layouts should not be rendered directly, but a layout is just a template that _might_
+    // reference `zmpl.content`, so this test ensures that this works even if it's not intended
+    // usage.
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const layout = manifest.find("layout");
+    const output = try layout.?.render(&data);
+    defer allocator.free(output);
+
+    const expected =
+        \\<html>
+        \\  <body>
+        \\    <main></main>
+        \\  </body>
+        \\</html>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, output);
+}
+
 test "toJson" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();

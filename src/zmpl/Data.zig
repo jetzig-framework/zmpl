@@ -40,6 +40,16 @@ pub const Writer = std.ArrayList(u8).Writer;
 
 const Self = @This();
 
+pub const RenderFn = *const fn (*Self) anyerror![]const u8;
+
+pub const LayoutContent = struct {
+    data: []const u8,
+
+    pub fn toString(self: *const LayoutContent) ![]const u8 {
+        return self.data;
+    }
+};
+
 _allocator: std.mem.Allocator,
 arena: ?std.heap.ArenaAllocator = null,
 arena_allocator: std.mem.Allocator = undefined,
@@ -49,6 +59,7 @@ output_writer: ?std.ArrayList(u8).Writer = null,
 value: ?*Value = null,
 Null: Value = .{ .Null = NullType{} },
 partial: bool = false,
+content: LayoutContent = .{ .data = "" },
 
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
 pub fn init(allocator: std.mem.Allocator) Self {

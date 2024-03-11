@@ -283,8 +283,8 @@ pub fn compile(self: *Self) ![]const u8 {
         \\const __zmpl = @import("zmpl");
         \\
         \\pub fn render(zmpl: *__zmpl.Data) anyerror![]const u8 {
-        \\  const allocator = zmpl.getAllocator();
-        \\  _ = try allocator.alloc(u8, 0); // no-op to avoid unused local constant
+        \\    const allocator = zmpl.getAllocator();
+        \\    _ = try allocator.alloc(u8, 0); // no-op to avoid unused local constant
     );
 
     var line_buf = std.ArrayList([]const u8).init(self.allocator);
@@ -450,6 +450,20 @@ pub fn compile(self: *Self) ![]const u8 {
         \\return zmpl._allocator.dupe(u8, if (zmpl.partial) "" else zmpl.output_buf.items);
     );
     try self.buffer.append("}");
+
+    try self.buffer.append(
+        \\
+        \\pub fn renderWithLayout(layout: __zmpl.manifest.Template, zmpl: *__zmpl.Data) anyerror![]const u8 {
+        \\    const inner_content = try render(zmpl);
+        \\    defer zmpl._allocator.free(inner_content);
+        \\    zmpl.output_buf.clearAndFree();
+        \\    zmpl.content = .{ .data = __zmpl.chomp(inner_content) };
+        \\    const content = try layout.render(zmpl);
+        \\    zmpl.output_buf.clearAndFree();
+        \\    return content;
+        \\}
+        \\
+    );
 
     return try std.mem.join(self.allocator, "\n", self.buffer.items);
 }

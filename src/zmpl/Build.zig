@@ -55,7 +55,8 @@ pub fn compile(self: *Self, comptime Template: type) !*std.Build.Module {
         \\
         \\pub const Template = struct {
         \\   name: []const u8,
-        \\   render: *const fn(*zmpl.Data) anyerror![]const u8,
+        \\   render: zmpl.Data.RenderFn,
+        \\   renderWithLayout: *const fn(Template, *zmpl.Data) anyerror![]const u8,
         \\};
         \\
         \\pub fn find(name: []const u8) ?Template {
@@ -71,11 +72,16 @@ pub fn compile(self: *Self, comptime Template: type) !*std.Build.Module {
     for (template_defs.items) |template_def| {
         try writer.writeAll(try std.fmt.allocPrint(
             self.build.allocator,
-            \\    .{{ .name = "{s}", .render = @import("{s}").render }},
+            \\    .{{
+            \\        .name = "{s}",
+            \\        .render = @import("{s}").render,
+            \\        .renderWithLayout = @import("{s}").renderWithLayout,
+            \\    }},
             \\
         ,
             .{
                 template_def.name,
+                template_def.module_name,
                 template_def.module_name,
             },
         ));
