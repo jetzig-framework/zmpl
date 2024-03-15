@@ -395,6 +395,60 @@ test "template with partial" {
     try std.testing.expectEqualStrings(expected, output);
 }
 
+test "template with partial with arguments" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_partial_with_arguments");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    const expected =
+        \\<div>This is an example with a partial with arguments</div>
+        \\<div><span>An example partial</span>
+        \\<span>foo: hello</span>
+        \\<span>bar: 100</span></div>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, output);
+}
+
+test "template with partial with arguments with commas and quotes" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_partial_with_arguments_with_commas_in_quotes");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    const expected =
+        \\<div>This is an example with a partial with arguments</div>
+        \\<div><span>An example partial</span>
+        \\<span>foo: hello, hi: goodbye</span>
+        \\<span>bar: 100</span></div>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, output);
+}
+
+test "template with partial with arguments with escaped quotes" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_partial_with_arguments_with_escaped_quotes");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    const expected =
+        \\<div>This is an example with a partial with arguments</div>
+        \\<div><span>An example partial</span>
+        \\<span>foo: hello, hi: "foo, bar" goodbye</span>
+        \\<span>bar: 100</span></div>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, output);
+}
+
 test "template with partial with no terminating linebreak" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();

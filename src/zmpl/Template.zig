@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const root = @import("root");
+const zmpl = @import("../zmpl.zig");
 
 const Self = @This();
 
@@ -138,14 +138,128 @@ const MarkupLine = struct {
         self.partial = false;
         if (self.reference_buffer.items.len == 0) return error.ZmplPartialNameError;
 
-        std.mem.replaceScalar(u8, self.reference_buffer.items, '/', '_');
+        const args = try self.compilePartialArgs();
+        defer args.deinit();
+        defer for (args.items) |arg| {
+            self.allocator.free(arg.name);
+            self.allocator.free(arg.value);
+        };
 
+        const first_arg_token = std.mem.indexOfAny(
+            u8,
+            self.reference_buffer.items,
+            &std.ascii.whitespace,
+        );
+        const partial_name = if (first_arg_token) |index|
+            self.reference_buffer.items[0..index]
+        else
+            self.reference_buffer.items;
+
+        std.mem.replaceScalar(u8, partial_name, '/', '_');
+
+        var args_buf = std.ArrayList(u8).init(self.allocator);
+        defer args_buf.deinit();
+        const args_writer = args_buf.writer();
+
+        for (args.items) |arg| {
+            const output = try std.fmt.allocPrint(
+                self.allocator,
+                \\try partial_data.put("{s}", {s});
+                \\
+            ,
+                .{ arg.name, arg.value },
+            );
+            defer self.allocator.free(output);
+            try args_writer.writeAll(output);
+        }
         const template =
-            \\
-            \\try zmpl.renderPartial("_{s}");
-            \\
+            \\{{
+            \\  var partial_data = try zmpl.createObject();
+            \\  defer partial_data.deinit();
+            \\  {s}
+            \\  try zmpl.renderPartial("_{s}", &partial_data.object);
+            \\}}
         ;
-        return try std.fmt.allocPrint(self.allocator, template, .{self.reference_buffer.items});
+        return try std.fmt.allocPrint(self.allocator, template, .{ args_buf.items, strip(partial_name) });
+    }
+
+    const Arg = struct { name: []const u8, value: []const u8 };
+
+    fn compilePartialArgs(self: *MarkupLine) !std.ArrayList(Arg) {
+        var args = std.ArrayList(Arg).init(self.allocator);
+
+        const reference = try std.mem.replaceOwned(
+            u8,
+            self.allocator,
+            self.reference_buffer.items,
+            "\\\\",
+            "\\",
+        );
+        defer self.allocator.free(reference);
+
+        const first_token = std.mem.indexOfAny(u8, reference, &std.ascii.whitespace);
+        if (first_token == null) return args;
+
+        var chunks = std.ArrayList([]const u8).init(self.allocator);
+        defer chunks.deinit();
+        defer for (chunks.items) |chunk| self.allocator.free(chunk);
+
+        var chunk_buf = std.ArrayList(u8).init(self.allocator);
+        defer chunk_buf.deinit();
+
+        var quote_open = false;
+        var escape = false;
+
+        for (reference[first_token.?..]) |char| {
+            if (char == '\\' and !escape) {
+                escape = true;
+            } else if (escape) {
+                try chunk_buf.append('\\');
+                try chunk_buf.append(char);
+                escape = false;
+            } else if (char == '"' and !quote_open) {
+                quote_open = true;
+                try chunk_buf.append(char);
+            } else if (char == '"' and quote_open) {
+                quote_open = false;
+                try chunk_buf.append(char);
+            } else if (char == ',' and !quote_open) {
+                try chunks.append(try self.allocator.dupe(u8, strip(chunk_buf.items)));
+                chunk_buf.clearAndFree();
+            } else {
+                try chunk_buf.append(char);
+            }
+        }
+
+        if (strip(chunk_buf.items).len > 0) {
+            try chunks.append(try self.allocator.dupe(u8, strip(chunk_buf.items)));
+        }
+
+        for (chunks.items) |chunk| {
+            var name: []const u8 = undefined;
+            var value: []const u8 = undefined;
+
+            const keypair_sep = ": ";
+            if (std.mem.indexOf(u8, chunk, keypair_sep)) |token_lhs| {
+                name = strip(chunk[0..token_lhs]);
+                if (chunk.len > token_lhs + keypair_sep.len + 1) {
+                    value = strip(chunk[token_lhs + keypair_sep.len ..]);
+                } else {
+                    debugPartialArgumentError(chunk);
+                    return error.ZmplPartialArgumentError;
+                }
+            } else {
+                debugPartialArgumentError(chunk);
+                return error.ZmplPartialArgumentError;
+            }
+
+            try args.append(.{
+                .name = try self.allocator.dupe(u8, name),
+                .value = try self.allocator.dupe(u8, value),
+            });
+        }
+
+        return args;
     }
 
     fn compileDataReference(self: *MarkupLine) ![]const u8 {
@@ -612,4 +726,12 @@ fn normalizeInput(allocator: std.mem.Allocator, input: []const u8) []const u8 {
 
     defer allocator.free(normalized);
     return std.mem.concat(allocator, u8, &[_][]const u8{ input, "\n" }) catch @panic("OOM");
+}
+
+fn strip(input: []const u8) []const u8 {
+    return std.mem.trim(u8, input, &std.ascii.whitespace);
+}
+
+fn debugPartialArgumentError(input: []const u8) void {
+    std.debug.print("Error parsing partial arguments in: `{s}`\n", .{input});
 }
