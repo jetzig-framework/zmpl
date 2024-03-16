@@ -27,6 +27,9 @@ if (std.mem.eql(u8, "zmpl is simple", "zmpl" ++ " is " ++ "simple")) {
   // Render a partial named `users/_mailto.zmpl`:
   <div>{^users/mailto}</div>
 
+  // Pass arguments to a partial:
+  <div>{^users/mailto(subject: zmpl.string("Welcome to Jetzig!"))}</div>
+
   <>Use fragment tags when you want to output content without a specific HTML tag</>
 
   <#>
@@ -65,10 +68,16 @@ test "readme example" {
         try std.testing.expectEqualStrings(
             \\  <div>Email: user@example.com</div>
             \\  <div>Token: abc123-456-def</div>
-            \\  <div><a href="mailto:user@example.com">user@example.com</a></div>
+            \\
+            \\  <div><a href="mailto:user@example.com?subject=">user@example.com</a></div>
+            \\
+            \\  <div><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a></div>
+            \\
             \\  Use fragment tags when you want to output content without a specific HTML tag
+            \\
             \\  Use multi-line raw text tags to bypass Zmpl syntax.
             \\  <code>Some example code with curly braces {} etc.</code>
+            \\
             \\  <span>Escape curly braces {like this}</span>
             \\
         , output);

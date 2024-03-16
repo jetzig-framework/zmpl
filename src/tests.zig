@@ -25,7 +25,9 @@ test "readme example" {
             \\  <div>Email: user@example.com</div>
             \\  <div>Token: abc123-456-def</div>
             \\
-            \\  <div><a href="mailto:user@example.com">user@example.com</a></div>
+            \\  <div><a href="mailto:user@example.com?subject=">user@example.com</a></div>
+            \\
+            \\  <div><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a></div>
             \\
             \\  Use fragment tags when you want to output content without a specific HTML tag
             \\
@@ -62,7 +64,7 @@ test "template with DOS linebreaks" {
             \\  <div>Email: user@example.com</div>
             \\  <div>Token: abc123-456-def</div>
             \\
-            \\  <div><a href="mailto:user@example.com">user@example.com</a></div>
+            \\  <div><a href="mailto:user@example.com?subject=">user@example.com</a></div>
             \\
             \\  Use fragment tags when you want to output content without a specific HTML tag
             \\

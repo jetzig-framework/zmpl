@@ -1,1 +1,1 @@
-<a href="mailto:{.user.email}">{.user.email}</a>
+<a href="mailto:{.user.email}?subject={.subject}">{.user.email}</a>

@@ -145,11 +145,7 @@ const MarkupLine = struct {
             self.allocator.free(arg.value);
         };
 
-        const first_arg_token = std.mem.indexOfAny(
-            u8,
-            self.reference_buffer.items,
-            &std.ascii.whitespace,
-        );
+        const first_arg_token = std.mem.indexOfScalar(u8, self.reference_buffer.items, '(');
         const partial_name = if (first_arg_token) |index|
             self.reference_buffer.items[0..index]
         else
@@ -164,7 +160,7 @@ const MarkupLine = struct {
         for (args.items) |arg| {
             const output = try std.fmt.allocPrint(
                 self.allocator,
-                \\try partial_data.put("{s}", {s});
+                \\    try partial_data.put("{s}", {s});
                 \\
             ,
                 .{ arg.name, arg.value },
@@ -174,10 +170,10 @@ const MarkupLine = struct {
         }
         const template =
             \\{{
-            \\  var partial_data = try zmpl.createObject();
-            \\  defer partial_data.deinit();
-            \\  {s}
-            \\  try zmpl.renderPartial("_{s}", &partial_data.object);
+            \\    var partial_data = try zmpl.createObject();
+            \\    defer partial_data.deinit();
+            \\{s}
+            \\    try zmpl.renderPartial("_{s}", &partial_data.object);
             \\}}
         ;
         return try std.fmt.allocPrint(self.allocator, template, .{ args_buf.items, strip(partial_name) });
@@ -188,6 +184,8 @@ const MarkupLine = struct {
     fn compilePartialArgs(self: *MarkupLine) !std.ArrayList(Arg) {
         var args = std.ArrayList(Arg).init(self.allocator);
 
+        // The entire markup line is escaped further up the stack, so we unescape here to
+        // simplify parsing.
         const reference = try std.mem.replaceOwned(
             u8,
             self.allocator,
@@ -197,8 +195,10 @@ const MarkupLine = struct {
         );
         defer self.allocator.free(reference);
 
-        const first_token = std.mem.indexOfAny(u8, reference, &std.ascii.whitespace);
-        if (first_token == null) return args;
+        const first_token = std.mem.indexOfScalar(u8, reference, '(');
+        const last_token = std.mem.lastIndexOfScalar(u8, reference, ')');
+        if (first_token == null or last_token == null) return args;
+        if (first_token.? + 1 >= last_token.?) return args;
 
         var chunks = std.ArrayList([]const u8).init(self.allocator);
         defer chunks.deinit();
@@ -210,7 +210,7 @@ const MarkupLine = struct {
         var quote_open = false;
         var escape = false;
 
-        for (reference[first_token.?..]) |char| {
+        for (reference[first_token.? + 1 .. last_token.?]) |char| {
             if (char == '\\' and !escape) {
                 escape = true;
             } else if (escape) {
