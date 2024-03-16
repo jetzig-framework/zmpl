@@ -25,7 +25,9 @@ test "readme example" {
             \\  <div>Email: user@example.com</div>
             \\  <div>Token: abc123-456-def</div>
             \\
-            \\  <div><a href="mailto:user@example.com">user@example.com</a></div>
+            \\  <div><a href="mailto:user@example.com?subject=">user@example.com</a></div>
+            \\
+            \\  <div><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a></div>
             \\
             \\  Use fragment tags when you want to output content without a specific HTML tag
             \\
@@ -62,7 +64,7 @@ test "template with DOS linebreaks" {
             \\  <div>Email: user@example.com</div>
             \\  <div>Token: abc123-456-def</div>
             \\
-            \\  <div><a href="mailto:user@example.com">user@example.com</a></div>
+            \\  <div><a href="mailto:user@example.com?subject=">user@example.com</a></div>
             \\
             \\  Use fragment tags when you want to output content without a specific HTML tag
             \\
@@ -390,6 +392,60 @@ test "template with partial" {
     const expected =
         \\<div>This is an example with a partial</div>
         \\<div><span>An example partial</span></div>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, output);
+}
+
+test "template with partial with arguments" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_partial_with_arguments");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    const expected =
+        \\<div>This is an example with a partial with arguments</div>
+        \\<div><span>An example partial</span>
+        \\<span>foo: hello</span>
+        \\<span>bar: 100</span></div>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, output);
+}
+
+test "template with partial with arguments with commas and quotes" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_partial_with_arguments_with_commas_in_quotes");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    const expected =
+        \\<div>This is an example with a partial with arguments</div>
+        \\<div><span>An example partial</span>
+        \\<span>foo: hello, hi: goodbye</span>
+        \\<span>bar: 100</span></div>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, output);
+}
+
+test "template with partial with arguments with escaped quotes" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_partial_with_arguments_with_escaped_quotes");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    const expected =
+        \\<div>This is an example with a partial with arguments</div>
+        \\<div><span>An example partial</span>
+        \\<span>foo: hello, hi: "foo, bar" goodbye</span>
+        \\<span>bar: 100</span></div>
         \\
     ;
     try std.testing.expectEqualStrings(expected, output);

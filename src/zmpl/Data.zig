@@ -60,6 +60,7 @@ value: ?*Value = null,
 Null: Value = .{ .Null = NullType{} },
 partial: bool = false,
 content: LayoutContent = .{ .data = "" },
+partial_data: ?*Object = null,
 
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
 pub fn init(allocator: std.mem.Allocator) Self {
@@ -81,13 +82,14 @@ pub fn deinit(self: *Self) void {
 }
 
 /// Render a partial template. Do not invoke directly, use `{^partial_name}` syntax instead.
-pub fn renderPartial(self: *Self, name: []const u8) !void {
+pub fn renderPartial(self: *Self, name: []const u8, partial_data: *Object) !void {
     if (manifest.find(name)) |template| {
-        // Partials return an empty string as they share the same writer as parent template.
         self.partial = true;
-        errdefer self.partial = false;
+        self.partial_data = partial_data;
+        defer self.partial = false;
+        defer self.partial_data = null;
+        // Partials return an empty string as they share the same writer as parent template.
         _ = try template.render(self);
-        self.partial = false;
     } else {
         return error.ZmplPartialNotFound;
     }
@@ -116,6 +118,11 @@ pub fn eql(self: *const Self, other: *const Self) bool {
 /// Takes a string such as `.foo.bar.baz` and translates into a path into the data tree to return
 /// a value that can be rendered in a template.
 pub fn getValue(self: Self, key: []const u8) !?*Value {
+    // Partial data always takes precedence over underlying template data.
+    if (self.partial_data) |val| {
+        if (val.get(key)) |partial_value| return partial_value;
+    }
+
     if (self.value) |val| {
         var tokens = std.mem.splitSequence(u8, key, ".");
         var current_value = val;
@@ -150,7 +157,7 @@ pub fn getValue(self: Self, key: []const u8) !?*Value {
 pub fn getValueString(self: Self, key: []const u8) ![]const u8 {
     if (try self.getValue(key)) |val| {
         switch (val.*) {
-            .object, .array => return "", // Implement on Object and Array ?
+            .object, .array => return "", // No sense in trying to convert an object/array to a string
             else => |*capture| {
                 var v = capture.*;
                 return try v.toString();
