@@ -254,7 +254,8 @@ pub fn boolean(self: *Self, value: bool) *Value {
     return val;
 }
 
-fn _null(self: *Self) *Value {
+/// Creates a new `Value` representing a `null` value. Public, but for internal use only.
+pub fn _null(self: *Self) *Value {
     const allocator = self.getAllocator();
     const val = allocator.create(Value) catch @panic("Out of memory");
     val.* = .{ .Null = NullType{} };
@@ -477,7 +478,7 @@ pub const Float = struct {
     }
 
     pub fn toString(self: Float) ![]const u8 {
-        return std.fmt.allocPrint(self.allocator, "{}", .{self.value});
+        return std.fmt.allocPrint(self.allocator, "{d}", .{self.value});
     }
 };
 

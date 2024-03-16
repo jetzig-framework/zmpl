@@ -158,12 +158,14 @@ const MarkupLine = struct {
         const args_writer = args_buf.writer();
 
         for (args.items) |arg| {
+            const value = try arg.toZmpl();
+            defer self.allocator.free(value);
             const output = try std.fmt.allocPrint(
                 self.allocator,
                 \\    try partial_data.put("{s}", {s});
                 \\
             ,
-                .{ arg.name, arg.value },
+                .{ arg.name, value },
             );
             defer self.allocator.free(output);
             try args_writer.writeAll(output);
@@ -179,7 +181,66 @@ const MarkupLine = struct {
         return try std.fmt.allocPrint(self.allocator, template, .{ args_buf.items, strip(partial_name) });
     }
 
-    const Arg = struct { name: []const u8, value: []const u8 };
+    const Arg = struct {
+        name: []const u8,
+        value: []const u8,
+        allocator: std.mem.Allocator,
+
+        /// Attempt to infer the type unless explicitly defined, e.g.:
+        /// `zmpl.string("..."))`
+        pub fn toZmpl(self: Arg) ![]const u8 {
+            if (std.mem.startsWith(u8, self.value, "zmpl.")) return try self.allocator.dupe(u8, self.value);
+            if (self.isString()) return try self.zmplValue(.string);
+            if (self.isInteger()) return try self.zmplValue(.integer);
+            if (self.isFloat()) return try self.zmplValue(.float);
+            if (self.isBoolean()) return try self.zmplValue(.boolean);
+            if (self.isNull()) return try self.zmplValue(.Null);
+            // Currently we only support scalars as partial args - array/object not supported.
+            std.debug.print("Unable to parse argument: {s}: {s}\n", .{ self.name, self.value });
+            return error.ZmplPartialArgumentError;
+        }
+
+        // Convert an inferred value argument to a Zmpl data type.
+        fn zmplValue(self: Arg, zmpl_type: enum { string, integer, float, boolean, Null }) ![]const u8 {
+            if (zmpl_type == .Null) return try self.allocator.dupe(u8, "zmpl._null()");
+
+            return try std.mem.concat(
+                self.allocator,
+                u8,
+                &[_][]const u8{ "zmpl.", @tagName(zmpl_type), "(", self.value, ")" },
+            );
+        }
+
+        // Identify a string argument.
+        fn isString(self: Arg) bool {
+            if (!std.mem.startsWith(u8, self.value, "\"")) return false;
+            if (!std.mem.endsWith(u8, self.value, "\"")) return false;
+            return true;
+        }
+
+        // Identify an integer number argument.
+        fn isInteger(self: Arg) bool {
+            for (self.value) |char| if (!std.ascii.isDigit(char)) return false;
+            return true;
+        }
+
+        // Identify a floating point number argument.
+        fn isFloat(self: Arg) bool {
+            if (std.mem.count(u8, self.value, ".") != 1) return false;
+            for (self.value) |char| if (!std.ascii.isDigit(char) and char != '.') return false;
+            return true;
+        }
+
+        // Identify a boolean argument.
+        fn isBoolean(self: Arg) bool {
+            return std.mem.eql(u8, self.value, "true") or std.mem.eql(u8, self.value, "false");
+        }
+
+        // Identify a `null` argument.
+        fn isNull(self: Arg) bool {
+            return std.mem.eql(u8, self.value, "null");
+        }
+    };
 
     fn compilePartialArgs(self: *MarkupLine) !std.ArrayList(Arg) {
         var args = std.ArrayList(Arg).init(self.allocator);
@@ -254,6 +315,7 @@ const MarkupLine = struct {
             }
 
             try args.append(.{
+                .allocator = self.allocator,
                 .name = try self.allocator.dupe(u8, name),
                 .value = try self.allocator.dupe(u8, value),
             });
