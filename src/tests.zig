@@ -29,6 +29,8 @@ test "readme example" {
             \\
             \\  <div><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a></div>
             \\
+            \\  <div><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a></div>
+            \\
             \\  Use fragment tags when you want to output content without a specific HTML tag
             \\
             \\  Use multi-line raw text tags to bypass Zmpl syntax.
@@ -410,6 +412,28 @@ test "template with partial with arguments" {
         \\<div><span>An example partial</span>
         \\<span>foo: hello</span>
         \\<span>bar: 100</span></div>
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, output);
+}
+
+test "template with partial with argument type inference" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_partial_with_argument_type_inference");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    // XXX: `null` (`quux`) coerces an empty string.
+    const expected =
+        \\<div>This is an example with a partial with arguments with type inference</div>
+        \\<div><span>An example partial</span>
+        \\<span>foo: hello</span>
+        \\<span>bar: 100</span>
+        \\<span>baz: 123.456</span>
+        \\<span>qux: true</span>
+        \\<span>quux: </span></div>
         \\
     ;
     try std.testing.expectEqualStrings(expected, output);

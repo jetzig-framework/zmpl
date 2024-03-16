@@ -30,6 +30,9 @@ if (std.mem.eql(u8, "zmpl is simple", "zmpl" ++ " is " ++ "simple")) {
   // Pass arguments to a partial:
   <div>{^users/mailto(subject: zmpl.string("Welcome to Jetzig!"))}</div>
 
+  // Pass arguments to a partial with type inference:
+  <div>{^users/mailto(subject: "Welcome to Jetzig!")}</div>
+
   <>Use fragment tags when you want to output content without a specific HTML tag</>
 
   <#>
