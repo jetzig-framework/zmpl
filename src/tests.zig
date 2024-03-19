@@ -383,6 +383,21 @@ test "template with escaped curly braces" {
     , output);
 }
 
+test "template with ternary reference" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const template = manifest.find("example_with_ternary_reference");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(
+        \\<div class="bar">hello</div>
+        \\<div class="foo">hello</div>
+        \\
+    , output);
+}
+
 test "template with partial" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
