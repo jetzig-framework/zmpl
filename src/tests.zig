@@ -191,6 +191,29 @@ test "template with deep nesting" {
     try std.testing.expectEqualStrings("<div>Hello :))</div>\n", output);
 }
 
+test "template with toJson call" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    var object = try data.object();
+    var nested_object = try data.object();
+    var double_nested_object = try data.object();
+    var triple_nested_object = try data.object();
+    try triple_nested_object.put("qux", data.string(":))"));
+    try double_nested_object.put("baz", triple_nested_object);
+    try nested_object.put("bar", double_nested_object);
+    try object.put("foo", nested_object);
+
+    const template = manifest.find("example_with_toJson_call");
+    const output = try template.?.render(&data);
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(
+        \\<script>const foo = {"foo":{"bar":{"baz":{"qux":":))"}}}};</script>
+        \\
+    , output);
+}
+
 test "template with iteration" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
@@ -580,7 +603,6 @@ test "toJson" {
     try object.put("foo", nested_object);
 
     const json = try data.toJson();
-    defer allocator.free(json);
 
     try std.testing.expectEqualStrings(json,
         \\{"foo":{"bar":10}}
@@ -591,7 +613,6 @@ test "toJson with no data" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
     const json = try data.toJson();
-    defer allocator.free(json);
 
     try std.testing.expectEqualStrings(json, "");
 }
@@ -606,7 +627,6 @@ test "fromJson simple" {
     try data.fromJson(input);
 
     const json = try data.toJson();
-    defer allocator.free(json);
     try std.testing.expectEqualStrings(json,
         \\{"foo":"bar"}
     );
@@ -622,7 +642,7 @@ test "fromJson complex" {
     try data.fromJson(input);
 
     const json = try data.toJson();
-    defer allocator.free(json);
+
     try std.testing.expectEqualStrings(json,
         \\{"foo":{"bar":["baz",10],"qux":{"quux":1.4123e+00,"corge":true}}}
     );
@@ -638,13 +658,11 @@ test "reset" {
     try data.fromJson(input);
 
     const json = try data.toJson();
-    defer allocator.free(json);
     try std.testing.expectEqualStrings(json,
         \\{"foo":"bar"}
     );
     data.reset();
     const more_json = try data.toJson();
-    defer allocator.free(more_json);
     try std.testing.expectEqualStrings(more_json, ""); // Maybe this should raise an error or return null ?
 }
 
@@ -682,7 +700,6 @@ test "appending to an array after insertion into object (regression)" {
     try array.append(data.string("baz"));
 
     const json = try data.toJson();
-    defer allocator.free(json);
 
     try std.testing.expectEqualStrings(json,
         \\{"foo":["bar","baz"]}
@@ -701,7 +718,6 @@ test "inserting to an object after insertion into array (regression)" {
     try object.put("qux", data.string("quux"));
 
     const json = try data.toJson();
-    defer allocator.free(json);
 
     try std.testing.expectEqualStrings(json,
         \\[{"bar":"baz","qux":"quux"}]

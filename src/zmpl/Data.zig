@@ -303,7 +303,7 @@ pub fn toJson(self: *Self) ![]const u8 {
     const writer = self.json_buf.writer();
     self.json_buf.clearAndFree();
     try self.value.?.toJson(writer);
-    return self._allocator.dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
+    return self.getAllocator().dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
 }
 
 /// Parses a JSON string and updates the current `Data` object with the parsed data. Inverse of
