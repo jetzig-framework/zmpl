@@ -452,16 +452,40 @@ pub fn identifier(self: *Self) ![]const u8 {
     return try self.allocator.dupe(u8, valid_name_array.items);
 }
 
-pub fn compile(self: *Self) ![]const u8 {
+pub fn compile(self: *Self, comptime options: type) ![]const u8 {
     self.buffer.clearAndFree();
-    try self.buffer.append(
+
+    var decls_buf = std.ArrayList(u8).init(self.allocator);
+    defer decls_buf.deinit();
+
+    if (@hasDecl(options, "template_constants")) {
+        inline for (std.meta.fields(options.template_constants)) |field| {
+            const type_str = switch (field.type) {
+                []const u8, i64, f64, bool => @typeName(field.type),
+                else => @compileError("Unsupported template constant type: " ++ @typeName(field.type)),
+            };
+
+            const decl_string = "const " ++ field.name ++ ": " ++ type_str ++ " = try zmpl.getConst(" ++ type_str ++ ", \"" ++ field.name ++ "\");\n"; // :(
+
+            try decls_buf.appendSlice("    " ++ decl_string);
+            try decls_buf.appendSlice("    zmpl.noop(" ++ type_str ++ ", " ++ field.name ++ ");\n");
+        }
+    }
+
+    const header = try std.fmt.allocPrint(
+        self.allocator,
         \\const std = @import("std");
         \\const __zmpl = @import("zmpl");
         \\
-        \\pub fn render(zmpl: *__zmpl.Data) anyerror![]const u8 {
+        \\pub fn render(zmpl: *__zmpl.Data) anyerror![]const u8 {{
+        \\{s}
         \\    const allocator = zmpl.getAllocator();
-        \\    _ = try allocator.alloc(u8, 0); // no-op to avoid unused local constant
+        \\    zmpl.noop(std.mem.Allocator, allocator);
+    ,
+        .{decls_buf.items},
     );
+    defer self.allocator.free(header);
+    try self.buffer.append(header);
 
     var line_buf = std.ArrayList([]const u8).init(self.allocator);
     defer line_buf.deinit();
@@ -629,7 +653,10 @@ pub fn compile(self: *Self) ![]const u8 {
 
     try self.buffer.append(
         \\
-        \\pub fn renderWithLayout(layout: __zmpl.manifest.Template, zmpl: *__zmpl.Data) anyerror![]const u8 {
+        \\pub fn renderWithLayout(
+        \\    layout: __zmpl.manifest.Template,
+        \\    zmpl: *__zmpl.Data,
+        \\) anyerror![]const u8 {
         \\    const inner_content = try render(zmpl);
         \\    defer zmpl._allocator.free(inner_content);
         \\    zmpl.output_buf.clearAndFree();

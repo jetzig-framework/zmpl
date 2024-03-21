@@ -61,6 +61,7 @@ Null: Value = .{ .Null = NullType{} },
 partial: bool = false,
 content: LayoutContent = .{ .data = "" },
 partial_data: ?*Object = null,
+template_decls: std.StringHashMap(*Value),
 
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
 pub fn init(allocator: std.mem.Allocator) Self {
@@ -71,6 +72,7 @@ pub fn init(allocator: std.mem.Allocator) Self {
         ._allocator = allocator,
         .json_buf = json_buf,
         .output_buf = output_buf,
+        .template_decls = std.StringHashMap(*Value).init(allocator),
     };
 }
 
@@ -166,12 +168,57 @@ pub fn getValueString(self: Self, key: []const u8) ![]const u8 {
     } else return "";
 }
 
+/// Add a const value. Must be called for **all** constants defined at build time before
+/// rendering a template. Constants can be defined by setting Zmpl's build option
+/// `zmpl_auto_build` to `false` and manually invoking template compilation:
+// ```zig
+// const ZmplBuild = @import("zmpl").ZmplBuild;
+// const ZmplTemplate = @import("zmpl").Template;
+// var zmpl_build = ZmplBuild.init(b, lib, template_path);
+// const TemplateConstants = struct {
+//     current_view: []const u8,
+//     current_action: []const u8,
+// };
+// const ZmplOptions = struct {
+//     pub const template_constants = TemplateConstants;
+// };
+// const manifest_module = try zmpl_build.compile(ZmplTemplate, ZmplOptions);
+// zmpl_module.addImport("zmpl.manifest", manifest_module);
+// ```
+pub fn addConst(self: *Self, name: []const u8, value: *Value) !void {
+    try self.template_decls.put(name, value);
+}
+
+/// Retrieves a typed value from template decls. Errors if value is not found, i.e. all expected
+/// values **must** be assigned before rendering a template.
+pub fn getConst(self: *Self, T: type, name: []const u8) !T {
+    if (self.template_decls.get(name)) |value| {
+        return switch (T) {
+            i64 => value.integer.value,
+            f64 => value.float.value,
+            []const u8 => value.string.value,
+            bool => value.boolean.value,
+            else => @compileError("Unsupported constant type: " ++ @typeName(T)),
+        };
+    } else {
+        std.debug.print("Undefined constant: {s} - must call `Data.addConst(...)` before rendering.", .{name});
+        return error.ZmplMissingConstant;
+    }
+}
+
 /// Resets the current `Data` object, allowing it to be re-initialized with a new root value.
 pub fn reset(self: *Self) void {
     if (self.value) |*ptr| {
         ptr.*.deinit();
     }
     self.value = null;
+}
+
+/// No-op function. Used by templates to prevent unused local constant errors for values that
+/// might not be used by the template (e.g. allocator, `addConst()` values).
+pub fn noop(self: Self, T: type, value: T) void {
+    _ = self;
+    _ = value;
 }
 
 /// Creates a new `Object`. The first call to `array()` or `object()` sets the root value.

@@ -530,6 +530,27 @@ test "template with partial with no terminating linebreak" {
     try std.testing.expectEqualStrings(expected, output);
 }
 
+// Not sure how to test this without passing another build option:
+
+// test "template with consts" {
+//     var data = zmpl.Data.init(allocator);
+//     defer data.deinit();
+//
+//     try data.addConst("current_view", data.string("iguanas"));
+//     try data.addConst("current_action", data.string("index"));
+//
+//     const template = manifest.find("example_with_consts");
+//     const output = try template.?.render(&data);
+//     defer allocator.free(output);
+//
+//     const expected =
+//         \\<div>iguanas</div>
+//         \\<div>index</div>
+//         \\
+//     ;
+//     try std.testing.expectEqualStrings(expected, output);
+// }
+
 test "template with layout" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();

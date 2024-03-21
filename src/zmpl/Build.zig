@@ -25,12 +25,16 @@ pub fn init(
     };
 }
 
-pub fn compile(self: *Self, comptime Template: type) !*std.Build.Module {
+pub fn compile(
+    self: *Self,
+    comptime Template: type,
+    comptime options: type,
+) !*std.Build.Module {
     var template_defs = std.ArrayList(TemplateDef).init(self.build.allocator);
 
     var write_files = self.build.addWriteFiles();
 
-    self.compileTemplates(&template_defs, Template) catch |err| {
+    self.compileTemplates(&template_defs, Template, options) catch |err| {
         switch (err) {
             error.TemplateDirectoryNotFound => {
                 std.debug.print(
@@ -106,6 +110,7 @@ fn compileTemplates(
     self: *Self,
     array: *std.ArrayList(TemplateDef),
     comptime Template: type,
+    comptime options: type,
 ) !void {
     const paths = try self.findTemplates();
     var dir = try std.fs.cwd().openDir(self.templates_path, .{});
@@ -124,7 +129,7 @@ fn compileTemplates(
         const buffer = try self.build.allocator.alloc(u8, size);
         const content = try dir.readFile(path, buffer);
         var template = Template.init(self.build.allocator, path, content);
-        const output = try template.compile();
+        const output = try template.compile(options);
 
         const module_name = try std.mem.replaceOwned(u8, self.build.allocator, output_path, "\\", "/");
 
