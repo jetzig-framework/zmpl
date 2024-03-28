@@ -63,6 +63,8 @@ content: LayoutContent = .{ .data = "" },
 partial_data: ?*Object = null,
 template_decls: std.StringHashMap(*Value),
 
+const indent = "  ";
+
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
 pub fn init(allocator: std.mem.Allocator) Self {
     const json_buf = std.ArrayList(u8).init(allocator);
@@ -349,7 +351,18 @@ pub fn toJson(self: *Self) ![]const u8 {
 
     const writer = self.json_buf.writer();
     self.json_buf.clearAndFree();
-    try self.value.?.toJson(writer);
+    try self.value.?.toJson(writer, false, 0);
+    return self.getAllocator().dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
+}
+
+/// Returns the entire `Data` tree as a pretty-printed JSON string.
+pub fn toPrettyJson(self: *Self) ![]const u8 {
+    if (self.value) |_| {} else return "";
+
+    const writer = self.json_buf.writer();
+    self.json_buf.clearAndFree();
+    try self.value.?.toJson(writer, true, 0);
+    try writer.writeByte('\n');
     return self.getAllocator().dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
 }
 
@@ -454,8 +467,10 @@ pub const Value = union(enum) {
     }
 
     /// Generates a JSON string representing the complete data tree.
-    pub fn toJson(self: *Value, writer: Writer) !void {
+    pub fn toJson(self: *Value, writer: Writer, pretty: bool, level: usize) !void {
         return switch (self.*) {
+            .array => |*capture| try capture.toJson(writer, pretty, level),
+            .object => |*capture| try capture.toJson(writer, pretty, level),
             inline else => |*capture| try capture.toJson(writer),
         };
     }
@@ -521,7 +536,7 @@ pub const Float = struct {
     }
 
     pub fn toJson(self: Float, writer: Writer) !void {
-        try writer.print("{}", .{self.value});
+        try writer.print("{d}", .{self.value});
     }
 
     pub fn toString(self: Float) ![]const u8 {
@@ -635,20 +650,25 @@ pub const Object = struct {
         return self.hashmap.count();
     }
 
-    pub fn toJson(self: *Object, writer: Writer) anyerror!void {
-        try writer.writeAll("{");
+    pub fn toJson(self: *Object, writer: Writer, pretty: bool, level: usize) anyerror!void {
+        try writer.writeByte('{');
+        if (pretty) try writer.writeByte('\n');
         var it = self.hashmap.keyIterator();
         var index: i64 = 0;
         const size = self.hashmap.count();
         while (it.next()) |key| {
+            if (pretty) try writer.writeBytesNTimes(indent, level + 1);
             try std.json.encodeJsonString(key.*, .{}, writer);
             try writer.writeAll(":");
+            if (pretty) try writer.writeByte(' ');
             var value = self.hashmap.get(key.*).?;
-            try value.toJson(writer);
+            try value.toJson(writer, pretty, level + 1);
             index += 1;
             if (index < size) try writer.writeAll(",");
+            if (pretty) try writer.writeByte('\n');
         }
-        try writer.writeAll("}");
+        if (pretty) try writer.writeBytesNTimes(indent, level);
+        try writer.writeByte('}');
     }
 };
 
@@ -682,12 +702,16 @@ pub const Array = struct {
         try self.array.append(value);
     }
 
-    pub fn toJson(self: *Array, writer: Writer) anyerror!void {
+    pub fn toJson(self: *Array, writer: Writer, pretty: bool, level: usize) anyerror!void {
         try writer.writeAll("[");
+        if (pretty) try writer.writeByte('\n');
         for (self.array.items, 0..) |*item, index| {
-            try item.*.toJson(writer);
+            if (pretty) try writer.writeBytesNTimes(indent, level + 1);
+            try item.*.toJson(writer, pretty, level + 1);
             if (index < self.array.items.len - 1) try writer.writeAll(",");
+            if (pretty) try writer.writeByte('\n');
         }
+        if (pretty) try writer.writeBytesNTimes(indent, level);
         try writer.writeAll("]");
     }
 

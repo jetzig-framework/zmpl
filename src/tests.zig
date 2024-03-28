@@ -638,6 +638,34 @@ test "toJson with no data" {
     try std.testing.expectEqualStrings(json, "");
 }
 
+test "toPrettyJson" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const input =
+        \\{"foo":{"bar":["baz",10],"qux":{"quux":1.4123,"corge":true}}}
+    ;
+    try data.fromJson(input);
+
+    const json = try data.toPrettyJson();
+
+    try std.testing.expectEqualStrings(
+        \\{
+        \\  "foo": {
+        \\    "bar": [
+        \\      "baz",
+        \\      10
+        \\    ],
+        \\    "qux": {
+        \\      "quux": 1.4123,
+        \\      "corge": true
+        \\    }
+        \\  }
+        \\}
+        \\
+    , json);
+}
+
 test "fromJson simple" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
@@ -665,8 +693,28 @@ test "fromJson complex" {
     const json = try data.toJson();
 
     try std.testing.expectEqualStrings(json,
-        \\{"foo":{"bar":["baz",10],"qux":{"quux":1.4123e+00,"corge":true}}}
+        \\{"foo":{"bar":["baz",10],"qux":{"quux":1.4123,"corge":true}}}
     );
+}
+
+test "fromJson -> toPrettyJson <- fromJson" {
+    var data = zmpl.Data.init(allocator);
+    defer data.deinit();
+
+    const input =
+        \\{"foo":{"bar":["baz",10],"qux":{"quux":1.4123,"corge":true}}}
+    ;
+    try data.fromJson(input);
+
+    const pretty_json = try data.toPrettyJson();
+
+    var data2 = zmpl.Data.init(allocator);
+    defer data2.deinit();
+
+    try data2.fromJson(pretty_json);
+
+    const json = try data2.toJson();
+    try std.testing.expectEqualStrings(json, input);
 }
 
 test "reset" {
