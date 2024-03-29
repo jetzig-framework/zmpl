@@ -1,7 +1,6 @@
 const std = @import("std");
 const zmpl = @import("zmpl");
 const allocator = std.testing.allocator;
-const manifest = @import("zmpl.manifest"); // Generated at build time
 
 test "readme example" {
     var data = zmpl.Data.init(allocator);
@@ -17,7 +16,7 @@ test "readme example" {
     try body.put("user", user);
     try body.put("auth", auth);
 
-    if (manifest.find("example")) |template| {
+    if (zmpl.find("example")) |template| {
         const output = try template.render(&data);
         defer allocator.free(output);
 
@@ -58,7 +57,7 @@ test "template with DOS linebreaks" {
     try body.put("user", user);
     try body.put("auth", auth);
 
-    if (manifest.find("example_with_dos_linebreaks")) |template| {
+    if (zmpl.find("example_with_dos_linebreaks")) |template| {
         const output = try template.render(&data);
         defer allocator.free(output);
 
@@ -88,7 +87,7 @@ test "template with if statement" {
     var object = try data.object();
     try object.put("foo", data.string("bar"));
 
-    const template = manifest.find("example_with_if_statement");
+    const template = zmpl.find("example_with_if_statement");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -99,7 +98,7 @@ test "template with multi-line tag" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_multi_line_tag");
+    const template = zmpl.find("example_with_multi_line_tag");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -118,7 +117,7 @@ test "template with quotes" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_quotes");
+    const template = zmpl.find("example_with_quotes");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -134,7 +133,7 @@ test "template with nested data lookup" {
     try nested_object.put("bar", data.integer(10));
     try object.put("foo", nested_object);
 
-    const template = manifest.find("example_with_nested_data_lookup");
+    const template = zmpl.find("example_with_nested_data_lookup");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -150,7 +149,7 @@ test "template with array data lookup" {
     try nested_array.append(data.string("nested array value"));
     try object.put("foo", nested_array);
 
-    const template = manifest.find("example_with_array_data_lookup");
+    const template = zmpl.find("example_with_array_data_lookup");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -164,7 +163,7 @@ test "template with root array" {
     var array = try data.array();
     try array.append(data.string("root array value"));
 
-    const template = manifest.find("example_with_root_array");
+    const template = zmpl.find("example_with_root_array");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -184,7 +183,7 @@ test "template with deep nesting" {
     try nested_object.put("bar", double_nested_object);
     try object.put("foo", nested_object);
 
-    const template = manifest.find("example_with_deep_nesting");
+    const template = zmpl.find("example_with_deep_nesting");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -204,7 +203,7 @@ test "template with toJson call" {
     try nested_object.put("bar", double_nested_object);
     try object.put("foo", nested_object);
 
-    const template = manifest.find("example_with_toJson_call");
+    const template = zmpl.find("example_with_toJson_call");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -224,7 +223,7 @@ test "template with iteration" {
     try array.append(data.string("hooray"));
     try object.put("foo", array);
 
-    const template = manifest.find("example_with_iteration");
+    const template = zmpl.find("example_with_iteration");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -235,7 +234,7 @@ test "template with local variable reference" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_local_variable_reference");
+    const template = zmpl.find("example_with_local_variable_reference");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -246,7 +245,7 @@ test "template with string literal" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_string_literal");
+    const template = zmpl.find("example_with_string_literal");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -262,7 +261,7 @@ test "template with Zig literal" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_zig_literal");
+    const template = zmpl.find("example_with_zig_literal");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -279,7 +278,7 @@ test "template with complex content" {
     try array.append(data.string("howdy"));
     try array.append(data.string("hiya"));
     try array.append(data.string("good day"));
-    const template = manifest.find("example_with_complex_content");
+    const template = zmpl.find("example_with_complex_content");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -325,7 +324,7 @@ test "template with fragment tag" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_fragment_tag");
+    const template = zmpl.find("example_with_fragment_tag");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -341,7 +340,7 @@ test "template with multi-line fragment tag" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_multi_line_fragment_tag");
+    const template = zmpl.find("example_with_multi_line_fragment_tag");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -374,7 +373,7 @@ test "template with multi-line fragment tag and trailing content" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_multi_line_fragment_tag_and_trailing_content");
+    const template = zmpl.find("example_with_multi_line_fragment_tag_and_trailing_content");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -394,7 +393,7 @@ test "template with escaped curly braces" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_escaped_curly_braces");
+    const template = zmpl.find("example_with_escaped_curly_braces");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -410,7 +409,7 @@ test "template with ternary reference" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_ternary_reference");
+    const template = zmpl.find("example_with_ternary_reference");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -425,7 +424,7 @@ test "template with partial" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_partial");
+    const template = zmpl.find("example_with_partial");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -441,7 +440,7 @@ test "template with partial with arguments" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_partial_with_arguments");
+    const template = zmpl.find("example_with_partial_with_arguments");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -459,7 +458,7 @@ test "template with partial with argument type inference" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_partial_with_argument_type_inference");
+    const template = zmpl.find("example_with_partial_with_argument_type_inference");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -481,7 +480,7 @@ test "template with partial with arguments with commas and quotes" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_partial_with_arguments_with_commas_in_quotes");
+    const template = zmpl.find("example_with_partial_with_arguments_with_commas_in_quotes");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -499,7 +498,7 @@ test "template with partial with arguments with escaped quotes" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_partial_with_arguments_with_escaped_quotes");
+    const template = zmpl.find("example_with_partial_with_arguments_with_escaped_quotes");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -517,7 +516,7 @@ test "template with partial with no terminating linebreak" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_with_partial_with_no_terminating_linebreak");
+    const template = zmpl.find("example_with_partial_with_no_terminating_linebreak");
     const output = try template.?.render(&data);
     defer allocator.free(output);
 
@@ -539,7 +538,7 @@ test "template with partial with no terminating linebreak" {
 //     try data.addConst("current_view", data.string("iguanas"));
 //     try data.addConst("current_action", data.string("index"));
 //
-//     const template = manifest.find("example_with_consts");
+//     const template = zmpl.find("example_with_consts");
 //     const output = try template.?.render(&data);
 //     defer allocator.free(output);
 //
@@ -555,8 +554,8 @@ test "template with layout" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_for_layout");
-    const layout = manifest.find("layout");
+    const template = zmpl.find("example_for_layout");
+    const layout = zmpl.find("layout");
     const output = try template.?.renderWithLayout(layout.?, &data);
     defer allocator.free(output);
 
@@ -575,8 +574,8 @@ test "template with partial with layout" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const template = manifest.find("example_for_layout_with_partial");
-    const layout = manifest.find("layout");
+    const template = zmpl.find("example_for_layout_with_partial");
+    const layout = zmpl.find("layout");
     const output = try template.?.renderWithLayout(layout.?, &data);
     defer allocator.free(output);
 
@@ -599,7 +598,7 @@ test "layout direct render" {
     var data = zmpl.Data.init(allocator);
     defer data.deinit();
 
-    const layout = manifest.find("layout");
+    const layout = zmpl.find("layout");
     const output = try layout.?.render(&data);
     defer allocator.free(output);
 

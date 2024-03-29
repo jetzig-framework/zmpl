@@ -33,7 +33,9 @@
 /// data tree (for Zmpl templates, use the `{.nested_object.key}` syntax to do this
 /// automatically.
 const std = @import("std");
-const manifest = @import("zmpl.manifest");
+const manifest = @import("zmpl.manifest").__Manifest;
+const zmpl = @import("../zmpl.zig");
+const util = @import("../manifest/util.zig");
 
 /// Output stream for writing values into a rendered template.
 pub const Writer = std.ArrayList(u8).Writer;
@@ -45,8 +47,16 @@ pub const RenderFn = *const fn (*Self) anyerror![]const u8;
 pub const LayoutContent = struct {
     data: []const u8,
 
+    // v1
     pub fn toString(self: *const LayoutContent) ![]const u8 {
         return self.data;
+    }
+
+    // v2
+    pub fn format(self: LayoutContent, actual_fmt: []const u8, options: anytype, writer: anytype) !void {
+        _ = options;
+        _ = actual_fmt;
+        try writer.writeAll(self.data);
     }
 };
 
@@ -62,6 +72,7 @@ partial: bool = false,
 content: LayoutContent = .{ .data = "" },
 partial_data: ?*Object = null,
 template_decls: std.StringHashMap(*Value),
+slots: ?[]const String = null,
 
 const indent = "  ";
 
@@ -86,12 +97,15 @@ pub fn deinit(self: *Self) void {
 }
 
 /// Render a partial template. Do not invoke directly, use `{^partial_name}` syntax instead.
-pub fn renderPartial(self: *Self, name: []const u8, partial_data: *Object) !void {
-    if (manifest.find(name)) |template| {
+/// TODO: v1 compat. - v2 renders partial functions directly.
+pub fn renderPartial(self: *Self, name: []const u8, partial_data: *Object, slots: []const String) !void {
+    if (zmpl.find(name)) |template| {
         self.partial = true;
         self.partial_data = partial_data;
+        self.slots = slots;
         defer self.partial = false;
         defer self.partial_data = null;
+        defer self.slots = null;
         // Partials return an empty string as they share the same writer as parent template.
         _ = try template.render(self);
     } else {
@@ -111,6 +125,19 @@ pub fn chompOutputBuffer(self: *Self) void {
     }
 }
 
+/// Convenience wrapper for `util.strip` to be used by compiled templates.
+pub fn strip(self: *Self, input: []const u8) []const u8 {
+    _ = self;
+    return util.strip(input);
+}
+
+/// Convenience wrapper for `util.chomp` to be used by compiled templates.
+pub fn chomp(self: *Self, input: []const u8) []const u8 {
+    _ = self;
+    return util.chomp(input);
+}
+
+/// Evaluate equality of two Data trees, recursively comparing all values.
 pub fn eql(self: *const Self, other: *const Self) bool {
     if (self.value != null and other.value != null) {
         return self.value.?.eql(other.value.?);
@@ -167,26 +194,136 @@ pub fn getValueString(self: Self, key: []const u8) ![]const u8 {
                 return try v.toString();
             },
         }
-    } else return "";
+    } else return switch (manifest.version) {
+        .v1 => "",
+        .v2 => blk: {
+            std.debug.print("[zmpl] Unknown data reference: `{s}`\n", .{key});
+            break :blk error.ZmplUnknownDataReferenceError;
+        },
+    };
+}
+
+const Item = struct {
+    key: []const u8,
+    value: *Value,
+};
+
+const IteratorSelector = enum { array, object };
+
+pub fn items(self: *Self, comptime selector: IteratorSelector) []switch (selector) {
+    .array => *Value,
+    .object => Item,
+} {
+    const value = self.value orelse return &.{};
+    return value.items(selector);
+}
+
+/// Attempt a given value to a string. If `.toString()` is implemented (i.e. likely a `Value`),
+/// call that, otherwise try to use an appropriate formatter.
+pub fn coerceString(self: *Self, value: anytype) ![]const u8 {
+    const Formatter = enum {
+        default,
+        optional_default,
+        string,
+        optional_string,
+        float,
+        zmpl,
+        zmpl_union,
+        none,
+    };
+
+    const formatter: Formatter = switch (@typeInfo(@TypeOf(value))) {
+        .Bool => .default,
+        .Int => .default,
+        .Float => .float,
+        .Struct => switch (@TypeOf(value)) {
+            Value, String, Integer, Float, Boolean, NullType => .zmpl,
+            inline else => blk: {
+                if (@hasDecl(@TypeOf(value), "format")) {
+                    break :blk .default;
+                } else {
+                    std.debug.print("Struct does not implement `format()`: {}\n", .{@TypeOf(value)});
+                    return error.ZmplSyntaxError;
+                }
+            },
+        },
+        .ComptimeFloat => .float,
+        .ComptimeInt => .default,
+        .Null => .none,
+        .Optional => if (@TypeOf(value) == ?[]const u8) .optional_string else .optional_default,
+        .Union => |Union| blk: {
+            break :blk switch (Union) {
+                inline else => |capture| if (@hasField(@TypeOf(capture), "toString")) .zmpl_union else .default,
+            };
+        },
+        .Pointer => |pointer| switch (pointer.child) {
+            Value, String, Integer, Float, Boolean, NullType => .zmpl,
+            u8 => |child| blk: {
+                // Logic borrowed from old implementation of std.meta.isZigString
+                if (!pointer.is_volatile and
+                    !pointer.is_allowzero and
+                    pointer.size == .Slice) break :blk .string;
+                if (!pointer.is_volatile and
+                    !pointer.is_allowzero and pointer.size == .One and
+                    child == .Array and
+                    &child.Array.child == u8) break :blk .string;
+                std.debug.print("Unsupported type: {}\n", .{pointer});
+                return error.ZmplSyntaxError;
+            },
+            type => blk: {
+                if (@hasDecl(@TypeOf(value.*), "format")) {
+                    break :blk .default;
+                } else {
+                    std.debug.print("Struct does not implement `format()`: {}\n", .{@TypeOf(value.*)});
+                    return error.ZmplSyntaxError;
+                }
+            },
+            inline else => {
+                std.debug.print("Unsupported type: {}\n", .{pointer});
+                return error.ZmplSyntaxError;
+            },
+        },
+
+        // This must be consistent with `std.builtin.Type` - we want to see an error if a new
+        // field is added so we specifically do not want an `else` clause here:
+        .Type,
+        .Void,
+        .NoReturn,
+        .Array,
+        .Undefined,
+        .ErrorUnion,
+        .ErrorSet,
+        .Enum,
+        .Fn,
+        .Opaque,
+        .Frame,
+        .AnyFrame,
+        .Vector,
+        .EnumLiteral,
+        => |Type| {
+            std.debug.print("Unsupported type: {}\n", .{Type});
+            return error.ZmplSyntaxError;
+        },
+    };
+
+    const allocator = self.getAllocator();
+
+    return switch (formatter) {
+        .default => try std.fmt.allocPrint(allocator, "{}", .{value}),
+        .optional_default => try std.fmt.allocPrint(allocator, "{?}", .{value}),
+        .string => try std.fmt.allocPrint(allocator, "{s}", .{value}),
+        .optional_string => try std.fmt.allocPrint(allocator, "{?s}", .{value}),
+        .float => try std.fmt.allocPrint(allocator, "{d}", .{value}),
+        .zmpl => try value.toString(),
+        .zmpl_union => switch (value) {
+            inline else => |capture| try capture.toString(),
+        },
+        .none => "",
+    };
 }
 
 /// Add a const value. Must be called for **all** constants defined at build time before
-/// rendering a template. Constants can be defined by setting Zmpl's build option
-/// `zmpl_auto_build` to `false` and manually invoking template compilation:
-// ```zig
-// const ZmplBuild = @import("zmpl").ZmplBuild;
-// const ZmplTemplate = @import("zmpl").Template;
-// var zmpl_build = ZmplBuild.init(b, lib, template_path);
-// const TemplateConstants = struct {
-//     current_view: []const u8,
-//     current_action: []const u8,
-// };
-// const ZmplOptions = struct {
-//     pub const template_constants = TemplateConstants;
-// };
-// const manifest_module = try zmpl_build.compile(ZmplTemplate, ZmplOptions);
-// zmpl_module.addImport("zmpl.manifest", manifest_module);
-// ```
+/// rendering a template.
 pub fn addConst(self: *Self, name: []const u8, value: *Value) !void {
     try self.template_decls.put(name, value);
 }
@@ -203,7 +340,7 @@ pub fn getConst(self: *Self, T: type, name: []const u8) !T {
             else => @compileError("Unsupported constant type: " ++ @typeName(T)),
         };
     } else {
-        std.debug.print("Undefined constant: {s} - must call `Data.addConst(...)` before rendering.", .{name});
+        std.debug.print("[zmpl] Undefined constant: `{s}` - must call `Data.addConst(...)` before rendering.\n", .{name});
         return error.ZmplMissingConstant;
     }
 }
@@ -318,13 +455,18 @@ pub fn write(self: *Self, slice: []const u8) !void {
         try writer.writeAll(slice);
     } else {
         self.output_writer = self.output_buf.writer();
-        try (self.output_writer.?).writeAll(slice);
+        try (self.output_writer.?).writeAll(util.chomp(slice));
     }
 }
 
 /// Gets a value from the data tree, returns a `NullType` value (not `null`) if not found.
 pub fn get(self: *Self, key: []const u8) !*Value {
-    return (try self.getValue(key)) orelse self._null(); // XXX: Raise an error here ?
+    if (try self.getValue(key)) |value| {
+        return value;
+    } else return switch (manifest.version) {
+        .v1 => self._null(),
+        .v2 => error.ZmplUnknownDataReferenceError,
+    };
 }
 
 /// Formats a comptime value as a string, e.g.:
@@ -498,6 +640,35 @@ pub const Value = union(enum) {
             .object => unreachable, // TODO
             else => unreachable,
         }
+    }
+
+    pub fn items(self: *Value, comptime selector: IteratorSelector) []switch (selector) {
+        .array => *Value,
+        .object => Item,
+    } {
+        return switch (selector) {
+            .array => blk: {
+                switch (self.*) {
+                    .array => |capture| break :blk capture.array.items,
+                    else => return &.{},
+                }
+            },
+            .object => blk: {
+                switch (self.*) {
+                    .object => |capture| {
+                        var it = capture.hashmap.iterator();
+                        var items_array = std.ArrayList(Item).init(self.getAllocator());
+                        while (it.next()) |item| {
+                            items_array.append(
+                                .{ .key = item.key_ptr.*, .value = item.value_ptr.* },
+                            ) catch @panic("OOM");
+                        }
+                        break :blk items_array.items;
+                    },
+                    else => return &.{},
+                }
+            },
+        };
     }
 
     pub fn deinit(self: *Value) void {

@@ -1,13 +1,18 @@
 const std = @import("std");
 
 const zmpl = @import("../zmpl.zig");
+const util = @import("util.zig");
 
 const Self = @This();
 
 allocator: std.mem.Allocator,
 content: []const u8,
+name: []const u8,
+templates_path: []const u8,
 path: []const u8,
 buffer: std.ArrayList([]const u8),
+args: ?[]const u8 = null, // v2 compat.
+partial: bool = false, // v2 compat.
 
 const MarkupLine = struct {
     allocator: std.mem.Allocator,
@@ -146,12 +151,24 @@ const MarkupLine = struct {
         };
 
         const first_arg_token = std.mem.indexOfScalar(u8, self.reference_buffer.items, '(');
-        const partial_name = if (first_arg_token) |index|
+        const partial_path = if (first_arg_token) |index|
             self.reference_buffer.items[0..index]
         else
             self.reference_buffer.items;
 
-        std.mem.replaceScalar(u8, partial_name, '/', '_');
+        const partial_basename = std.fs.path.basenamePosix(partial_path);
+        const partial_dirname = std.fs.path.dirnamePosix(partial_path);
+        const partial_name = try std.mem.concat(
+            self.allocator,
+            u8,
+            &[_][]const u8{
+                if (partial_dirname) |dirname| dirname else "",
+                if (partial_dirname) |_| "/" else "",
+                "_",
+                partial_basename,
+            },
+        );
+        defer self.allocator.free(partial_name);
 
         var args_buf = std.ArrayList(u8).init(self.allocator);
         defer args_buf.deinit();
@@ -175,7 +192,7 @@ const MarkupLine = struct {
             \\    var partial_data = try zmpl.createObject();
             \\    defer partial_data.deinit();
             \\{s}
-            \\    try zmpl.renderPartial("_{s}", &partial_data.object);
+            \\    try zmpl.renderPartial("{s}", &partial_data.object, &.{{}});
             \\}}
         ;
         return try std.fmt.allocPrint(self.allocator, template, .{ args_buf.items, strip(partial_name) });
@@ -393,20 +410,33 @@ const MarkupLine = struct {
     }
 };
 
-pub fn init(allocator: std.mem.Allocator, path: []const u8, content: []const u8) Self {
+pub fn init(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    templates_path: []const u8,
+    path: []const u8,
+    content: []const u8,
+    template_map: std.StringHashMap([]const u8),
+) Self {
+    _ = template_map; // v2 compat.
     return .{
         .allocator = allocator,
         .path = path,
-        .content = normalizeInput(allocator, content),
+        .name = name,
+        .templates_path = templates_path,
+        .content = util.normalizeInput(allocator, content),
         .buffer = std.ArrayList([]const u8).init(allocator),
     };
 }
 
 pub fn identifier(self: *Self) ![]const u8 {
+    const path = try std.fs.path.relative(self.allocator, self.templates_path, self.path);
+    defer self.allocator.free(path);
+
     var segments = std.ArrayList([]const u8).init(self.allocator);
     defer segments.deinit();
 
-    var it = std.mem.splitScalar(u8, self.path, std.fs.path.sep);
+    var it = std.mem.splitScalar(u8, path, std.fs.path.sep);
     while (it.next()) |segment| {
         try segments.append(segment);
     }
@@ -474,15 +504,12 @@ pub fn compile(self: *Self, comptime options: type) ![]const u8 {
 
     const header = try std.fmt.allocPrint(
         self.allocator,
-        \\const std = @import("std");
-        \\const __zmpl = @import("zmpl");
-        \\
-        \\pub fn render(zmpl: *__zmpl.Data) anyerror![]const u8 {{
+        \\pub fn {s}_render(zmpl: *__zmpl.Data) anyerror![]const u8 {{
         \\{s}
         \\    const allocator = zmpl.getAllocator();
         \\    zmpl.noop(std.mem.Allocator, allocator);
     ,
-        .{decls_buf.items},
+        .{ self.name, decls_buf.items },
     );
     defer self.allocator.free(header);
     try self.buffer.append(header);
@@ -651,22 +678,25 @@ pub fn compile(self: *Self, comptime options: type) ![]const u8 {
     );
     try self.buffer.append("}");
 
-    try self.buffer.append(
+    try self.buffer.append(try std.fmt.allocPrint(
+        self.allocator,
         \\
-        \\pub fn renderWithLayout(
-        \\    layout: __zmpl.manifest.Template,
+        \\fn {0s}_renderWithLayout(
+        \\    layout: __Manifest.Template,
         \\    zmpl: *__zmpl.Data,
-        \\) anyerror![]const u8 {
-        \\    const inner_content = try render(zmpl);
+        \\) anyerror![]const u8 {{
+        \\    const inner_content = try {0s}_render(zmpl);
         \\    defer zmpl._allocator.free(inner_content);
         \\    zmpl.output_buf.clearAndFree();
-        \\    zmpl.content = .{ .data = __zmpl.chomp(inner_content) };
+        \\    zmpl.content = .{{ .data = __zmpl.chomp(inner_content) }};
         \\    const content = try layout.render(zmpl);
         \\    zmpl.output_buf.clearAndFree();
         \\    return content;
-        \\}
+        \\}}
         \\
-    );
+    ,
+        .{self.name},
+    ));
 
     return try std.mem.join(self.allocator, "\n", self.buffer.items);
 }
@@ -805,16 +835,6 @@ fn clearDanglingWhitespace(buf: *std.ArrayList(u8)) void {
 
         for (capture..buf.items.len) |_| _ = buf.pop();
     }
-}
-
-// Normalize input by swapping DOS linebreaks for Unix linebreaks and ensuring that the input is
-// closed by a `\n`.
-fn normalizeInput(allocator: std.mem.Allocator, input: []const u8) []const u8 {
-    const normalized = std.mem.replaceOwned(u8, allocator, input, "\r\n", "\n") catch @panic("OOM");
-    if (std.mem.endsWith(u8, normalized, "\n")) return normalized;
-
-    defer allocator.free(normalized);
-    return std.mem.concat(allocator, u8, &[_][]const u8{ input, "\n" }) catch @panic("OOM");
 }
 
 fn strip(input: []const u8) []const u8 {

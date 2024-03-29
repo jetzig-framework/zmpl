@@ -2,7 +2,12 @@
     .name = "zmpl",
     .version = "0.0.1",
     .minimum_zig_version = "0.11.0",
-    .dependencies = .{},
+    .dependencies = .{
+        .zmd = .{
+            .url = "https://github.com/jetzig-framework/zmd/archive/8f2c0481af0d66bea4060fec54a21fae1693f6e9.tar.gz",
+            .hash = "1220cecbf45561dc26c5e2960bb60200ba7483004ca608c1db05d2cc7f741eb79b83",
+        },
+    },
 
     .paths = .{
         "build.zig",

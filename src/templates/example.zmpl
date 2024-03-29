@@ -1,23 +1,31 @@
-if (std.mem.eql(u8, "zmpl is simple", "zmpl" ++ " is " ++ "simple")) {
-  // Add comments using Zig syntax.
-  <div>Email: {.user.email}</div>
-  <div>Token: {.auth.token}</div>
+<!-- Zig mode for template logic -->
+@zig {
+  if (std.mem.eql(u8, "zmpl is simple", "zmpl" ++ " is " ++ "simple")) {
+    <span>Zmpl is simple!</span>
+  }
+}
 
-  // Render a partial named `users/_mailto.zmpl`:
-  <div>{^users/mailto}</div>
+<!-- Easy data lookup syntax -->
+<div>Email: {{.user.email}}</div>
+<div>Token: {{.auth.token}}</div>
 
-  // Pass arguments to a partial:
-  <div>{^users/mailto(subject: zmpl.string("Welcome to Jetzig!"))}</div>
+<!-- Partials -->
+@partial example_partial
 
-  // Pass arguments to a partial with type inference:
-  <div>{^users/mailto(subject: "Welcome to Jetzig!")}</div>
+<!-- Partials with positional args -->
+@partial mailto(.user.email, "Welcome to Jetzig!")
 
-  <>Use fragment tags when you want to output content without a specific HTML tag</>
+<!-- Partials with keyword args --->
+@partial mailto(email: .user.email, subject: "Welcome to Jetzig!")
 
-  <#>
-  Use multi-line raw text tags to bypass Zmpl syntax.
-  <code>Some example code with curly braces {} etc.</code>
-  </#>
+<!-- Partials with slots --->
+@partial mailto(email: .user.email, subject: "Welcome to Jetzig!") {
+  <a href="https://example.com/auth/{{.auth.token}}">Sign in</a>
+  <a href="https://example.com/unsubscribe/{{.auth.token}}">Unsubscribe</a>
+}
 
-  <span>Escape curly braces {{like this}}</span>
+@markdown {
+  # Built-in markdown support
+
+  * [jetzig.dev](https://www.jetzig.dev/)
 }
