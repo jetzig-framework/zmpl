@@ -21,9 +21,11 @@ pub fn generateVariableName(buf: *[32]u8) void {
     const first_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const any_chars = "0123456789" ++ first_chars;
 
-    buf[0] = first_chars[std.crypto.random.intRangeAtMost(u8, 0, first_chars.len - 1)];
+    for (0..3) |index| {
+        buf[index] = first_chars[std.crypto.random.intRangeAtMost(u8, 0, first_chars.len - 1)];
+    }
 
-    for (1..32) |index| {
+    for (3..32) |index| {
         buf[index] = any_chars[std.crypto.random.intRangeAtMost(u8, 0, any_chars.len - 1)];
     }
 }

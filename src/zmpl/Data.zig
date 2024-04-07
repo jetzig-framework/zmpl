@@ -270,6 +270,7 @@ pub fn coerceString(self: *Self, value: anytype) ![]const u8 {
                 std.debug.print("Unsupported type: {}\n", .{pointer});
                 return error.ZmplSyntaxError;
             },
+            []u8 => .string,
             type => blk: {
                 if (@hasDecl(@TypeOf(value.*), "format")) {
                     break :blk .default;
@@ -278,7 +279,12 @@ pub fn coerceString(self: *Self, value: anytype) ![]const u8 {
                     return error.ZmplSyntaxError;
                 }
             },
-            inline else => {
+            inline else => blk: {
+                const child = @typeInfo(pointer.child);
+                if (child == .Array) {
+                    const arr = &child.Array;
+                    if (arr.child == u8) break :blk .string;
+                }
                 std.debug.print("Unsupported type: {}\n", .{pointer});
                 return error.ZmplSyntaxError;
             },

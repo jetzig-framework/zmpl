@@ -71,7 +71,10 @@ fn renderZig(self: Node, content: []const u8) ![]const u8 {
         const mode = getHtmlLineMode(line);
         switch (mode) {
             .html => try buf.appendSlice(try self.renderHtml(line, .{})),
-            .zig => try buf.appendSlice(line),
+            .zig => {
+                try buf.appendSlice(line);
+                try buf.append('\n');
+            },
         }
     }
 
