@@ -35,7 +35,7 @@
 const std = @import("std");
 const manifest = @import("zmpl.manifest").__Manifest;
 const zmpl = @import("../zmpl.zig");
-const util = @import("../manifest/util.zig");
+const util = @import("util.zig");
 
 /// Output stream for writing values into a rendered template.
 pub const Writer = std.ArrayList(u8).Writer;
