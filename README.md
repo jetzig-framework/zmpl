@@ -18,40 +18,90 @@ Syntax highlighters are currently community-sourced. Please get in touch if you 
 
 See [src/templates](src/templates) for more examples.
 
-```html
-if (std.mem.eql(u8, "zmpl is simple", "zmpl" ++ " is " ++ "simple")) {
-  // Add comments using Zig syntax.
-  <div>Email: {.user.email}</div>
-  <div>Token: {.auth.token}</div>
+### Template
 
-  // Render a partial named `users/_mailto.zmpl`:
-  <div>{^users/mailto}</div>
+```zig
+<!-- Zig mode for template logic -->
+@zig {
+  if (std.mem.eql(u8, "zmpl is simple", "zmpl" ++ " is " ++ "simple")) {
+    <span>Zmpl is simple!</span>
+  }
+}
 
-  // Pass arguments to a partial:
-  <div>{^users/mailto(subject: zmpl.string("Welcome to Jetzig!"))}</div>
+<!-- Easy data lookup syntax -->
+<div>Email: {{.user.email}}</div>
+<div>Token: {{.auth.token}}</div>
 
-  // Pass arguments to a partial with type inference:
-  <div>{^users/mailto(subject: "Welcome to Jetzig!")}</div>
+<!-- Partials -->
+@partial example_partial
 
-  <>Use fragment tags when you want to output content without a specific HTML tag</>
+<!-- Partials with positional args -->
+@partial mailto(.user.email, "Welcome to Jetzig!")
 
-  <#>
-  Use multi-line raw text tags to bypass Zmpl syntax.
-  <code>Some example code with curly braces {} etc.</code>
-  </#>
+<!-- Partials with keyword args --->
+@partial mailto(email: .user.email, subject: "Welcome to Jetzig!")
 
-  <span>Escape curly braces {{like this}}</span>
+<!-- Partials with slots --->
+@partial mailto(email: .user.email, subject: "Welcome to Jetzig!") {
+  <a href="https://example.com/auth/{{.auth.token}}">Sign in</a>
+  <a href="https://example.com/unsubscribe/{{.auth.token}}">Unsubscribe</a>
+}
+
+@markdown {
+  # Built-in markdown support
+
+  * [jetzig.dev](https://www.jetzig.dev/)
 }
 ```
+
+### `mailto` Partial
+
+```zig
+@args email: *ZmplValue, subject: []const u8
+<a href="mailto:{{email}}?subject={{subject}}">{{email}}</a>
+
+@zig {
+    for (slots, 0..) |slot, slot_index| {
+        <div class="slot-{{slot_index}}">{{slot}}</div>
+    }
+}
+```
+
+### Output HTML
+
+```html
+<!-- Zig mode for template logic -->
+    <span>Zmpl is simple!</span>
+
+<!-- Easy data lookup syntax -->
+<div>Email: user@example.com</div>
+<div>Token: abc123-456-def</div>
+
+<!-- Partials -->
+<span>An example partial</span>
+<!-- Partials with positional args -->
+<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+<!-- Partials with keyword args --->
+<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+<!-- Partials with slots --->
+<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>
+        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
+
+<div><h1>Built-in markdown support</h1>
+<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
+```
+
+### Example Usage
+
+Default template path is `src/templates`. Use `-Dzmpl_templates_path=...` to set an alternative (relative or absolute) path.
 
 ```zig
 const std = @import("std");
 const zmpl = @import("zmpl");
-const allocator = std.testing.allocator;
-const manifest = @import("zmpl.manifest"); // Generated at build time
 
 test "readme example" {
-    var data = zmpl.Data.init(allocator);
+    var data = zmpl.Data.init(std.testing.allocator);
     defer data.deinit();
 
     var body = try data.object();
@@ -64,24 +114,37 @@ test "readme example" {
     try body.put("user", user);
     try body.put("auth", auth);
 
-    if (manifest.find("example")) |template| {
+    if (zmpl.find("example")) |template| {
         const output = try template.render(&data);
-        defer allocator.free(output);
+        defer std.testing.allocator.free(output);
 
         try std.testing.expectEqualStrings(
-            \\  <div>Email: user@example.com</div>
-            \\  <div>Token: abc123-456-def</div>
+            \\<!-- Zig mode for template logic -->
             \\
-            \\  <div><a href="mailto:user@example.com?subject=">user@example.com</a></div>
+            \\    <span>Zmpl is simple!</span>
             \\
-            \\  <div><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a></div>
+            \\<!-- Easy data lookup syntax -->
+            \\<div>Email: user@example.com</div>
+            \\<div>Token: abc123-456-def</div>
             \\
-            \\  Use fragment tags when you want to output content without a specific HTML tag
+            \\<!-- Partials -->
             \\
-            \\  Use multi-line raw text tags to bypass Zmpl syntax.
-            \\  <code>Some example code with curly braces {} etc.</code>
+            \\<span>An example partial</span>
             \\
-            \\  <span>Escape curly braces {like this}</span>
+            \\<!-- Partials with positional args -->
+            \\
+            \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\
+            \\<!-- Partials with keyword args --->
+            \\
+            \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\
+            \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\
+            \\        <div><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>
+            \\
+            \\<div><h1>Built-in markdown support</h1>
+            \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
             \\
         , output);
     } else {
