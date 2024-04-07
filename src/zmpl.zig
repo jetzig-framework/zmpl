@@ -14,6 +14,8 @@ pub const InitOptions = struct {
     templates_path: []const u8 = "src/templates",
 };
 
+pub const util = @import("zmpl/util.zig");
+
 pub const find = manifest.find;
 
 pub fn chomp(input: []const u8) []const u8 {
