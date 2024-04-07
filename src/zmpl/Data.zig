@@ -441,8 +441,7 @@ pub fn boolean(self: *Self, value: bool) *Value {
 }
 
 /// Creates a new `Value` representing a `null` value. Public, but for internal use only.
-pub fn _null(self: *Self) *Value {
-    const allocator = self.getAllocator();
+pub fn _null(allocator: std.mem.Allocator) *Value {
     const val = allocator.create(Value) catch @panic("Out of memory");
     val.* = .{ .Null = NullType{} };
     return val;
@@ -464,7 +463,7 @@ pub fn get(self: *Self, key: []const u8) !*Value {
     if (try self.getValue(key)) |value| {
         return value;
     } else return switch (manifest.version) {
-        .v1 => self._null(),
+        .v1 => _null(self.getAllocator()),
         .v2 => error.ZmplUnknownDataReferenceError,
     };
 }
@@ -535,7 +534,7 @@ fn parseJsonValue(self: *Self, value: std.json.Value) !*Value {
         .integer => |val| self.integer(val),
         .float => |val| self.float(val),
         .bool => |val| self.boolean(val),
-        .null => self._null(),
+        .null => _null(self.getAllocator()),
     };
 }
 
@@ -593,17 +592,17 @@ pub const Value = union(enum) {
     }
 
     /// Puts a `Value` into an `Object`.
-    pub fn put(self: *Value, key: []const u8, value: *Value) !void {
+    pub fn put(self: *Value, key: []const u8, value: ?*Value) !void {
         switch (self.*) {
-            .object => |*capture| try capture.put(key, value),
+            .object => |*capture| try capture.put(key, value orelse _null(capture.allocator)),
             inline else => unreachable,
         }
     }
 
     /// Appends a `Value` to an `Array`.
-    pub fn append(self: *Value, value: *Value) !void {
+    pub fn append(self: *Value, value: ?*Value) !void {
         switch (self.*) {
-            .array => |*capture| try capture.append(value),
+            .array => |*capture| try capture.append(value orelse _null(capture.allocator)),
             inline else => unreachable,
         }
     }
@@ -797,13 +796,14 @@ pub const Object = struct {
         return true;
     }
 
-    pub fn put(self: *Object, key: []const u8, value: *Value) !void {
+    pub fn put(self: *Object, key: []const u8, value: ?*Value) !void {
         const key_dupe = try self.allocator.dupe(u8, key);
-        switch (value.*) {
-            .object, .array => try self.hashmap.put(key_dupe, value),
-            inline else => {
-                try self.hashmap.put(key_dupe, value);
-            },
+        if (value) |capture| {
+            switch (capture.*) {
+                inline else => try self.hashmap.put(key_dupe, capture),
+            }
+        } else {
+            try self.hashmap.put(key_dupe, _null(self.allocator));
         }
     }
 
@@ -869,8 +869,8 @@ pub const Array = struct {
         return if (self.array.items.len > index) self.array.items[index] else null;
     }
 
-    pub fn append(self: *Array, value: *Value) !void {
-        try self.array.append(value);
+    pub fn append(self: *Array, value: ?*Value) !void {
+        try self.array.append(value orelse _null(self.allocator));
     }
 
     pub fn toJson(self: *Array, writer: Writer, pretty: bool, level: usize) anyerror!void {
