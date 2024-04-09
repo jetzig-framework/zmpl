@@ -24,6 +24,9 @@
       <div>{{.user.email}}</div>
     }
   }
+}
+
+@html {
   @partial blah
 }
 

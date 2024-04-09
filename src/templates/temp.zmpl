@@ -1,4 +1,4 @@
-@zig {
+@zig EOF
   const foo = 100;
   const bar = (try zmpl.getValue("test")).?;
   const MyThing = struct {
@@ -21,4 +21,4 @@
     <span>{{foo}}</span>
     <span>{{.user.email}}</span>
   }
-}
+EOF
