@@ -33,12 +33,25 @@ template_map: std.StringHashMap([]const u8),
 /// ```
 pub const Token = struct {
     mode: Mode,
+    delimiter: Delimiter,
     start: usize,
     end: usize,
     mode_line: []const u8,
     index: usize,
     depth: usize,
     args: ?[]const u8 = null,
+
+    pub fn startOfContent(self: Token) usize {
+        return self.start + self.mode_line.len;
+    }
+
+    pub fn endOfContent(self: Token) usize {
+        return self.end - switch (self.delimiter) {
+            .eof, .none => 0,
+            .string => |string| string.len,
+            .brace => 1,
+        };
+    }
 };
 
 /// Initialize a new template.
@@ -94,11 +107,34 @@ pub fn identifier(self: *ModalTemplate) ![]const u8 {
 }
 
 const Mode = enum { html, zig, partial, args, markdown };
+const Delimiter = union(enum) {
+    string: []const u8,
+    eof: void,
+    none: void,
+    brace: void,
+};
+
+const DelimitedMode = struct {
+    mode: Mode,
+    delimiter: Delimiter,
+    delimiter_string: ?[]const u8 = null,
+};
+
 const default_mode: Mode = .html;
 const Context = struct {
     mode: Mode,
+    delimiter: Delimiter,
     start: usize,
     depth: isize = 1,
+    mode_line: ?[]const u8 = null,
+
+    pub fn delimiterLen(self: Context) usize {
+        return switch (self.delimiter) {
+            .string => |string| string.len,
+            .brace => 1,
+            .eof, .none => 0,
+        };
+    }
 };
 
 // Tokenize template into (possibly nested) sections, where each section is a mode declaration
@@ -108,7 +144,7 @@ fn tokenize(self: *ModalTemplate) !void {
 
     var stack = std.ArrayList(Context).init(self.allocator);
     defer stack.deinit();
-    try stack.append(.{ .mode = default_mode, .depth = 1, .start = 0 });
+    try stack.append(.{ .mode = default_mode, .depth = 1, .start = 0, .delimiter = .eof });
 
     var line_it = std.mem.splitScalar(u8, self.input, '\n');
     var cursor: usize = 0;
@@ -118,21 +154,20 @@ fn tokenize(self: *ModalTemplate) !void {
     while (line_it.next()) |line| : (cursor += line.len + 1) {
         line_index += 1;
 
-        if (getMode(line)) |mode| {
-            const modeline_brace_depth = getBraceDepth(.zig, line);
-            if (modeline_brace_depth == 0) {
-                try self.appendToken(.{
-                    .mode = mode,
-                    .start = cursor,
-                    .depth = 1,
-                }, cursor + line.len, depth + 1);
+        if (getDelimitedMode(line)) |delimited_mode| {
+            const context: Context = .{
+                .mode = delimited_mode.mode,
+                .delimiter = delimited_mode.delimiter,
+                .start = cursor,
+                .depth = 1,
+                .mode_line = line,
+            };
+
+            if (context.delimiter == .none) {
+                try self.appendToken(context, cursor + line.len, depth + 1);
             } else {
-                try stack.append(.{
-                    .mode = mode,
-                    .start = cursor,
-                    .depth = 1,
-                });
-                depth += @intCast(modeline_brace_depth);
+                try stack.append(context);
+                depth += 1;
             }
             continue;
         }
@@ -141,7 +176,17 @@ fn tokenize(self: *ModalTemplate) !void {
 
         if (stack.items.len > 0 and stack.items[stack.items.len - 1].depth == 0) {
             const context = stack.pop();
-            try self.appendToken(context, cursor + line.len, depth);
+            const end = switch (context.delimiter) {
+                .none => unreachable, // Handled above - we don't push a context for .none
+                .eof => cursor + line.len,
+                // We want a crash here if delimiter index not found as it means `resolveNesting`
+                // is broken.
+                .brace => cursor + std.mem.indexOfScalar(u8, line, '}').?,
+                .string => |string| cursor + std.mem.indexOf(u8, line, string).? + string.len - 1,
+            };
+
+            try self.appendToken(context, end, depth);
+
             if (depth == 0) {
                 self.debugError(line, line_index);
                 return error.ZmplSyntaxError;
@@ -151,6 +196,10 @@ fn tokenize(self: *ModalTemplate) !void {
         }
     }
 
+    if (depth > 0) {
+        std.debug.print("Error resolving block delimiters in `{s}`\n", .{self.path});
+        return error.ZmplSyntaxError;
+    }
     try self.appendRootToken();
 
     // for (self.tokens.items) |token| self.debugToken(token, false);
@@ -161,32 +210,36 @@ fn tokenize(self: *ModalTemplate) !void {
 // Append a new token. Note that tokens are not ordered in any meaningful way - use
 // `TokensIterator` to iterate through tokens in an appropriate order.
 fn appendToken(self: *ModalTemplate, context: Context, end: usize, depth: usize) !void {
-    const mode_end = std.mem.indexOfScalar(u8, self.input[context.start..end], '\n') orelse end - context.start + 1;
-    const mode_line = self.input[context.start .. context.start + mode_end - 1];
-
-    var args = std.mem.trim(u8, mode_line, &std.ascii.whitespace);
-    args = std.mem.trimRight(u8, args, "{");
-    const args_start = @tagName(context.mode).len + 1;
-    args = if (args_start <= args.len)
-        std.mem.trim(u8, args[args_start..], &std.ascii.whitespace)
-    else
-        "";
-
-    try self.tokens.append(.{
-        .mode = context.mode,
-        .start = context.start + mode_end,
-        .end = end,
-        .mode_line = mode_line,
-        .args = if (args.len > 0) args else null,
-        .index = self.tokens.items.len,
-        .depth = depth,
-    });
+    if (context.mode_line) |mode_line| {
+        var args = std.mem.trim(u8, mode_line, &std.ascii.whitespace);
+        args = switch (context.delimiter) {
+            .none, .eof => args,
+            .string => |delimiter_string| std.mem.trimRight(u8, args, delimiter_string),
+            .brace => std.mem.trimRight(u8, args, "}"),
+        };
+        const args_start = @tagName(context.mode).len + 1;
+        args = if (args_start <= args.len)
+            std.mem.trim(u8, args[args_start..], &std.ascii.whitespace)
+        else
+            "";
+        try self.tokens.append(.{
+            .mode = context.mode,
+            .start = context.start,
+            .delimiter = context.delimiter,
+            .end = end,
+            .mode_line = mode_line,
+            .args = if (args.len > 0) args else null,
+            .index = self.tokens.items.len,
+            .depth = depth,
+        });
+    } else unreachable;
 }
 
 // Append a root token with the default mode that covers the entire input.
 fn appendRootToken(self: *ModalTemplate) !void {
     try self.tokens.append(.{
         .mode = default_mode,
+        .delimiter = .eof,
         .start = 0,
         .end = self.input.len,
         .mode_line = "",
@@ -215,8 +268,8 @@ fn parseChildren(self: *ModalTemplate, node: *Node) !void {
     var tokens_it = self.tokensIterator(node.token);
     while (tokens_it.next()) |token| {
         const child_node = try self.createNode(token);
-        try self.parseChildren(child_node);
         try node.children.append(child_node);
+        try self.parseChildren(child_node);
     }
 }
 
@@ -261,18 +314,22 @@ const TokensIterator = struct {
         var current_index: ?usize = null;
 
         for (self.tokens) |token| {
+            // Do not yield tokens that are not immediate children
             if (token.depth != self.root_token.depth + 1) continue;
+            // Do not yield the last-matched token or the root token
             if (token.index == self.index or token.index == self.root_token.index) continue;
-            if (token.start < self.root_token.start or token.end >= self.root_token.end) continue;
-            if (token.start < self.tokens[self.index].start) {
-                continue;
-            }
+            // Do not yield tokens that exist outside the bounds of the root token
+            if (token.start < self.root_token.start or token.end > self.root_token.end) continue;
+            // Do not yield tokens that begin before the last-matched token
+            if (token.start < self.tokens[self.index].start) continue;
 
+            // Set an initial value once all criteria are met
             if (current_index == null) {
                 current_index = token.index;
                 continue;
             }
 
+            // Match the top-most token in the input (updates on each iteration)
             if (token.start < self.tokens[current_index.?].start) {
                 current_index = token.index;
             }
@@ -292,7 +349,7 @@ fn tokensIterator(self: ModalTemplate, token: ?Token) TokensIterator {
 
 // Given an input line, identify a mode sigil (`@`) and, if present, return the specified mode.
 // Since `@` is also used in Zig code, we do not fail if an unrecognized mode is specified.
-fn getMode(line: []const u8) ?Mode {
+fn getDelimitedMode(line: []const u8) ?DelimitedMode {
     const stripped = std.mem.trim(u8, line, &std.ascii.whitespace);
 
     if (!std.mem.startsWith(u8, stripped, "@") or stripped.len < 2) return null;
@@ -302,10 +359,77 @@ fn getMode(line: []const u8) ?Mode {
     const first_word = stripped[1..end_of_first_word.?];
 
     inline for (std.meta.fields(Mode)) |field| {
-        if (std.mem.eql(u8, field.name, first_word)) return @enumFromInt(field.value);
+        if (std.mem.eql(u8, field.name, first_word)) {
+            const mode: Mode = @enumFromInt(field.value);
+            const maybe_delimiter: ?Delimiter = switch (mode) {
+                .args => .none,
+                .html,
+                .zig,
+                .partial,
+                .markdown,
+                => getBlockDelimiter(mode, first_word, stripped[end_of_first_word.?..]),
+            };
+            if (maybe_delimiter) |delimiter| {
+                return .{ .mode = mode, .delimiter = delimiter };
+            } else {
+                return null;
+            }
+        }
     }
 
     return null;
+}
+
+fn getBlockDelimiter(mode: Mode, first_word: []const u8, line: []const u8) ?Delimiter {
+    var parenthesis_depth: usize = 0;
+    var escaped = false;
+    var double_quoted = false;
+    var single_quoted = false;
+
+    for (line, 0..) |char, index| {
+        if (char == '\\' and !escaped) {
+            escaped = true;
+        } else if (char == '\\' and escaped) {
+            escaped = false;
+        } else if (char == '"' and !double_quoted and !single_quoted) {
+            double_quoted = true;
+        } else if (char == '"' and double_quoted and !single_quoted) {
+            double_quoted = false;
+        } else if (char == '\'' and !double_quoted and !single_quoted) {
+            single_quoted = true;
+        } else if (char == '\'' and !double_quoted and single_quoted) {
+            single_quoted = false;
+        } else if (char == '(') {
+            parenthesis_depth += 1;
+        } else if (char == ')') {
+            parenthesis_depth -= 1;
+            if (parenthesis_depth == 0) {
+                if (index < line.len - 1) {
+                    return delimiterFromString(util.strip(line[index + 1 ..]));
+                } else return .none;
+            }
+        }
+    }
+
+    const stripped = util.strip(line);
+    if (std.mem.lastIndexOfScalar(u8, stripped, ' ')) |index| {
+        // Guaranteed to not be last character as we already stripped whitespace so no bounds
+        // check needed.
+        const last_word = stripped[index + 1 ..];
+        return if (std.mem.eql(u8, first_word, last_word)) null else delimiterFromString(last_word);
+    } else {
+        return switch (mode) {
+            .partial, .args => .none,
+            .html, .zig, .markdown => delimiterFromString(stripped),
+        };
+    }
+}
+
+fn delimiterFromString(string: []const u8) Delimiter {
+    return if (std.mem.eql(u8, string, "{"))
+        .brace
+    else
+        .{ .string = string };
 }
 
 // When the current context's mode is `zig`, evaluate open and close braces to determine the
@@ -315,18 +439,31 @@ fn resolveNesting(line: []const u8, stack: std.ArrayList(Context)) void {
     if (stack.items.len == 0) return;
 
     const current_context = stack.items[stack.items.len - 1];
-    const current_mode = current_context.mode;
-    const current_depth = current_context.depth;
 
-    const increment: isize = getBraceDepth(current_mode, line);
-    stack.items[stack.items.len - 1].depth = current_depth + increment;
+    switch (current_context.delimiter) {
+        .eof => {},
+        .none => {
+            stack.items[stack.items.len - 1].depth = 0;
+        },
+        .brace => {
+            const brace_depth: isize = getBraceDepth(current_context.mode, line);
+            const current_depth = current_context.depth;
+            stack.items[stack.items.len - 1].depth = current_depth + brace_depth;
+        },
+        .string => |delimiter_string| {
+            if (util.startsWithIgnoringWhitespace(line, delimiter_string)) {
+                stack.items[stack.items.len - 1].depth = 0;
+            }
+        },
+    }
 }
 
 // Count unescaped and unquoted braces opens and closes (+1 for open, -1 for close).
 fn getBraceDepth(mode: Mode, line: []const u8) isize {
     return switch (mode) {
         .zig => blk: {
-            var quoted = false;
+            var single_quoted = false;
+            var double_quoted = false;
             var escaped = false;
             var depth: isize = 0;
             for (line) |char| {
@@ -334,10 +471,14 @@ fn getBraceDepth(mode: Mode, line: []const u8) isize {
                     escaped = true;
                 } else if (escaped) {
                     escaped = false;
-                } else if (char == '"' and !quoted) {
-                    quoted = true;
-                } else if (char == '"' and quoted) {
-                    quoted = false;
+                } else if (char == '\'' and !single_quoted and !double_quoted) {
+                    single_quoted = true;
+                } else if (char == '\'' and single_quoted and !double_quoted) {
+                    single_quoted = false;
+                } else if (char == '"' and !single_quoted and !double_quoted) {
+                    double_quoted = true;
+                } else if (char == '"' and !single_quoted and double_quoted) {
+                    double_quoted = false;
                 } else if (char == '{') {
                     depth += 1;
                 } else if (char == '}') {
@@ -397,8 +538,7 @@ fn renderHeader(self: *ModalTemplate, writer: anytype, options: type) !void {
         \\{3s}
         \\    const allocator = zmpl.getAllocator();
         \\    zmpl.noop(std.mem.Allocator, allocator);
-        \\    const __is_partial = {4s};
-        \\    {5s}
+        \\    {4s}
         \\
     ,
         .{
@@ -406,7 +546,6 @@ fn renderHeader(self: *ModalTemplate, writer: anytype, options: type) !void {
             if (self.partial) "Partial" else "",
             if (self.partial) args else "",
             decls_buf.items,
-            if (self.partial) "true" else "false",
             if (self.partial) "zmpl.noop([]const []const u8, slots);" else "",
         },
     );
@@ -419,8 +558,7 @@ fn renderHeader(self: *ModalTemplate, writer: anytype, options: type) !void {
 fn renderFooter(self: ModalTemplate, writer: anytype) !void {
     try writer.writeAll(
         \\
-        \\if (__is_partial) zmpl.chompOutputBuffer();
-        \\return zmpl._allocator.dupe(u8, zmpl.output_buf.items);
+        \\return zmpl._allocator.dupe(u8, zmpl.strip(zmpl.output_buf.items));
         \\}
         \\
     );
@@ -450,7 +588,7 @@ fn renderFooter(self: ModalTemplate, writer: anytype) !void {
             \\    const inner_content = try {0s}_render(zmpl);
             \\    defer zmpl._allocator.free(inner_content);
             \\    zmpl.output_buf.clearAndFree();
-            \\    zmpl.content = .{{ .data = __zmpl.chomp(inner_content) }};
+            \\    zmpl.content = .{{ .data = zmpl.strip(inner_content) }};
             \\    const content = try layout.render(zmpl);
             \\    zmpl.output_buf.clearAndFree();
             \\    return content;
@@ -469,7 +607,7 @@ fn getRootToken(tokens: []Token) Token {
 
     for (tokens, 0..) |token, index| {
         const root_token = tokens[root_token_index];
-        if (token.start < root_token.start and token.end > root_token.end) {
+        if (token.start <= root_token.start and token.end > root_token.end) {
             root_token_index = index;
         }
     }

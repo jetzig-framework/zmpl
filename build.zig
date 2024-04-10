@@ -89,8 +89,8 @@ pub fn build(b: *std.Build) !void {
 
     if (auto_build) {
         const tests_path = switch (zmpl_version) {
-            .v1 => "src/tests.zig",
-            .v2 => "src/tests_v2.zig",
+            .v1 => "src/tests_v1.zig",
+            .v2 => "src/tests.zig",
         };
 
         const main_tests = b.addTest(.{

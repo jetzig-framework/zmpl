@@ -7,6 +7,10 @@ _Zmpl_ is a templating language for [Zig](https://ziglang.org/) :lizard:
 * Compiles to _Zig_ code for syntax and type validation.
 * Used by the [Jetzig](https://github.com/bobf/jetzig) web framework.
 
+## Documentation
+
+Visit the [Jetzig Documentation](https://jetzig.dev/documentation.html) page to see detailed _Zmpl_ documentation with usage examples.
+
 ## Syntax Highlighting
 
 Syntax highlighters are currently community-sourced. Please get in touch if you have created a plugin for your editor of choice and we will gladly list it here.
@@ -73,6 +77,7 @@ See [src/templates](src/templates) for more examples.
 <!-- Zig mode for template logic -->
     <span>Zmpl is simple!</span>
 
+
 <!-- Easy data lookup syntax -->
 <div>Email: user@example.com</div>
 <div>Token: abc123-456-def</div>
@@ -120,32 +125,26 @@ test "readme example" {
 
         try std.testing.expectEqualStrings(
             \\<!-- Zig mode for template logic -->
-            \\
             \\    <span>Zmpl is simple!</span>
+            \\
             \\
             \\<!-- Easy data lookup syntax -->
             \\<div>Email: user@example.com</div>
             \\<div>Token: abc123-456-def</div>
             \\
             \\<!-- Partials -->
-            \\
             \\<span>An example partial</span>
-            \\
             \\<!-- Partials with positional args -->
-            \\
             \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
-            \\
             \\<!-- Partials with keyword args --->
-            \\
             \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
-            \\
+            \\<!-- Partials with slots --->
             \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
-            \\
-            \\        <div><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>
+            \\        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>
+            \\        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
             \\
             \\<div><h1>Built-in markdown support</h1>
             \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
-            \\
         , output);
     } else {
         try std.testing.expect(false);

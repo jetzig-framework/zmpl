@@ -21,34 +21,39 @@ const Node = @This();
 const WriterOptions = struct { zmpl_write: []const u8 = "zmpl.write" };
 
 pub fn compile(self: Node, input: []const u8, writer: anytype) !void {
-    var start: usize = self.token.start;
-
     if (self.token.mode == .partial and self.children.items.len > 0) {
         std.debug.print(
-            "Partial slots cannot contain mode pragmas:\n{s}\n",
+            "Partial slots cannot contain mode blocks:\n{s}\n",
             .{input[self.token.start - self.token.mode_line.len .. self.token.end]},
         );
         return error.ZmplSyntaxError;
     }
 
+    // Write chunks for current token between child token boundaries, rendering child token
+    // immediately after.
+    var start: usize = self.token.startOfContent();
     for (self.children.items) |child_node| {
-        const end = child_node.token.start - child_node.token.mode_line.len - 1;
-        const content = if (end > start) input[start..end] else "";
-        try writer.writeAll(try self.render(content));
+        if (start < child_node.token.start) {
+            const content = input[start .. child_node.token.start - 1];
+            const rendered_content = try self.render(content);
+            try writer.writeAll(rendered_content);
+        }
+
         start = child_node.token.end + 1;
         try child_node.compile(input, writer);
     }
-    if (self.children.items.len > 0) {
-        const end = self.children.items[self.children.items.len - 1].token.end;
-        try writer.writeAll(try self.render(input[end .. self.token.end - 1]));
+
+    if (self.children.items.len == 0) {
+        const content = input[self.token.startOfContent()..self.token.endOfContent()];
+        const rendered_content = try self.render(content);
+        try writer.writeAll(rendered_content);
     } else {
-        // An empty template has zero length, but this also catches any other weirdness that
-        // might happen.
-        const content = if (self.token.end > self.token.start)
-            input[self.token.start .. self.token.end - 1]
-        else
-            "";
-        try writer.writeAll(try self.render(content));
+        const last_child = self.children.items[self.children.items.len - 1];
+        if (last_child.token.end + 1 < self.token.endOfContent()) {
+            const content = input[last_child.token.end + 1 .. self.token.endOfContent()];
+            const rendered_content = try self.render(content);
+            try writer.writeAll(rendered_content);
+        }
     }
 }
 
@@ -91,7 +96,7 @@ const HtmlIterator = struct {
     }
 
     pub fn next(self: *HtmlIterator) ?[]const u8 {
-        if (self.index >= self.content.len - 1) return null;
+        if (self.content.len == 0 or self.index >= self.content.len - 1) return null;
 
         const start = self.index;
 

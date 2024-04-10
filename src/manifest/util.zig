@@ -16,6 +16,16 @@ pub fn startsWithIgnoringWhitespace(haystack: []const u8, needle: []const u8) bo
     return std.mem.startsWith(u8, stripped, needle);
 }
 
+/// Detect if a given input string begins with a given value, ignoring leading whitespace.
+pub fn indexOfIgnoringWhitespace(haystack: []const u8, needle: []const u8) ?usize {
+    const trimmed = std.mem.trimLeft(u8, haystack, &std.ascii.whitespace);
+    if (std.mem.indexOf(u8, trimmed, needle)) |index| {
+        return (haystack.len - trimmed.len) + index;
+    } else {
+        return null;
+    }
+}
+
 /// Generate a random variable name with enough entropy to be considered unique.
 pub fn generateVariableName(buf: *[32]u8) void {
     const first_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
