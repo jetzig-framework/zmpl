@@ -33,6 +33,7 @@
 /// data tree (for Zmpl templates, use the `{.nested_object.key}` syntax to do this
 /// automatically.
 const std = @import("std");
+
 const manifest = @import("zmpl.manifest").__Manifest;
 const zmpl = @import("../zmpl.zig");
 const util = zmpl.util;
@@ -225,6 +226,7 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
         optional_default,
         string,
         optional_string,
+        string_array,
         float,
         zmpl,
         zmpl_union,
@@ -241,7 +243,7 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
                 if (@hasDecl(@TypeOf(value), "format")) {
                     break :blk .default;
                 } else {
-                    std.debug.print("Struct does not implement `format()`: {}\n", .{@TypeOf(value)});
+                    std.debug.print("[zmpl] Error: Struct does not implement `format()`: {}\n", .{@TypeOf(value)});
                     return error.ZmplSyntaxError;
                 }
             },
@@ -255,26 +257,31 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
                 inline else => |capture| if (@hasField(@TypeOf(capture), "toString")) .zmpl_union else .default,
             };
         },
+        // builtin.Type.Pointer{ .size = builtin.Type.Pointer.Size.Slice, .is_const = true, .is_volatile = false, .alignment = 8, .address_space = builtin.AddressSpace.generic, .child = []const u8, .is_allowzero = false, .sentinel = null }
         .Pointer => |pointer| switch (pointer.child) {
             Value, String, Integer, Float, Boolean, NullType => .zmpl,
+            []const u8 => |child| blk: {
+                if (isStringCoercablePointer(pointer, child, []const u8)) {
+                    break :blk .string_array;
+                } else {
+                    std.debug.print("[zmpl] Error: Unsupported type: {}\n", .{pointer});
+                    return error.ZmplSyntaxError;
+                }
+            },
             u8 => |child| blk: {
-                // Logic borrowed from old implementation of std.meta.isZigString
-                if (!pointer.is_volatile and
-                    !pointer.is_allowzero and
-                    pointer.size == .Slice) break :blk .string;
-                if (!pointer.is_volatile and
-                    !pointer.is_allowzero and pointer.size == .One and
-                    child == .Array and
-                    &child.Array.child == u8) break :blk .string;
-                std.debug.print("Unsupported type: {}\n", .{pointer});
-                return error.ZmplSyntaxError;
+                if (isStringCoercablePointer(pointer, child, u8)) {
+                    break :blk .string;
+                } else {
+                    std.debug.print("[zmpl] Error: Unsupported type: {}\n", .{pointer});
+                    return error.ZmplSyntaxError;
+                }
             },
             []u8 => .string,
             type => blk: {
                 if (@hasDecl(@TypeOf(value.*), "format")) {
                     break :blk .default;
                 } else {
-                    std.debug.print("Struct does not implement `format()`: {}\n", .{@TypeOf(value.*)});
+                    std.debug.print("[zmpl] Error: Struct does not implement `format()`: {}\n", .{@TypeOf(value.*)});
                     return error.ZmplSyntaxError;
                 }
             },
@@ -318,6 +325,7 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
         .optional_default => try std.fmt.allocPrint(allocator, "{?}", .{value}),
         .string => try std.fmt.allocPrint(allocator, "{s}", .{value}),
         .optional_string => try std.fmt.allocPrint(allocator, "{?s}", .{value}),
+        .string_array => try std.mem.join(allocator, "\n", value),
         .float => try std.fmt.allocPrint(allocator, "{d}", .{value}),
         .zmpl => try value.toString(),
         .zmpl_union => switch (value) {
@@ -493,6 +501,7 @@ pub fn _get(self: *Data, key: []const u8) !*Value {
     };
 }
 
+// TODO: Remove - v1 only
 /// Formats a comptime value as a string, e.g.:
 /// ```
 /// const foo = "abc";
@@ -987,6 +996,19 @@ pub fn getAllocator(self: *Data) std.mem.Allocator {
     }
 }
 
+fn isStringCoercablePointer(pointer: std.builtin.Type.Pointer, child: type, array_child: type) bool {
+    // Logic borrowed from old implementation of std.meta.isZigString
+    if (!pointer.is_volatile and
+        !pointer.is_allowzero and
+        pointer.size == .Slice) return true;
+    if (!pointer.is_volatile and
+        !pointer.is_allowzero and pointer.size == .One and
+        child == .Array and
+        &child.Array.child == array_child) return true;
+    return false;
+}
+
+// TODO: Remove - v1 only
 fn isZigString(comptime T: type) bool {
     return comptime blk: {
         // Only pointer types can be strings, no optionals

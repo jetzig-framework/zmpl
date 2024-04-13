@@ -140,6 +140,26 @@ test "complex example" {
     }
 }
 
+test "direct rendering of slots (render [][]const u8 as line-separated string)" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    if (zmpl.find("slots")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\<div>
+            \\<h2>Slots:</h2>
+            \\<span>slot 1</span>
+            \\<span>slot 2</span>
+            \\<span>slot 3</span>
+            \\</div>
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
+
 test "javascript" {
     var data = zmpl.Data.init(std.testing.allocator);
     defer data.deinit();
