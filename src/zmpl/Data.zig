@@ -40,9 +40,9 @@ const util = zmpl.util;
 /// Output stream for writing values into a rendered template.
 pub const Writer = std.ArrayList(u8).Writer;
 
-const Self = @This();
+const Data = @This();
 
-pub const RenderFn = *const fn (*Self) anyerror![]const u8;
+pub const RenderFn = *const fn (*Data) anyerror![]const u8;
 
 pub const LayoutContent = struct {
     data: []const u8,
@@ -67,7 +67,6 @@ json_buf: std.ArrayList(u8),
 output_buf: std.ArrayList(u8),
 output_writer: ?std.ArrayList(u8).Writer = null,
 value: ?*Value = null,
-Null: Value = .{ .Null = NullType{} },
 partial: bool = false,
 content: LayoutContent = .{ .data = "" },
 partial_data: ?*Object = null,
@@ -77,7 +76,7 @@ slots: ?[]const String = null,
 const indent = "  ";
 
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
-pub fn init(allocator: std.mem.Allocator) Self {
+pub fn init(allocator: std.mem.Allocator) Data {
     const json_buf = std.ArrayList(u8).init(allocator);
     const output_buf = std.ArrayList(u8).init(allocator);
 
@@ -90,7 +89,7 @@ pub fn init(allocator: std.mem.Allocator) Self {
 }
 
 /// Frees all resources used by this `Data` instance.
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *Data) void {
     if (self.arena) |arena| arena.deinit();
     self.output_buf.deinit();
     self.json_buf.deinit();
@@ -98,7 +97,7 @@ pub fn deinit(self: *Self) void {
 
 /// Render a partial template. Do not invoke directly, use `{^partial_name}` syntax instead.
 /// TODO: v1 compat. - v2 renders partial functions directly.
-pub fn renderPartial(self: *Self, name: []const u8, partial_data: *Object, slots: []const String) !void {
+pub fn renderPartial(self: *Data, name: []const u8, partial_data: *Object, slots: []const String) !void {
     if (zmpl.find(name)) |template| {
         self.partial = true;
         self.partial_data = partial_data;
@@ -116,7 +115,7 @@ pub fn renderPartial(self: *Self, name: []const u8, partial_data: *Object, slots
 /// Chomps output buffer. Used for partials to allow user to add an explicit blank line at the
 /// end of a template if needed, otherwise `<div>{^partial_name}</div>` should not output a
 /// newline.
-pub fn chompOutputBuffer(self: *Self) void {
+pub fn chompOutputBuffer(self: *Data) void {
     if (std.mem.endsWith(u8, self.output_buf.items, "\r\n")) {
         _ = self.output_buf.pop();
         _ = self.output_buf.pop();
@@ -126,19 +125,19 @@ pub fn chompOutputBuffer(self: *Self) void {
 }
 
 /// Convenience wrapper for `util.strip` to be used by compiled templates.
-pub fn strip(self: *Self, input: []const u8) []const u8 {
+pub fn strip(self: *Data, input: []const u8) []const u8 {
     _ = self;
     return util.strip(input);
 }
 
 /// Convenience wrapper for `util.chomp` to be used by compiled templates.
-pub fn chomp(self: *Self, input: []const u8) []const u8 {
+pub fn chomp(self: *Data, input: []const u8) []const u8 {
     _ = self;
     return util.chomp(input);
 }
 
 /// Evaluate equality of two Data trees, recursively comparing all values.
-pub fn eql(self: *const Self, other: *const Self) bool {
+pub fn eql(self: *const Data, other: *const Data) bool {
     if (self.value != null and other.value != null) {
         return self.value.?.eql(other.value.?);
     } else if (self.value == null and other.value == null) {
@@ -148,7 +147,7 @@ pub fn eql(self: *const Self, other: *const Self) bool {
 
 /// Takes a string such as `.foo.bar.baz` and translates into a path into the data tree to return
 /// a value that can be rendered in a template.
-pub fn getValue(self: Self, key: []const u8) !?*Value {
+pub fn getValue(self: Data, key: []const u8) !?*Value {
     // Partial data always takes precedence over underlying template data.
     if (self.partial_data) |val| {
         if (val.get(key)) |partial_value| return partial_value;
@@ -185,7 +184,7 @@ pub fn getValue(self: Self, key: []const u8) !?*Value {
 
 /// Converts any `Value` in a root `Object` to a string. Returns an empty string if no match or
 /// no compatible data type.
-pub fn getValueString(self: Self, key: []const u8) ![]const u8 {
+pub fn getValueString(self: Data, key: []const u8) ![]const u8 {
     if (try self.getValue(key)) |val| {
         switch (val.*) {
             .object, .array => return "", // No sense in trying to convert an object/array to a string
@@ -210,7 +209,7 @@ const Item = struct {
 
 const IteratorSelector = enum { array, object };
 
-pub fn items(self: *Self, comptime selector: IteratorSelector) []switch (selector) {
+pub fn items(self: *Data, comptime selector: IteratorSelector) []switch (selector) {
     .array => *Value,
     .object => Item,
 } {
@@ -220,7 +219,7 @@ pub fn items(self: *Self, comptime selector: IteratorSelector) []switch (selecto
 
 /// Attempt a given value to a string. If `.toString()` is implemented (i.e. likely a `Value`),
 /// call that, otherwise try to use an appropriate formatter.
-pub fn coerceString(self: *Self, value: anytype) ![]const u8 {
+pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
     const Formatter = enum {
         default,
         optional_default,
@@ -330,17 +329,17 @@ pub fn coerceString(self: *Self, value: anytype) ![]const u8 {
 
 /// Add a const value. Must be called for **all** constants defined at build time before
 /// rendering a template.
-pub fn addConst(self: *Self, name: []const u8, value: *Value) !void {
+pub fn addConst(self: *Data, name: []const u8, value: *Value) !void {
     try self.template_decls.put(name, value);
 }
 
 /// Retrieves a typed value from template decls. Errors if value is not found, i.e. all expected
 /// values **must** be assigned before rendering a template.
-pub fn getConst(self: *Self, T: type, name: []const u8) !T {
+pub fn getConst(self: *Data, T: type, name: []const u8) !T {
     if (self.template_decls.get(name)) |value| {
         return switch (T) {
-            i64 => value.integer.value,
-            f64 => value.float.value,
+            i128 => value.integer.value,
+            f128 => value.float.value,
             []const u8 => value.string.value,
             bool => value.boolean.value,
             else => @compileError("Unsupported constant type: " ++ @typeName(T)),
@@ -352,7 +351,7 @@ pub fn getConst(self: *Self, T: type, name: []const u8) !T {
 }
 
 /// Resets the current `Data` object, allowing it to be re-initialized with a new root value.
-pub fn reset(self: *Self) void {
+pub fn reset(self: *Data) void {
     if (self.value) |*ptr| {
         ptr.*.deinit();
     }
@@ -361,7 +360,7 @@ pub fn reset(self: *Self) void {
 
 /// No-op function. Used by templates to prevent unused local constant errors for values that
 /// might not be used by the template (e.g. allocator, `addConst()` values).
-pub fn noop(self: Self, T: type, value: T) void {
+pub fn noop(self: Data, T: type, value: T) void {
     _ = self;
     _ = value;
 }
@@ -373,7 +372,7 @@ pub fn noop(self: Self, T: type, value: T) void {
 /// var object = try data.object(); // <-- the root value is now an object.
 /// try nested_object = try data.object(); // <-- creates a new, detached object.
 /// try object.put("nested", nested_object); // <-- adds a nested object to the root object.
-pub fn object(self: *Self) !*Value {
+pub fn object(self: *Data) !*Value {
     if (self.value) |_| {
         return try self.createObject();
     } else {
@@ -382,7 +381,7 @@ pub fn object(self: *Self) !*Value {
     }
 }
 
-pub fn createObject(self: *Self) !*Value {
+pub fn createObject(self: *Data) !*Value {
     const obj = Object.init(self.getAllocator());
     const ptr = try self.getAllocator().create(Value);
     ptr.* = Value{ .object = obj };
@@ -396,7 +395,7 @@ pub fn createObject(self: *Self) !*Value {
 /// var array = try data.array(); // <-- the root value is now an array.
 /// try nested_array = try data.array(); // <-- creates a new, detached array.
 /// try array.append(nested_array); // <-- adds a nested array to the root array.
-pub fn array(self: *Self) !*Value {
+pub fn array(self: *Data) !*Value {
     if (self.value) |_| {
         return try self.createArray();
     } else {
@@ -406,7 +405,7 @@ pub fn array(self: *Self) !*Value {
 }
 
 /// Creates a new `Array`. For most use cases, use `array()` instead.
-pub fn createArray(self: *Self) !*Value {
+pub fn createArray(self: *Data) !*Value {
     const arr = Array.init(self.getAllocator());
     const ptr = try self.getAllocator().create(Value);
     ptr.* = Value{ .array = arr };
@@ -414,7 +413,7 @@ pub fn createArray(self: *Self) !*Value {
 }
 
 /// Creates a new `Value` representing a string (e.g. `"foobar"`).
-pub fn string(self: *Self, value: []const u8) *Value {
+pub fn string(self: *Data, value: []const u8) *Value {
     const allocator = self.getAllocator();
     const duped = allocator.dupe(u8, value) catch @panic("Out of memory");
     const val = allocator.create(Value) catch @panic("Out of memory");
@@ -423,7 +422,7 @@ pub fn string(self: *Self, value: []const u8) *Value {
 }
 
 /// Creates a new `Value` representing an integer (e.g. `1234`).
-pub fn integer(self: *Self, value: i64) *Value {
+pub fn integer(self: *Data, value: i128) *Value {
     const allocator = self.getAllocator();
     const val = allocator.create(Value) catch @panic("Out of memory");
     val.* = .{ .integer = .{ .value = value, .allocator = self.getAllocator() } };
@@ -431,7 +430,7 @@ pub fn integer(self: *Self, value: i64) *Value {
 }
 
 /// Creates a new `Value` representing a float (e.g. `1.234`).
-pub fn float(self: *Self, value: f64) *Value {
+pub fn float(self: *Data, value: f128) *Value {
     const allocator = self.getAllocator();
     const val = allocator.create(Value) catch @panic("Out of memory");
     val.* = .{ .float = .{ .value = value, .allocator = self.getAllocator() } };
@@ -439,7 +438,7 @@ pub fn float(self: *Self, value: f64) *Value {
 }
 
 /// Creates a new `Value` representing a boolean (true/false).
-pub fn boolean(self: *Self, value: bool) *Value {
+pub fn boolean(self: *Data, value: bool) *Value {
     const allocator = self.getAllocator();
     const val = allocator.create(Value) catch @panic("Out of memory");
     val.* = .{ .boolean = .{ .value = value, .allocator = self.getAllocator() } };
@@ -449,13 +448,13 @@ pub fn boolean(self: *Self, value: bool) *Value {
 /// Creates a new `Value` representing a `null` value. Public, but for internal use only.
 pub fn _null(allocator: std.mem.Allocator) *Value {
     const val = allocator.create(Value) catch @panic("Out of memory");
-    val.* = .{ .Null = NullType{} };
+    val.* = .{ .Null = NullType{ .allocator = allocator } };
     return val;
 }
 
 /// Writes a given string to the output buffer. Creates a new output buffer if not already
 /// present. Used by compiled Zmpl templates.
-pub fn write(self: *Self, slice: []const u8) !void {
+pub fn write(self: *Data, slice: []const u8) !void {
     if (self.output_writer) |writer| {
         try writer.writeAll(slice);
     } else {
@@ -464,8 +463,28 @@ pub fn write(self: *Self, slice: []const u8) !void {
     }
 }
 
-/// Gets a value from the data tree, returns a `NullType` value (not `null`) if not found.
-pub fn get(self: *Self, key: []const u8) !*Value {
+/// Gets a value from the data tree using an exact key. Returns `null` if key not found or if
+/// root object is not `Object`.
+pub fn get(self: *Data, key: []const u8) ?*Value {
+    if (self.value == null) return null;
+
+    return switch (self.value.?.*) {
+        .object => |value| value.get(key),
+        else => null,
+    };
+}
+
+/// Receives an array of keys and recursively gets each key from nested objects, returning `null`
+/// if a key is not found, or `*Value` if all keys are found.
+pub fn chain(self: *Data, keys: []const []const u8) ?*Value {
+    if (self.value == null) return null;
+
+    return self.value.?.chain(keys);
+}
+
+/// Gets a value from the data tree using reference lookup syntax (e.g. `.foo.bar.baz`).
+/// Used internally by templates.
+pub fn _get(self: *Data, key: []const u8) !*Value {
     if (try self.getValue(key)) |value| {
         return value;
     } else return switch (manifest.version) {
@@ -484,7 +503,7 @@ pub fn get(self: *Self, key: []const u8) !*Value {
 /// ```
 ///
 /// Used for rendering comptime values defined within a template.
-pub fn formatDecl(self: *Self, comptime decl: anytype) ![]const u8 {
+pub fn formatDecl(self: *Data, comptime decl: anytype) ![]const u8 {
     if (comptime isZigString(@TypeOf(decl))) {
         return try std.fmt.allocPrint(self.getAllocator(), "{s}", .{decl});
     } else {
@@ -493,34 +512,34 @@ pub fn formatDecl(self: *Self, comptime decl: anytype) ![]const u8 {
 }
 
 /// Returns the entire `Data` tree as a JSON string.
-pub fn toJson(self: *Self) ![]const u8 {
+pub fn toJson(self: *Data) ![]const u8 {
     if (self.value) |_| {} else return "";
 
     const writer = self.json_buf.writer();
     self.json_buf.clearAndFree();
-    try self.value.?.toJson(writer, false, 0);
+    try self.value.?._toJson(writer, false, 0);
     return self.getAllocator().dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
 }
 
 /// Returns the entire `Data` tree as a pretty-printed JSON string.
-pub fn toPrettyJson(self: *Self) ![]const u8 {
+pub fn toPrettyJson(self: *Data) ![]const u8 {
     if (self.value) |_| {} else return "";
 
     const writer = self.json_buf.writer();
     self.json_buf.clearAndFree();
-    try self.value.?.toJson(writer, true, 0);
+    try self.value.?._toJson(writer, true, 0);
     try writer.writeByte('\n');
     return self.getAllocator().dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
 }
 
 /// Parses a JSON string and updates the current `Data` object with the parsed data. Inverse of
 /// `toJson`.
-pub fn fromJson(self: *Self, json: []const u8) !void {
+pub fn fromJson(self: *Data, json: []const u8) !void {
     const parsed = try std.json.parseFromSlice(std.json.Value, self.getAllocator(), json, .{});
     self.value = try self.parseJsonValue(parsed.value);
 }
 
-fn parseJsonValue(self: *Self, value: std.json.Value) !*Value {
+fn parseJsonValue(self: *Data, value: std.json.Value) !*Value {
     return switch (value) {
         .object => |*val| blk: {
             var it = val.iterator();
@@ -536,7 +555,10 @@ fn parseJsonValue(self: *Self, value: std.json.Value) !*Value {
             break :blk arr;
         },
         .string => |val| self.string(val),
-        .number_string => |val| self.string(val), // TODO: Special-case this somehow?
+        .number_string => |val| if (std.mem.containsAtLeast(u8, val, 1, "."))
+            self.float(try std.fmt.parseFloat(f128, val))
+        else
+            self.integer(try std.fmt.parseInt(i128, val, 10)),
         .integer => |val| self.integer(val),
         .float => |val| self.float(val),
         .bool => |val| self.boolean(val),
@@ -597,6 +619,15 @@ pub const Value = union(enum) {
         }
     }
 
+    /// Receives an array of keys and recursively gets each key from nested objects, returning `null`
+    /// if a key is not found, or `*Value` if all keys are found.
+    pub fn chain(self: *Value, keys: []const []const u8) ?*Value {
+        return switch (self.*) {
+            .object => |*capture| capture.chain(keys),
+            else => null,
+        };
+    }
+
     /// Puts a `Value` into an `Object`.
     pub fn put(self: *Value, key: []const u8, value: ?*Value) !void {
         switch (self.*) {
@@ -613,13 +644,29 @@ pub const Value = union(enum) {
         }
     }
 
+    pub fn toJson(self: *Value) ![]const u8 {
+        const allocator = switch (self.*) {
+            inline else => |capture| capture.allocator,
+        };
+        var buf = std.ArrayList(u8).init(allocator);
+        const writer = buf.writer();
+        try self._toJson(writer, false, 0);
+        return buf.items;
+    }
+
     /// Generates a JSON string representing the complete data tree.
-    pub fn toJson(self: *Value, writer: Writer, pretty: bool, level: usize) !void {
+    pub fn _toJson(self: *Value, writer: Writer, pretty: bool, level: usize) !void {
         return switch (self.*) {
             .array => |*capture| try capture.toJson(writer, pretty, level),
             .object => |*capture| try capture.toJson(writer, pretty, level),
             inline else => |*capture| try capture.toJson(writer),
         };
+    }
+
+    pub fn format(self: *Value, actual_fmt: []const u8, options: anytype, writer: anytype) !void {
+        _ = options;
+        _ = actual_fmt;
+        try writer.writeAll(try self.toString());
     }
 
     /// Converts a primitive type (string, integer, float) to a string representation.
@@ -686,6 +733,8 @@ pub const Value = union(enum) {
 };
 
 pub const NullType = struct {
+    allocator: std.mem.Allocator,
+
     pub fn toJson(self: NullType, writer: Writer) !void {
         _ = self;
         try writer.writeAll("null");
@@ -704,7 +753,7 @@ pub const NullType = struct {
 };
 
 pub const Float = struct {
-    value: f64,
+    value: f128,
     allocator: std.mem.Allocator,
 
     pub fn eql(self: *const Float, other: *const Float) bool {
@@ -721,7 +770,7 @@ pub const Float = struct {
 };
 
 pub const Integer = struct {
-    value: i64,
+    value: i128,
     allocator: std.mem.Allocator,
 
     pub fn eql(self: *const Integer, other: *const Integer) bool {
@@ -819,6 +868,21 @@ pub const Object = struct {
         } else return null;
     }
 
+    pub fn chain(self: Object, keys: []const []const u8) ?*Value {
+        var current_object = self;
+
+        for (keys, 1..) |key, depth| {
+            if (current_object.get(key)) |capture| {
+                switch (capture.*) {
+                    .object => |obj| current_object = obj,
+                    else => |*val| return if (depth == keys.len) return val else null,
+                }
+            } else return null;
+        }
+
+        return null;
+    }
+
     pub fn contains(self: Object, key: []const u8) bool {
         return self.hashmap.contains(key);
     }
@@ -831,7 +895,7 @@ pub const Object = struct {
         try writer.writeByte('{');
         if (pretty) try writer.writeByte('\n');
         var it = self.hashmap.keyIterator();
-        var index: i64 = 0;
+        var index: usize = 0;
         const size = self.hashmap.count();
         while (it.next()) |key| {
             if (pretty) try writer.writeBytesNTimes(indent, level + 1);
@@ -839,7 +903,7 @@ pub const Object = struct {
             try writer.writeAll(":");
             if (pretty) try writer.writeByte(' ');
             var value = self.hashmap.get(key.*).?;
-            try value.toJson(writer, pretty, level + 1);
+            try value._toJson(writer, pretty, level + 1);
             index += 1;
             if (index < size) try writer.writeAll(",");
             if (pretty) try writer.writeByte('\n');
@@ -884,7 +948,7 @@ pub const Array = struct {
         if (pretty) try writer.writeByte('\n');
         for (self.array.items, 0..) |*item, index| {
             if (pretty) try writer.writeBytesNTimes(indent, level + 1);
-            try item.*.toJson(writer, pretty, level + 1);
+            try item.*._toJson(writer, pretty, level + 1);
             if (index < self.array.items.len - 1) try writer.writeAll(",");
             if (pretty) try writer.writeByte('\n');
         }
@@ -913,7 +977,7 @@ pub const Iterator = struct {
     }
 };
 
-pub fn getAllocator(self: *Self) std.mem.Allocator {
+pub fn getAllocator(self: *Data) std.mem.Allocator {
     if (self.arena) |_| {
         return self.arena_allocator;
     } else {

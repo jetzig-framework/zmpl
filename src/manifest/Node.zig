@@ -322,7 +322,7 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
             // Pass a *Zmpl.Value to partial using regular data lookup syntax.
             const value = try std.fmt.allocPrint(
                 self.allocator,
-                \\(try zmpl.get("{s}"))
+                \\(try zmpl._get("{s}"))
             ,
                 .{arg.value[1..]},
             );

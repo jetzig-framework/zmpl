@@ -504,7 +504,7 @@ fn renderHeader(self: *ModalTemplate, writer: anytype, options: type) !void {
     if (@hasDecl(options, "template_constants")) {
         inline for (std.meta.fields(options.template_constants)) |field| {
             const type_str = switch (field.type) {
-                []const u8, i64, f64, bool => @typeName(field.type),
+                []const u8, i128, f128, bool => @typeName(field.type),
                 else => @compileError("Unsupported template constant type: " ++ @typeName(field.type)),
             };
 
