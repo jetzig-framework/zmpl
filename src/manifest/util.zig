@@ -107,6 +107,15 @@ pub fn templatePathFetch(allocator: std.mem.Allocator, path: []const u8, partial
     return try std.mem.concat(allocator, u8, &[_][]const u8{ dirname.?, "/", prefixed });
 }
 
+pub fn normalizePathPosix(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    var buf = std.ArrayList([]const u8).init(allocator);
+    defer buf.deinit();
+    var it = std.mem.tokenizeSequence(u8, path, std.fs.path.sep_str);
+    while (it.next()) |segment| try buf.append(segment);
+
+    return try std.mem.join(allocator, "/", buf.items);
+}
+
 /// Try to read a file and return content, output a helpful error on failure.
 pub fn readFile(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8) ![]const u8 {
     const stat = dir.statFile(path) catch |err| {

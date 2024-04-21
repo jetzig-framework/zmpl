@@ -17,6 +17,7 @@ pub const InitOptions = struct {
 pub const util = @import("zmpl/util.zig");
 
 pub const find = manifest.find;
+pub const findPrefixed = manifest.findPrefixed;
 
 pub fn chomp(input: []const u8) []const u8 {
     return std.mem.trimRight(u8, input, "\r\n");
