@@ -4,37 +4,47 @@ const builtin = @import("builtin");
 const util = @import("util.zig");
 
 allocator: std.mem.Allocator,
-templates_path: []const u8,
+templates_paths: []const TemplatesPath,
 template_paths: [][]const u8,
 
-pub const Version = enum { v1, v2 };
-
 const Manifest = @This();
+
+pub const TemplatesPath = struct {
+    prefix: []const u8,
+    path: []const u8,
+};
 
 const TemplateDef = struct {
     key: []const u8,
     name: []const u8,
+    prefix: []const u8,
     content: []const u8,
     partial: bool,
 };
 
-pub fn init(allocator: std.mem.Allocator, templates_path: []const u8, template_paths: [][]const u8) Manifest {
+pub fn init(
+    allocator: std.mem.Allocator,
+    templates_paths: []const TemplatesPath,
+    template_paths: [][]const u8,
+) Manifest {
     return .{
         .allocator = allocator,
-        .templates_path = templates_path,
+        .templates_paths = templates_paths,
         .template_paths = template_paths,
     };
 }
 
 pub fn compile(
     self: *Manifest,
-    version: Version,
     comptime TemplateType: type,
     comptime options: type,
 ) ![]const u8 {
     var template_defs = std.ArrayList(TemplateDef).init(self.allocator);
 
-    try self.compileTemplates(&template_defs, TemplateType, options);
+    for (self.templates_paths) |templates_path| {
+        try self.compileTemplates(&template_defs, templates_path, TemplateType, options);
+    }
+    std.debug.print("[zmpl] Compiled {} template(s)\n", .{self.template_paths.len});
 
     var buf = std.ArrayList(u8).init(self.allocator);
     const writer = buf.writer();
@@ -57,23 +67,43 @@ pub fn compile(
         , .{template_def.content}));
     }
 
-    try writer.writeAll(try std.fmt.allocPrint(self.allocator,
+    try writer.writeAll(
         \\
         \\pub const ZmplValue = __zmpl.Data.Value;
-        \\pub const __Manifest = struct {{
-        \\    pub const version: enum {{ v1, v2 }} = .{s};
-        \\
-        \\    pub const Template = struct {{
+        \\pub const __Manifest = struct {
+        \\    pub const Template = struct {
         \\       name: []const u8,
+        \\       prefix: []const u8,
+        \\       key: []const u8,
         \\       render: __zmpl.Data.RenderFn,
         \\       renderWithLayout: *const fn(Template, *__zmpl.Data) anyerror![]const u8,
-        \\    }};
+        \\    };
         \\
-        \\    pub fn find(name: []const u8) ?Template {{
-        \\        return template_map.get(name);
-        \\    }}
+        \\    /// Find any template matching a given name. Uses all template paths in order.
+        \\    pub fn find(name: []const u8) ?Template {
+        \\        for (templates) |template| {
+        \\            if (!std.mem.eql(u8, template.key, name)) continue;
         \\
-    , .{@tagName(version)}));
+        \\            return template;
+        \\        }
+        \\
+        \\        return null;
+        \\    }
+        \\
+        \\    /// Find a template in a given prefix, i.e. a template located within a specific
+        \\    /// template path.
+        \\    pub fn findPrefixed(prefix: []const u8, name: []const u8) ?Template {
+        \\        for (templates) |template| {
+        \\            if (!std.mem.eql(u8, template.prefix, prefix)) continue;
+        \\            if (!std.mem.eql(u8, template.key, name)) continue;
+        \\
+        \\            return template;
+        \\        }
+        \\
+        \\        return null;
+        \\    }
+        \\
+    );
 
     for (template_defs.items) |template_def| {
         if (template_def.partial) continue;
@@ -81,36 +111,34 @@ pub fn compile(
         try writer.writeAll(try std.fmt.allocPrint(self.allocator,
             \\const {0s} = __Manifest.Template{{
             \\  .render = {0s}_render,
-            \\  .renderWithLayout = {s}_renderWithLayout,
+            \\  .renderWithLayout = {0s}_renderWithLayout,
+            \\  .key = "{2s}",
             \\  .name = "{0s}",
+            \\  .prefix = "{1s}",
             \\}};
-        , .{template_def.name}));
+            \\
+        , .{ template_def.name, template_def.prefix, template_def.key }));
     }
 
     try writer.writeAll(
-        \\    pub const template_map = std.ComptimeStringMap(
-        \\        Template,
-        \\        .{
+        \\    pub const templates = [_]Template{
         \\
     );
 
     for (template_defs.items) |template_def| {
         if (template_def.partial) continue;
 
-        try writer.writeAll(try std.fmt.allocPrint(
-            self.allocator,
-            \\.{{ "{s}", {s} }},
+        try writer.print(
+            \\{s},
             \\
         ,
-            .{ template_def.key, template_def.name },
-        ));
+            .{template_def.name},
+        );
     }
 
     try writer.writeAll(
-        \\        }
-        \\    );
+        \\    };
         \\};
-        \\
     );
     return self.allocator.dupe(u8, buf.items);
 }
@@ -118,19 +146,22 @@ pub fn compile(
 fn compileTemplates(
     self: *Manifest,
     array: *std.ArrayList(TemplateDef),
+    templates_path: TemplatesPath,
     comptime TemplateType: type,
     comptime options: type,
 ) !void {
     var template_map = std.StringHashMap([]const u8).init(self.allocator);
 
     for (self.template_paths) |path| {
+        if (!std.mem.startsWith(u8, path, templates_path.path)) continue;
         const generated_name = try util.generateVariableNameAlloc(self.allocator);
-        const key = try util.templatePathStore(self.allocator, self.templates_path, path);
+        const key = try util.templatePathStore(self.allocator, templates_path.path, path);
         try template_map.put(key, generated_name);
     }
 
     for (self.template_paths) |path| {
-        const key = try util.templatePathStore(self.allocator, self.templates_path, path);
+        if (!std.mem.startsWith(u8, path, templates_path.path)) continue;
+        const key = try util.templatePathStore(self.allocator, templates_path.path, path);
         const generated_name = template_map.get(key).?;
 
         var file = try std.fs.openFileAbsolute(path, .{});
@@ -139,7 +170,7 @@ fn compileTemplates(
         var template = TemplateType.init(
             self.allocator,
             generated_name,
-            self.templates_path,
+            templates_path.path,
             path,
             content,
             template_map,
@@ -150,11 +181,11 @@ fn compileTemplates(
         const template_def: TemplateDef = .{
             .key = key,
             .name = generated_name,
+            .prefix = templates_path.prefix,
             .content = output,
             .partial = partial,
         };
 
         try array.append(template_def);
     }
-    std.debug.print("[zmpl] Compiled {} template(s)\n", .{self.template_paths.len});
 }

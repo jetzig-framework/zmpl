@@ -3,8 +3,6 @@ const builtin = @import("builtin");
 
 pub const zmpl = @import("src/zmpl.zig");
 pub const Data = zmpl.Data;
-pub const Template = zmpl.Template;
-pub const ModalTemplate = zmpl.ModalTemplate;
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -29,8 +27,28 @@ pub fn build(b: *std.Build) !void {
     const templates_path = b.option(
         []const u8,
         "zmpl_templates_path",
-        "Directory to search for .zmpl templates.",
-    ) orelse try std.fs.path.join(b.allocator, &[_][]const u8{ "src", "templates" });
+        "Directories to search for .zmpl templates. (Deprecated: Use `zmpl_templates_paths`)",
+    );
+
+    const templates_paths_option = b.option(
+        []const []const u8,
+        "zmpl_templates_paths",
+        "Directories to search for .zmpl templates. Format: `prefix=...,path=...",
+    );
+
+    const templates_paths: []const []const u8 = if (templates_path) |path|
+        try templatesPaths(
+            b.allocator,
+            &.{.{ .prefix = "templates", .path = try splitPath(b.allocator, path) }},
+        )
+    else
+        templates_paths_option orelse try templatesPaths(
+            b.allocator,
+            &.{.{
+                .prefix = "templates",
+                .path = &.{ "src", "templates" },
+            }},
+        );
 
     const zmpl_auto_build_option = b.option(
         bool,
@@ -38,8 +56,6 @@ pub fn build(b: *std.Build) !void {
         "Automatically compile Zmpl templates (default: true)",
     );
     const auto_build = if (zmpl_auto_build_option) |opt| opt else true;
-    const zmpl_version_option = b.option(enum { v1, v2 }, "zmpl_version", "Zmpl version");
-    const zmpl_version = zmpl_version_option orelse .v2;
 
     const manifest_exe = b.addExecutable(.{
         .name = "manifest",
@@ -61,37 +77,18 @@ pub fn build(b: *std.Build) !void {
     const manifest_exe_run = b.addRunArtifact(manifest_exe);
     const manifest_lazy_path = manifest_exe_run.addOutputFileArg("zmpl.manifest.zig");
 
+    manifest_exe_run.setCwd(.{ .path = try std.fs.cwd().realpathAlloc(b.allocator, ".") });
     manifest_exe_run.expectExitCode(0);
-    manifest_exe_run.addArg(templates_path);
-    manifest_exe_run.setEnvironmentVariable("ZMPL_VERSION", @tagName(zmpl_version));
+    manifest_exe_run.addArg(try std.mem.join(b.allocator, ";", templates_paths));
 
-    const templates: [][]const u8 = if (std.mem.eql(u8, templates_path, ""))
-        &.{}
-    else
-        findTemplates(b, templates_path) catch |err| blk: {
-            switch (err) {
-                error.ZmplTemplateDirectoryNotFound => {
-                    std.debug.print(
-                        "[zmpl] Template directory `{s}` not found, skipping compilation.\n",
-                        .{templates_path},
-                    );
-                    break :blk &.{};
-                },
-                else => return err,
-            }
-        };
-
-    for (templates) |path| manifest_exe_run.addFileArg(.{ .path = path });
+    for (try findTemplates(b, templates_paths)) |path| manifest_exe_run.addFileArg(.{ .path = path });
 
     const manifest_module = b.addModule("zmpl.manifest", .{ .root_source_file = manifest_lazy_path });
     manifest_module.addImport("zmpl", zmpl_module);
     zmpl_module.addImport("zmpl.manifest", manifest_module);
 
     if (auto_build) {
-        const tests_path = switch (zmpl_version) {
-            .v1 => "src/tests_v1.zig",
-            .v2 => "src/tests.zig",
-        };
+        const tests_path = "src/tests.zig";
 
         const main_tests = b.addTest(.{
             .root_source_file = .{ .path = tests_path },
@@ -118,6 +115,38 @@ pub fn build(b: *std.Build) !void {
     docs_step.dependOn(&docs_install.step);
 }
 
+const TemplatesPath = struct {
+    prefix: []const u8,
+    path: []const []const u8,
+};
+
+pub fn templatesPaths(allocator: std.mem.Allocator, paths: []const TemplatesPath) ![]const []const u8 {
+    var buf = std.ArrayList([]const u8).init(allocator);
+    for (paths) |path| {
+        const joined = try std.fs.path.join(allocator, path.path);
+        defer allocator.free(joined);
+
+        const absolute_path = if (std.fs.path.isAbsolute(joined))
+            try allocator.dupe(u8, joined)
+        else
+            std.fs.cwd().realpathAlloc(allocator, joined) catch |err| {
+                switch (err) {
+                    error.FileNotFound => {
+                        std.debug.print("[zmpl] Templates path not found: `{s}` - skipping.\n", .{joined});
+                        continue;
+                    },
+                    else => return err,
+                }
+            };
+
+        try buf.append(
+            try std.mem.concat(allocator, u8, &.{ "prefix=", path.prefix, ",path=", absolute_path }),
+        );
+    }
+
+    return try buf.toOwnedSlice();
+}
+
 pub fn addTemplateConstants(b: *std.Build, comptime constants: type) ![]const u8 {
     const fields = switch (@typeInfo(constants)) {
         .Struct => |info| info.fields,
@@ -135,24 +164,41 @@ pub fn addTemplateConstants(b: *std.Build, comptime constants: type) ![]const u8
     return try std.mem.join(b.allocator, "|", &array);
 }
 
-fn findTemplates(b: *std.Build, templates_path: []const u8) ![][]const u8 {
+fn findTemplates(b: *std.Build, templates_paths: []const []const u8) ![][]const u8 {
     var templates = std.ArrayList([]const u8).init(b.allocator);
 
-    var dir = std.fs.cwd().openDir(templates_path, .{ .iterate = true }) catch |err| {
-        switch (err) {
-            error.FileNotFound => return error.ZmplTemplateDirectoryNotFound,
-            else => return err,
+    var templates_paths_buf = std.ArrayList([]const u8).init(b.allocator);
+    defer templates_paths_buf.deinit();
+    for (templates_paths) |syntax| {
+        const prefix_end = std.mem.indexOf(u8, syntax, ",path=").?;
+        const path_start = prefix_end + ",path=".len;
+        const path = syntax[path_start..];
+        try templates_paths_buf.append(path);
+    }
+
+    for (templates_paths_buf.items) |templates_path| {
+        var dir = std.fs.cwd().openDir(templates_path, .{ .iterate = true }) catch |err| {
+            switch (err) {
+                error.FileNotFound => {
+                    std.debug.print(
+                        "[zmpl] Template directory `{s}` not found, skipping.\n",
+                        .{templates_path},
+                    );
+                    continue;
+                },
+                else => return err,
+            }
+        };
+
+        var walker = try dir.walk(b.allocator);
+        defer walker.deinit();
+
+        while (try walker.next()) |entry| {
+            if (entry.kind != .file) continue;
+            const extension = std.fs.path.extension(entry.path);
+            if (!std.mem.eql(u8, extension, ".zmpl")) continue;
+            try templates.append(try dir.realpathAlloc(b.allocator, entry.path));
         }
-    };
-
-    var walker = try dir.walk(b.allocator);
-    defer walker.deinit();
-
-    while (try walker.next()) |entry| {
-        if (entry.kind != .file) continue;
-        const extension = std.fs.path.extension(entry.path);
-        if (!std.mem.eql(u8, extension, ".zmpl")) continue;
-        try templates.append(try dir.realpathAlloc(b.allocator, entry.path));
     }
     return try templates.toOwnedSlice();
 }
@@ -189,4 +235,12 @@ fn parseZmplConstants(allocator: std.mem.Allocator, constants_string: ?[]const u
         try array.appendSlice("};\n");
         return try array.toOwnedSlice();
     } else return "";
+}
+
+fn splitPath(allocator: std.mem.Allocator, path: []const u8) ![]const []const u8 {
+    var it = std.mem.tokenizeSequence(u8, path, std.fs.path.sep_str);
+    var buf = std.ArrayList([]const u8).init(allocator);
+    while (it.next()) |segment| try buf.append(segment);
+
+    return try buf.toOwnedSlice();
 }

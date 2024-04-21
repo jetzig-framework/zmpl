@@ -2,7 +2,7 @@ const std = @import("std");
 
 const Zmd = @import("zmd").Zmd;
 
-const Token = @import("ModalTemplate.zig").Token;
+const Token = @import("Template.zig").Token;
 const util = @import("util.zig");
 
 const markdown_fragments = struct {
@@ -339,10 +339,7 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
         \\{1s}
         \\        }};
         \\        var __partial_data = __zmpl.Data.init(allocator);
-        \\
-        \\        // TODO: remove v1 compat. hack:
         \\        __partial_data.template_decls = zmpl.template_decls;
-        \\
         \\        defer __partial_data.deinit();
         \\
         \\    const __partial_output = try {2s}_renderPartial(&__partial_data, &__slots, {3s});

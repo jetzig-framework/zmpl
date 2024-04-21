@@ -2,7 +2,6 @@ const std = @import("std");
 
 const Manifest = @import("Manifest.zig");
 const Template = @import("Template.zig");
-const ModalTemplate = @import("ModalTemplate.zig");
 const zmpl_options = @import("zmpl_options");
 
 pub fn main() !void {
@@ -35,41 +34,30 @@ pub fn main() !void {
     defer std.process.argsFree(allocator, args);
 
     const manifest_path = args[1];
-    const templates_path = args[2];
-    const template_paths = args[3..];
 
-    const zmpl_version = try getVersion(allocator);
+    var templates_paths_buf = std.ArrayList(Manifest.TemplatesPath).init(allocator);
+    defer templates_paths_buf.deinit();
+    var it = std.mem.tokenizeSequence(u8, args[2], ";");
+    while (it.next()) |syntax| {
+        const prefix_start = "prefix=".len;
+        const prefix_end = std.mem.indexOf(u8, syntax, ",path=").?;
+        const path_start = prefix_end + ",path=".len;
+        const prefix = syntax[prefix_start..prefix_end];
+        const path = syntax[path_start..];
+        try templates_paths_buf.append(.{ .prefix = prefix, .path = path });
+    }
+
+    const template_paths = args[3..];
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     const arena_allocator = arena.allocator();
-    var manifest = Manifest.init(arena_allocator, templates_path, template_paths);
+    var manifest = Manifest.init(arena_allocator, templates_paths_buf.items, template_paths);
 
-    const content = switch (zmpl_version) {
-        .v1 => try manifest.compile(.v1, Template, zmpl_options),
-        .v2 => try manifest.compile(.v2, ModalTemplate, zmpl_options),
-    };
+    const content = try manifest.compile(Template, zmpl_options);
 
     const file = try std.fs.createFileAbsolute(manifest_path, .{ .truncate = true });
     try file.writeAll(content);
     file.close();
-}
-
-fn getVersion(allocator: std.mem.Allocator) !Manifest.Version {
-    const default_version = "v1";
-    const version = std.process.getEnvVarOwned(allocator, "ZMPL_VERSION") catch |err| blk: {
-        break :blk switch (err) {
-            error.EnvironmentVariableNotFound => try allocator.dupe(u8, default_version),
-            else => return err,
-        };
-    };
-
-    defer allocator.free(version);
-
-    if (std.mem.eql(u8, version, "v1")) return .v1;
-    if (std.mem.eql(u8, version, "v2")) return .v2;
-
-    std.debug.print("Unrecognized Zmpl version: `{s}`. Expected: {{ v1, v2 }}\n", .{version});
-    unreachable;
 }

@@ -48,12 +48,6 @@ pub const RenderFn = *const fn (*Data) anyerror![]const u8;
 pub const LayoutContent = struct {
     data: []const u8,
 
-    // v1
-    pub fn toString(self: *const LayoutContent) ![]const u8 {
-        return self.data;
-    }
-
-    // v2
     pub fn format(self: LayoutContent, actual_fmt: []const u8, options: anytype, writer: anytype) !void {
         _ = options;
         _ = actual_fmt;
@@ -94,23 +88,6 @@ pub fn deinit(self: *Data) void {
     if (self.arena) |arena| arena.deinit();
     self.output_buf.deinit();
     self.json_buf.deinit();
-}
-
-/// Render a partial template. Do not invoke directly, use `{^partial_name}` syntax instead.
-/// TODO: v1 compat. - v2 renders partial functions directly.
-pub fn renderPartial(self: *Data, name: []const u8, partial_data: *Object, slots: []const String) !void {
-    if (zmpl.find(name)) |template| {
-        self.partial = true;
-        self.partial_data = partial_data;
-        self.slots = slots;
-        defer self.partial = false;
-        defer self.partial_data = null;
-        defer self.slots = null;
-        // Partials return an empty string as they share the same writer as parent template.
-        _ = try template.render(self);
-    } else {
-        return error.ZmplPartialNotFound;
-    }
 }
 
 /// Chomps output buffer. Used for partials to allow user to add an explicit blank line at the
@@ -194,13 +171,10 @@ pub fn getValueString(self: Data, key: []const u8) ![]const u8 {
                 return try v.toString();
             },
         }
-    } else return switch (manifest.version) {
-        .v1 => "",
-        .v2 => blk: {
-            std.debug.print("[zmpl] Unknown data reference: `{s}`\n", .{key});
-            break :blk error.ZmplUnknownDataReferenceError;
-        },
-    };
+    } else {
+        std.debug.print("[zmpl] Unknown data reference: `{s}`\n", .{key});
+        return error.ZmplUnknownDataReferenceError;
+    }
 }
 
 const Item = struct {
@@ -453,14 +427,14 @@ pub fn boolean(self: *Data, value: bool) *Value {
     return val;
 }
 
-/// Creates a new `Value` representing a `null` value. Public, but for internal use only.
+/// Create a new `Value` representing a `null` value. Public, but for internal use only.
 pub fn _null(allocator: std.mem.Allocator) *Value {
     const val = allocator.create(Value) catch @panic("Out of memory");
     val.* = .{ .Null = NullType{ .allocator = allocator } };
     return val;
 }
 
-/// Writes a given string to the output buffer. Creates a new output buffer if not already
+/// Write a given string to the output buffer. Creates a new output buffer if not already
 /// present. Used by compiled Zmpl templates.
 pub fn write(self: *Data, slice: []const u8) !void {
     if (self.output_writer) |writer| {
@@ -471,13 +445,33 @@ pub fn write(self: *Data, slice: []const u8) !void {
     }
 }
 
-/// Gets a value from the data tree using an exact key. Returns `null` if key not found or if
+/// Get a value from the data tree using an exact key. Returns `null` if key not found or if
 /// root object is not `Object`.
 pub fn get(self: *Data, key: []const u8) ?*Value {
     if (self.value == null) return null;
 
     return switch (self.value.?.*) {
         .object => |value| value.get(key),
+        else => null,
+    };
+}
+
+/// Get a typed value from the data tree using an exact key. Returns `null` if key not found or
+/// if root object is not `Object`. Use this function to resolve the underlying value in a Value.
+/// (e.g. `.string` returns `[]const u8`).
+pub fn getT(self: *Data, comptime T: ValueType, key: []const u8) ?switch (T) {
+    .object => *Object,
+    .array => *Array,
+    .string => []const u8,
+    .float => f128,
+    .integer => i128,
+    .boolean => bool,
+    .Null => null,
+} {
+    if (self.value == null) return null;
+
+    return switch (self.value.?.*) {
+        .object => |value| value.getT(T, key),
         else => null,
     };
 }
@@ -493,31 +487,10 @@ pub fn chain(self: *Data, keys: []const []const u8) ?*Value {
 /// Gets a value from the data tree using reference lookup syntax (e.g. `.foo.bar.baz`).
 /// Used internally by templates.
 pub fn _get(self: *Data, key: []const u8) !*Value {
-    if (try self.getValue(key)) |value| {
-        return value;
-    } else return switch (manifest.version) {
-        .v1 => _null(self.getAllocator()),
-        .v2 => error.ZmplUnknownDataReferenceError,
-    };
-}
-
-// TODO: Remove - v1 only
-/// Formats a comptime value as a string, e.g.:
-/// ```
-/// const foo = "abc";
-/// data.formatDecl(foo); // --> "foo"
-///
-/// const bar = 123;
-/// data.formatDecl(bar); // --> "123"
-/// ```
-///
-/// Used for rendering comptime values defined within a template.
-pub fn formatDecl(self: *Data, comptime decl: anytype) ![]const u8 {
-    if (comptime isZigString(@TypeOf(decl))) {
-        return try std.fmt.allocPrint(self.getAllocator(), "{s}", .{decl});
-    } else {
-        return try std.fmt.allocPrint(self.getAllocator(), "{}", .{decl});
-    }
+    return if (try self.getValue(key)) |value|
+        value
+    else
+        error.ZmplUnknownDataReferenceError;
 }
 
 /// Returns the entire `Data` tree as a JSON string.
@@ -575,9 +548,19 @@ fn parseJsonValue(self: *Data, value: std.json.Value) !*Value {
     };
 }
 
+pub const ValueType = enum {
+    object,
+    array,
+    float,
+    integer,
+    boolean,
+    string,
+    Null,
+};
+
 /// A generic type representing any supported type. All types are JSON-compatible and can be
 /// serialized and deserialized losslessly.
-pub const Value = union(enum) {
+pub const Value = union(ValueType) {
     object: Object,
     array: Array,
     float: Float,
@@ -621,16 +604,34 @@ pub const Value = union(enum) {
     }
 
     /// Gets a `Value` from an `Object`.
-    pub fn get(self: *Value, key: []const u8) ?*Value {
+    pub fn get(self: *const Value, key: []const u8) ?*Value {
         switch (self.*) {
             .object => |*capture| return capture.get(key),
             inline else => unreachable,
         }
     }
 
+    /// Get a typed value from the data tree using an exact key. Returns `null` if key not found or
+    /// if root object is not `Object`. Use this function to resolve the underlying value in a Value.
+    /// (e.g. `.string` returns `[]const u8`).
+    pub fn getT(self: *const Value, comptime T: ValueType, key: []const u8) ?switch (T) {
+        .object => *Object,
+        .array => *Array,
+        .string => []const u8,
+        .float => f128,
+        .integer => i128,
+        .boolean => bool,
+        .Null => null,
+    } {
+        return switch (self.*) {
+            .object => |value| value.getT(T, key),
+            else => null,
+        };
+    }
+
     /// Receives an array of keys and recursively gets each key from nested objects, returning `null`
     /// if a key is not found, or `*Value` if all keys are found.
-    pub fn chain(self: *Value, keys: []const []const u8) ?*Value {
+    pub fn chain(self: *const Value, keys: []const []const u8) ?*Value {
         return switch (self.*) {
             .object => |*capture| capture.chain(keys),
             else => null,
@@ -877,6 +878,47 @@ pub const Object = struct {
         } else return null;
     }
 
+    pub fn getT(self: Object, comptime T: ValueType, key: []const u8) ?switch (T) {
+        .object => *Object,
+        .array => *Array,
+        .string => []const u8,
+        .float => f128,
+        .integer => i128,
+        .boolean => bool,
+        .Null => null,
+    } {
+        if (self.hashmap.getEntry(key)) |entry| {
+            const value = entry.value_ptr.*.*;
+            return switch (T) {
+                .object => switch (value) {
+                    .object => entry.value_ptr.*,
+                    else => null,
+                },
+                .array => switch (value) {
+                    .array => entry.value_ptr.*,
+                    else => null,
+                },
+                .string => switch (value) {
+                    .string => |capture| capture.value,
+                    else => null,
+                },
+                .float => switch (value) {
+                    .float => |capture| capture.value,
+                    else => null,
+                },
+                .integer => switch (value) {
+                    .integer => |capture| capture.value,
+                    else => null,
+                },
+                .boolean => switch (value) {
+                    .boolean => |capture| capture.value,
+                    else => null,
+                },
+                .Null => null,
+            };
+        } else return null;
+    }
+
     pub fn chain(self: Object, keys: []const []const u8) ?*Value {
         var current_object = self;
 
@@ -1006,33 +1048,4 @@ fn isStringCoercablePointer(pointer: std.builtin.Type.Pointer, child: type, arra
         child == .Array and
         &child.Array.child == array_child) return true;
     return false;
-}
-
-// TODO: Remove - v1 only
-fn isZigString(comptime T: type) bool {
-    return comptime blk: {
-        // Only pointer types can be strings, no optionals
-        const info = @typeInfo(T);
-        if (info != .Pointer) break :blk false;
-
-        const ptr = &info.Pointer;
-        // Check for CV qualifiers that would prevent coerction to []const u8
-        if (ptr.is_volatile or ptr.is_allowzero) break :blk false;
-
-        // If it's already a slice, simple check.
-        if (ptr.size == .Slice) {
-            break :blk ptr.child == u8;
-        }
-
-        // Otherwise check if it's an array type that coerces to slice.
-        if (ptr.size == .One) {
-            const child = @typeInfo(ptr.child);
-            if (child == .Array) {
-                const arr = &child.Array;
-                break :blk arr.child == u8;
-            }
-        }
-
-        break :blk false;
-    };
 }
