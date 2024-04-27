@@ -166,7 +166,7 @@ fn compileTemplates(
 
         var file = try std.fs.openFileAbsolute(path, .{});
         const size = (try file.stat()).size;
-        const content = try file.readToEndAlloc(self.allocator, size);
+        const content = try file.readToEndAlloc(self.allocator, @intCast(size));
         var template = TemplateType.init(
             self.allocator,
             generated_name,
