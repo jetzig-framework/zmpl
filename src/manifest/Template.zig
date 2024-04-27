@@ -10,6 +10,7 @@ templates_path: []const u8,
 name: []const u8,
 path: []const u8,
 input: []const u8,
+template_type: TemplateType,
 state: enum { initial, tokenized, parsed, compiled } = .initial,
 tokens: std.ArrayList(Token),
 root_node: *Node = undefined,
@@ -68,6 +69,7 @@ pub fn init(
         .templates_path = templates_path,
         .name = name,
         .path = path,
+        .template_type = templateType(path),
         .input = util.normalizeInput(allocator, input),
         .tokens = std.ArrayList(Token).init(allocator),
         .partial = std.mem.startsWith(u8, std.fs.path.basename(path), "_"),
@@ -91,7 +93,7 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
     const writer = buf.writer();
 
     try self.renderHeader(writer, options);
-    try self.root_node.compile(self.input, writer);
+    try self.root_node.compile(self.input, writer, options);
     try self.renderFooter(writer);
 
     self.state = .compiled;
@@ -120,7 +122,6 @@ const DelimitedMode = struct {
     delimiter_string: ?[]const u8 = null,
 };
 
-const default_mode: Mode = .html;
 const Context = struct {
     mode: Mode,
     delimiter: Delimiter,
@@ -144,7 +145,7 @@ fn tokenize(self: *Template) !void {
 
     var stack = std.ArrayList(Context).init(self.allocator);
     defer stack.deinit();
-    try stack.append(.{ .mode = default_mode, .depth = 1, .start = 0, .delimiter = .eof });
+    try stack.append(.{ .mode = self.defaultMode(), .depth = 1, .start = 0, .delimiter = .eof });
 
     var line_it = std.mem.splitScalar(u8, self.input, '\n');
     var cursor: usize = 0;
@@ -238,7 +239,7 @@ fn appendToken(self: *Template, context: Context, end: usize, depth: usize) !voi
 // Append a root token with the default mode that covers the entire input.
 fn appendRootToken(self: *Template) !void {
     try self.tokens.append(.{
-        .mode = default_mode,
+        .mode = self.defaultMode(),
         .delimiter = .eof,
         .start = 0,
         .end = self.input.len,
@@ -258,7 +259,7 @@ fn parse(self: *Template) !void {
 
     try self.parseChildren(self.root_node);
 
-    // debugTree(self.root_node, 0);
+    // debugTree(self.root_node, 0, self.path);
 
     self.state = .parsed;
 }
@@ -589,7 +590,7 @@ fn renderFooter(self: Template, writer: anytype) !void {
             \\    defer zmpl._allocator.free(inner_content);
             \\    zmpl.output_buf.clearAndFree();
             \\    zmpl.content = .{{ .data = zmpl.strip(inner_content) }};
-            \\    const content = try layout.render(zmpl);
+            \\    const content = try layout._render(zmpl);
             \\    zmpl.output_buf.clearAndFree();
             \\    return content;
             \\}}
@@ -615,6 +616,24 @@ fn getRootToken(tokens: []Token) Token {
     return tokens[root_token_index];
 }
 
+fn defaultMode(self: Template) Mode {
+    return switch (self.template_type) {
+        .html => .html,
+        .markdown => .markdown,
+    };
+}
+
+const TemplateType = enum { html, markdown };
+
+// Identify template type - currently either `html` or `markdown`.
+fn templateType(path: []const u8) TemplateType {
+    if (std.mem.endsWith(u8, path, ".md.zmpl")) return .markdown;
+    if (std.mem.endsWith(u8, path, ".html.zmpl")) return .html;
+    if (std.mem.endsWith(u8, path, ".zmpl")) return .html;
+
+    unreachable;
+}
+
 fn debugError(self: Template, line: []const u8, line_index: usize) void {
     std.debug.print(
         "[zmpl] Error resolving braces in `{s}:{}` \n    {s}\n",
@@ -635,13 +654,13 @@ fn debugToken(self: Template, token: Token, print_content: bool) void {
 }
 
 // Output a parsed tree with indentation to stderr.
-fn debugTree(node: *Node, level: usize) void {
+fn debugTree(node: *Node, level: usize, path: []const u8) void {
     if (level == 0) {
-        std.debug.print("tree:\n", .{});
+        std.debug.print("tree: {s}\n", .{path});
     }
     for (0..level + 1) |_| std.debug.print(" ", .{});
     std.debug.print("{s} {}->{}\n", .{ @tagName(node.token.mode), node.token.start, node.token.end });
     for (node.children.items) |child_node| {
-        debugTree(child_node, level + 1);
+        debugTree(child_node, level + 1, path);
     }
 }

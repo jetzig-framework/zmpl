@@ -11,7 +11,7 @@ pub fn main() !void {
             @typeName(zmpl_options)),
     };
 
-    const permitted_fields = .{"template_constants"};
+    const permitted_fields = .{ "template_constants", "markdown_fragments" };
 
     inline for (options_fields) |field| {
         inline for (permitted_fields) |permitted_field| {

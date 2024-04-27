@@ -38,12 +38,12 @@ const manifest = @import("zmpl.manifest").__Manifest;
 const zmpl = @import("../zmpl.zig");
 const util = zmpl.util;
 
+const zmd = @import("zmd");
+
 /// Output stream for writing values into a rendered template.
 pub const Writer = std.ArrayList(u8).Writer;
 
 const Data = @This();
-
-pub const RenderFn = *const fn (*Data) anyerror![]const u8;
 
 pub const LayoutContent = struct {
     data: []const u8,
@@ -113,6 +113,14 @@ pub fn chomp(self: *Data, input: []const u8) []const u8 {
     _ = self;
     return util.chomp(input);
 }
+
+const MarkdownFragmentType = enum { link };
+const MarkdownNode = struct {
+    content: ?[]const u8,
+    href: ?[]const u8,
+    title: ?[]const u8,
+    meta: ?[]const u8,
+};
 
 /// Evaluate equality of two Data trees, recursively comparing all values.
 pub fn eql(self: *const Data, other: *const Data) bool {

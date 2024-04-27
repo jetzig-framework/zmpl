@@ -71,13 +71,8 @@ pub fn compile(
         \\
         \\pub const ZmplValue = __zmpl.Data.Value;
         \\pub const __Manifest = struct {
-        \\    pub const Template = struct {
-        \\       name: []const u8,
-        \\       prefix: []const u8,
-        \\       key: []const u8,
-        \\       render: __zmpl.Data.RenderFn,
-        \\       renderWithLayout: *const fn(Template, *__zmpl.Data) anyerror![]const u8,
-        \\    };
+        \\    const TemplateType = enum { zmpl, markdown };
+        \\    pub const Template = __zmpl.Template;
         \\
         \\    /// Find any template matching a given name. Uses all template paths in order.
         \\    pub fn find(name: []const u8) ?Template {
@@ -110,8 +105,8 @@ pub fn compile(
 
         try writer.writeAll(try std.fmt.allocPrint(self.allocator,
             \\const {0s} = __Manifest.Template{{
-            \\  .render = {0s}_render,
-            \\  .renderWithLayout = {0s}_renderWithLayout,
+            \\  ._render = {0s}_render,
+            \\  ._renderWithLayout = {0s}_renderWithLayout,
             \\  .key = "{2s}",
             \\  .name = "{0s}",
             \\  .prefix = "{1s}",
@@ -156,6 +151,11 @@ fn compileTemplates(
         if (!std.mem.startsWith(u8, path, templates_path.path)) continue;
         const generated_name = try util.generateVariableNameAlloc(self.allocator);
         const key = try util.templatePathStore(self.allocator, templates_path.path, path);
+        if (template_map.get(key)) |_| {
+            std.debug.print("[zmpl] Found duplicate template: {s}\n", .{path});
+            std.debug.print("[zmpl] Template names must be uniquely identifiable. Exiting.\n", .{});
+            std.process.exit(1);
+        }
         try template_map.put(key, generated_name);
     }
 

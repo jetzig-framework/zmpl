@@ -87,7 +87,13 @@ pub fn templatePathStore(allocator: std.mem.Allocator, root: []const u8, path: [
 
     const normalized = try std.mem.replaceOwned(u8, allocator, relative, "\\", "/");
 
-    return normalized[0 .. normalized.len - std.fs.path.extension(normalized).len];
+    const extension = if (std.mem.endsWith(u8, normalized, ".md.zmpl"))
+        ".md.zmpl"
+    else if (std.mem.endsWith(u8, normalized, ".html.zmpl"))
+        ".html.zmpl"
+    else
+        std.fs.path.extension(normalized);
+    return normalized[0 .. normalized.len - extension.len];
 }
 
 /// Normalize a template path for fetching from a lookup map.
@@ -129,4 +135,18 @@ pub fn readFile(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
     };
     const content = std.fs.cwd().readFileAlloc(allocator, path, stat.size);
     return content;
+}
+
+/// Output an escaped string suitable for use in generated Zig code.
+pub fn zigStringEscape(allocator: std.mem.Allocator, input: ?[]const u8) ![]const u8 {
+    if (input) |string| {
+        var buf = std.ArrayList(u8).init(allocator);
+        const writer = buf.writer();
+        try writer.writeByte('"');
+        try std.zig.stringEscape(string, "", .{}, writer);
+        try writer.writeByte('"');
+        return try buf.toOwnedSlice();
+    } else {
+        return try allocator.dupe(u8, "null");
+    }
 }

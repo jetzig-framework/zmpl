@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 
 pub const zmpl = @import("src/zmpl.zig");
 pub const Data = zmpl.Data;
+const zmd = @import("zmd");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -21,6 +22,7 @@ pub fn build(b: *std.Build) !void {
     const zmd_dep = b.dependency("zmd", .{ .target = target, .optimize = optimize });
     const zmd_module = zmd_dep.module("zmd");
     lib.root_module.addImport("zmd", zmd_module);
+    zmpl_module.addImport("zmd", zmd_module);
 
     const zmpl_constants_option = b.option([]const u8, "zmpl_constants", "Template constants");
 
@@ -35,6 +37,8 @@ pub fn build(b: *std.Build) !void {
         "zmpl_templates_paths",
         "Directories to search for .zmpl templates. Format: `prefix=...,path=...",
     );
+
+    const zmpl_markdown_fragments_option = b.option([]const u8, "zmpl_markdown_fragments", "Custom markdown fragments");
 
     const templates_paths: []const []const u8 = if (templates_path) |path|
         try templatesPaths(
@@ -67,12 +71,11 @@ pub fn build(b: *std.Build) !void {
     const options_files = b.addWriteFiles();
     const zmpl_constants_file = options_files.add(
         "zmpl_options.zig",
-        try parseZmplConstants(b.allocator, zmpl_constants_option),
+        try generateZmplOptions(b.allocator, zmpl_markdown_fragments_option, zmpl_constants_option),
     );
-    manifest_exe.root_module.addImport(
-        "zmpl_options",
-        b.createModule(.{ .root_source_file = zmpl_constants_file }),
-    );
+    const zmpl_options_module = b.createModule(.{ .root_source_file = zmpl_constants_file });
+    zmpl_options_module.addImport("zmd", zmd_module);
+    manifest_exe.root_module.addImport("zmpl_options", zmpl_options_module);
     manifest_exe.root_module.addImport("zmd", zmd_module);
     const manifest_exe_run = b.addRunArtifact(manifest_exe);
     const manifest_lazy_path = manifest_exe_run.addOutputFileArg("zmpl.manifest.zig");
@@ -85,6 +88,7 @@ pub fn build(b: *std.Build) !void {
 
     const manifest_module = b.addModule("zmpl.manifest", .{ .root_source_file = manifest_lazy_path });
     manifest_module.addImport("zmpl", zmpl_module);
+    manifest_module.addImport("zmd", zmd_module);
     zmpl_module.addImport("zmpl.manifest", manifest_module);
 
     if (auto_build) {
@@ -201,6 +205,20 @@ fn findTemplates(b: *std.Build, templates_paths: []const []const u8) ![][]const 
         }
     }
     return try templates.toOwnedSlice();
+}
+
+fn generateZmplOptions(
+    allocator: std.mem.Allocator,
+    markdown_fragments: ?[]const u8,
+    constants: ?[]const u8,
+) ![]const u8 {
+    const constants_source = try parseZmplConstants(allocator, constants);
+    return try std.fmt.allocPrint(allocator,
+        \\{s}
+        \\
+        \\{s}
+        \\
+    , .{ constants_source, markdown_fragments orelse "" });
 }
 
 fn parseZmplConstants(allocator: std.mem.Allocator, constants_string: ?[]const u8) ![]const u8 {
