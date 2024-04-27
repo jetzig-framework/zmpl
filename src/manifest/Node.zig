@@ -1,13 +1,10 @@
 const std = @import("std");
 
 const Zmd = @import("zmd").Zmd;
+const ZmdNode = @import("zmd").Node;
 
 const Token = @import("Template.zig").Token;
 const util = @import("util.zig");
-
-const markdown_fragments = struct {
-    pub const root = .{ "<div>", "</div>" };
-};
 
 token: Token,
 children: std.ArrayList(*Node),
@@ -20,7 +17,7 @@ const Node = @This();
 
 const WriterOptions = struct { zmpl_write: []const u8 = "zmpl.write" };
 
-pub fn compile(self: Node, input: []const u8, writer: anytype) !void {
+pub fn compile(self: Node, input: []const u8, writer: anytype, options: type) !void {
     if (self.token.mode == .partial and self.children.items.len > 0) {
         std.debug.print(
             "Partial slots cannot contain mode blocks:\n{s}\n",
@@ -35,33 +32,40 @@ pub fn compile(self: Node, input: []const u8, writer: anytype) !void {
     for (self.children.items) |child_node| {
         if (start < child_node.token.start) {
             const content = input[start .. child_node.token.start - 1];
-            const rendered_content = try self.render(content);
+            const rendered_content = try self.render(content, options);
             try writer.writeAll(rendered_content);
         }
 
         start = child_node.token.end + 1;
-        try child_node.compile(input, writer);
+        try child_node.compile(input, writer, options);
     }
 
     if (self.children.items.len == 0) {
         const content = input[self.token.startOfContent()..self.token.endOfContent()];
-        const rendered_content = try self.render(content);
+        const rendered_content = try self.render(content, options);
         try writer.writeAll(rendered_content);
     } else {
         const last_child = self.children.items[self.children.items.len - 1];
         if (last_child.token.end + 1 < self.token.endOfContent()) {
             const content = input[last_child.token.end + 1 .. self.token.endOfContent()];
-            const rendered_content = try self.render(content);
+            const rendered_content = try self.render(content, options);
             try writer.writeAll(rendered_content);
         }
     }
 }
 
-fn render(self: Node, content: []const u8) ![]const u8 {
+fn render(self: Node, content: []const u8, options: type) ![]const u8 {
+    const markdown_fragments = if (@hasDecl(options, "markdown_fragments"))
+        options.markdown_fragments
+    else
+        struct {
+            pub const root = .{ "<div>", "</div>" };
+        };
+
     return switch (self.token.mode) {
         .zig => try self.renderZig(content),
         .html => try self.renderHtml(content, .{}),
-        .markdown => try self.renderHtml(try self.renderMarkdown(content), .{}),
+        .markdown => try self.renderHtml(try self.renderMarkdown(content, markdown_fragments), .{}),
         .partial => try self.renderPartial(content),
         .args => try self.renderArgs(),
     };
@@ -177,12 +181,12 @@ fn getHtmlLineMode(line: []const u8) enum { html, zig } {
         .zig;
 }
 
-fn renderMarkdown(self: Node, content: []const u8) ![]const u8 {
+fn renderMarkdown(self: Node, content: []const u8, fragments: type) ![]const u8 {
     var zmd = Zmd.init(self.allocator);
     defer zmd.deinit();
 
     try zmd.parse(content);
-    return try zmd.toHtml(markdown_fragments);
+    return try zmd.toHtml(fragments);
 }
 
 const Syntax = struct {

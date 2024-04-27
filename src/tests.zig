@@ -217,3 +217,19 @@ test "custom delimiters" {
         try std.testing.expect(false);
     }
 }
+
+test ".md.zmpl extension" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    if (zmpl.find("markdown_extension")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\<div><h1>Hello</h1>
+            \\</div>
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
