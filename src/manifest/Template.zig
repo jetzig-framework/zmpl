@@ -537,7 +537,7 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
         self.allocator,
         \\pub fn {0s}_render{1s}(zmpl: *__zmpl.Data, {2s}) anyerror![]const u8 {{
         \\{3s}
-        \\    const allocator = zmpl.getAllocator();
+        \\    const allocator = zmpl.allocator();
         \\    zmpl.noop(std.mem.Allocator, allocator);
         \\    {4s}
         \\
@@ -559,7 +559,7 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
 fn renderFooter(self: Template, writer: anytype) !void {
     try writer.writeAll(
         \\
-        \\return zmpl._allocator.dupe(u8, zmpl.strip(zmpl.output_buf.items));
+        \\return zmpl.parent_allocator.dupe(u8, zmpl.strip(zmpl.output_buf.items));
         \\}
         \\
     );
@@ -587,7 +587,7 @@ fn renderFooter(self: Template, writer: anytype) !void {
             \\    zmpl: *__zmpl.Data,
             \\) anyerror![]const u8 {{
             \\    const inner_content = try {0s}_render(zmpl);
-            \\    defer zmpl._allocator.free(inner_content);
+            \\    defer zmpl.parent_allocator.free(inner_content);
             \\    zmpl.output_buf.clearAndFree();
             \\    zmpl.content = .{{ .data = zmpl.strip(inner_content) }};
             \\    const content = try layout._render(zmpl);
