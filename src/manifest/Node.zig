@@ -270,12 +270,12 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
         return error.ZmplSyntaxError;
     }
 
-    const target_partial_args = try self.getPartialArgsSignature(partial_name);
+    const expected_partial_args = try self.getPartialArgsSignature(partial_name);
 
     var reordered_args = std.ArrayList(Arg).init(self.allocator);
     defer reordered_args.deinit();
 
-    outer: for (target_partial_args, 0..) |expected_arg, expected_arg_index| {
+    outer: for (expected_partial_args, 0..) |expected_arg, expected_arg_index| {
         for (partial_args, 0..) |actual_arg, actual_arg_index| {
             if (actual_arg.name == null) {
                 if (actual_arg_index == expected_arg_index) {
@@ -293,11 +293,19 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
         }
     }
 
-    if (reordered_args.items.len != target_partial_args.len) {
+    for (expected_partial_args, 0..) |expected_arg, index| {
+        if (index > reordered_args.items.len - 1) {
+            if (expected_arg.default) |default| try reordered_args.append(
+                .{ .name = expected_arg.name, .value = default },
+            );
+        }
+    }
+
+    if (reordered_args.items.len != expected_partial_args.len) {
         std.debug.print("Expected args for partial `{s}`: ", .{partial_name});
-        for (target_partial_args, 0..) |arg, index| std.debug.print(
+        for (expected_partial_args, 0..) |arg, index| std.debug.print(
             "{s}{s}",
-            .{ arg.name.?, if (index + 1 < target_partial_args.len) ", " else "\n" },
+            .{ arg.name.?, if (index + 1 < expected_partial_args.len) ", " else "\n" },
         );
         std.debug.print("Found: ", .{});
         for (partial_args, 0..) |arg, index| std.debug.print(
@@ -424,9 +432,19 @@ fn renderArgs(self: Node) ![]const u8 {
 const Arg = struct {
     name: ?[]const u8,
     value: []const u8,
+    default: ?[]const u8 = null,
 };
 
-fn parsePartialArgs(self: Node, input: []const u8) ![]Arg {
+fn parsePartialArgsSignature(self: Node, input: []const u8) ![]Arg {
+    // var args = std.ArrayList(Arg).init(self.allocator);
+    const args = try self.parsePartialArgs(input);
+    for (args) |arg| {
+        std.debug.print("arg: {any}\n", .{arg});
+    }
+    return args;
+}
+
+pub fn parsePartialArgs(self: Node, input: []const u8) ![]Arg {
     var args = std.ArrayList(Arg).init(self.allocator);
 
     const first_token = std.mem.indexOfScalar(u8, input, '(');
@@ -472,12 +490,21 @@ fn parsePartialArgs(self: Node, input: []const u8) ![]Arg {
     for (chunks.items) |chunk| {
         var name: ?[]const u8 = null;
         var value: []const u8 = undefined;
+        var default: ?[]const u8 = null;
 
         const keypair_sep = ": ";
         if (std.mem.indexOf(u8, chunk, keypair_sep)) |token_lhs| { // Keyword arg
             name = util.strip(chunk[0..token_lhs]);
             if (chunk.len > token_lhs + keypair_sep.len) {
                 value = util.strip(chunk[token_lhs + keypair_sep.len ..]);
+                if (std.mem.indexOfScalar(u8, value, '=')) |index| {
+                    if (index + 1 > value.len - 1) {
+                        std.debug.print("Error parsing default value: `{s}`\n", .{chunk});
+                        return error.ZmplSyntaxError;
+                    }
+                    default = value[index + 1 ..];
+                    value = value[0..index];
+                }
             } else {
                 debugPartialArgumentError(chunk);
                 return error.ZmplPartialArgumentError;
@@ -490,6 +517,7 @@ fn parsePartialArgs(self: Node, input: []const u8) ![]Arg {
         try args.append(.{
             .name = if (name) |capture| try self.allocator.dupe(u8, capture) else null,
             .value = try self.allocator.dupe(u8, value),
+            .default = if (default) |capture| try self.allocator.dupe(u8, capture) else null,
         });
     }
 

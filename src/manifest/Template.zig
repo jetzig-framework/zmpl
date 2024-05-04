@@ -522,10 +522,25 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
             std.debug.print("@args pragma can only be used once per template.\n", .{});
             return error.ZmplSyntaxError;
         }
-        // Allow `@args(foo: []const u8, bar: usize)`
-        //  and: `@args foo: []const u8, bar: usize`
-        //  since it's barely any extra work.
-        self.args = util.trimParentheses(util.strip(token.mode_line["@args".len..]));
+        // Force (optional) parentheses to satisfy args parser.
+        const args_mode_line = try std.fmt.allocPrint(
+            self.allocator,
+            "({s})",
+            .{util.trimParentheses(util.strip(token.mode_line["@args".len..]))},
+        );
+
+        const args = try self.root_node.parsePartialArgs(args_mode_line);
+        var args_buf = std.ArrayList(u8).init(self.allocator);
+        const args_writer = args_buf.writer();
+
+        for (args) |arg| {
+            if (arg.name == null) {
+                std.debug.print("Error parsing `@args` pragma: `{s}`\n", .{token.mode_line});
+                return error.ZmplSyntaxError;
+            }
+            try args_writer.print("{0s}: {1s}, ", .{ arg.name.?, arg.value });
+        }
+        self.args = try args_buf.toOwnedSlice();
     }
 
     const args = try std.mem.concat(

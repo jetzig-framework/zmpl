@@ -233,3 +233,18 @@ test ".md.zmpl extension" {
         try std.testing.expect(false);
     }
 }
+
+test "default partial arguments" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    if (zmpl.find("default_partial_arguments")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\bar, default value
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
