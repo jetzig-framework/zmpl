@@ -680,6 +680,17 @@ pub const Value = union(ValueType) {
         };
     }
 
+    pub fn clone(self: *const Value, gpa: std.mem.Allocator) !*Value {
+        const json = try self.toJson();
+        const arena = switch (self.*) {
+            inline else => |capture| capture.allocator,
+        };
+        defer arena.free(json);
+        var data = Data.init(gpa);
+        try data.fromJson(json);
+        return data.value.?;
+    }
+
     pub fn format(self: *Value, actual_fmt: []const u8, options: anytype, writer: anytype) !void {
         _ = options;
         _ = actual_fmt;
