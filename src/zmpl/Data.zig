@@ -345,7 +345,23 @@ pub fn getConst(self: *Data, T: type, name: []const u8) !T {
 pub fn getCoerce(self: Data, T: type, name: []const u8) !T {
     return switch (T) {
         []const u8 => self.getT(.string, name) orelse error.ZmplUnknownDataReferenceError,
-        u1, u2, u4, u8, u16, u32, u64, u128, i8, i16, i32, i64, i128 => if (self.getT(.integer, name)) |value|
+        u1,
+        u2,
+        u4,
+        u8,
+        u16,
+        u32,
+        u64,
+        u128,
+        i1,
+        i2,
+        i4,
+        i8,
+        i16,
+        i32,
+        i64,
+        i128,
+        => if (self.getT(.integer, name)) |value|
             @as(T, @intCast(value))
         else
             error.ZmplUnknownDataReferenceError,
