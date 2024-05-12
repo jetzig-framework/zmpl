@@ -287,3 +287,25 @@ test "references combined with markdown" {
         try std.testing.expect(false);
     }
 }
+
+test "partial arg type coercion" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var object = try data.object();
+    try object.put("foo", data.integer(100));
+    try object.put("bar", data.float(123.456));
+    try object.put("baz", data.string("qux"));
+
+    if (zmpl.find("partial_arg_type_coercion")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\100
+            \\123.456
+            \\qux
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}

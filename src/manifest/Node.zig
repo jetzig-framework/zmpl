@@ -333,14 +333,14 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
     var args_buf = std.ArrayList([]const u8).init(self.allocator);
     defer args_buf.deinit();
 
-    for (reordered_args.items) |arg| {
+    for (reordered_args.items, expected_partial_args) |arg, expected_arg| {
         if (std.mem.startsWith(u8, arg.value, ".")) {
             // Pass a *Zmpl.Value to partial using regular data lookup syntax.
             const value = try std.fmt.allocPrint(
                 self.allocator,
-                \\(try zmpl._get("{s}"))
+                \\(try zmpl.getCoerce({s}, "{s}"))
             ,
-                .{arg.value[1..]},
+                .{ expected_arg.value, arg.value[1..] },
             );
             try args_buf.append(value);
         } else {
@@ -554,7 +554,6 @@ fn renderRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]co
 }
 
 fn renderDataRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
-    // TODO: Attempt to coerce Zmpl value to partial arg type if data ref is passed to a partial
     return std.fmt.allocPrint(
         self.allocator,
         \\_ = try {s}(try zmpl.getValueString("{s}"));

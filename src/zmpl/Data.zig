@@ -339,6 +339,26 @@ pub fn getConst(self: *Data, T: type, name: []const u8) !T {
     }
 }
 
+/// Coerce a data reference to the given type.
+/// If a partial argument is a data reference (as opposed to a local constant/literal/etc.),
+/// attempt to coerce it to the expected argument type.
+pub fn getCoerce(self: Data, T: type, name: []const u8) !T {
+    return switch (T) {
+        []const u8 => self.getT(.string, name) orelse error.ZmplUnknownDataReferenceError,
+        u1, u2, u4, u8, u16, u32, u64, u128, i8, i16, i32, i64, i128 => if (self.getT(.integer, name)) |value|
+            @as(T, @intCast(value))
+        else
+            error.ZmplUnknownDataReferenceError,
+        f16, f32, f64, f128 => if (self.getT(.float, name)) |value|
+            @as(T, @floatCast(value))
+        else
+            error.ZmplUnknownDataReferenceError,
+        bool => self.getT(.boolean, name) orelse error.ZmplUnknownDataReferenceError,
+        *Value => try self._get(name),
+        else => @compileError("Unsupported type for data lookup in partial args: " ++ @typeName(T)),
+    };
+}
+
 /// Resets the current `Data` object, allowing it to be re-initialized with a new root value.
 pub fn reset(self: *Data) void {
     if (self.value) |*ptr| {
@@ -456,7 +476,7 @@ pub fn write(self: *Data, slice: []const u8) !void {
 
 /// Get a value from the data tree using an exact key. Returns `null` if key not found or if
 /// root object is not `Object`.
-pub fn get(self: *Data, key: []const u8) ?*Value {
+pub fn get(self: Data, key: []const u8) ?*Value {
     if (self.value == null) return null;
 
     return switch (self.value.?.*) {
@@ -468,7 +488,7 @@ pub fn get(self: *Data, key: []const u8) ?*Value {
 /// Get a typed value from the data tree using an exact key. Returns `null` if key not found or
 /// if root object is not `Object`. Use this function to resolve the underlying value in a Value.
 /// (e.g. `.string` returns `[]const u8`).
-pub fn getT(self: *Data, comptime T: ValueType, key: []const u8) ?switch (T) {
+pub fn getT(self: *const Data, comptime T: ValueType, key: []const u8) ?switch (T) {
     .object => *Object,
     .array => *Array,
     .string => []const u8,
@@ -495,7 +515,7 @@ pub fn chain(self: *Data, keys: []const []const u8) ?*Value {
 
 /// Gets a value from the data tree using reference lookup syntax (e.g. `.foo.bar.baz`).
 /// Used internally by templates.
-pub fn _get(self: *Data, key: []const u8) !*Value {
+pub fn _get(self: Data, key: []const u8) !*Value {
     return if (try self.getValue(key)) |value|
         value
     else
