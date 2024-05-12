@@ -265,3 +265,25 @@ test "escaping (HTML and backslash escaping" {
         try std.testing.expect(false);
     }
 }
+
+test "references combined with markdown" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var object = try data.object();
+    try object.put("url", data.string("https://jetzig.dev/"));
+    try object.put("title", data.string("jetzig.dev"));
+
+    if (zmpl.find("references_markdown")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\<div><h1>Test</h1>
+            \\
+            \\<p>  <a href="https://jetzig.dev/">jetzig.dev</a></p>
+            \\</div>
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
