@@ -554,6 +554,7 @@ fn renderRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]co
 }
 
 fn renderDataRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
+    // TODO: Attempt to coerce Zmpl value to partial arg type if data ref is passed to a partial
     return std.fmt.allocPrint(
         self.allocator,
         \\_ = try {s}(try zmpl.getValueString("{s}"));
