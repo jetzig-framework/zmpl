@@ -248,3 +248,20 @@ test "default partial arguments" {
         try std.testing.expect(false);
     }
 }
+
+test "escaping (HTML and backslash escaping" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    if (zmpl.find("escaping")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\<div><pre class="language-html" style="font-family: Monospace;"><code>&lt;div&gt;
+            \\  @partial foo("bar")
+            \\&lt;/div&gt;</code></pre></div>
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}

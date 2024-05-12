@@ -203,6 +203,7 @@ fn renderHtml(self: *const Node, content: []const u8, writer_options: WriterOpti
     var ref_buf = std.ArrayList(u8).init(self.allocator);
     var html_buf = std.ArrayList(u8).init(self.allocator);
     var ref_open = false;
+    var escaped = false;
 
     while (index < content.len) : (index += 1) {
         const char = content[index];
@@ -219,7 +220,10 @@ fn renderHtml(self: *const Node, content: []const u8, writer_options: WriterOpti
             ref_buf.clearAndFree();
         } else if (ref_open) {
             try ref_buf.append(char);
+        } else if (char == '\\' and !escaped) {
+            escaped = true;
         } else {
+            escaped = false;
             try html_buf.append(char);
         }
     }
