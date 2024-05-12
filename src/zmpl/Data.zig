@@ -344,6 +344,8 @@ pub fn reset(self: *Data) void {
     if (self.value) |*ptr| {
         ptr.*.deinit();
     }
+    self.output_buf.clearAndFree();
+    self.json_buf.clearAndFree();
     self.value = null;
 }
 
