@@ -11,12 +11,12 @@ pub fn build(b: *std.Build) !void {
 
     const lib = b.addStaticLibrary(.{
         .name = "zmpl",
-        .root_source_file = .{ .path = "src/zmpl.zig" },
+        .root_source_file = b.path("src/zmpl.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    const zmpl_module = b.addModule("zmpl", .{ .root_source_file = .{ .path = "src/zmpl.zig" } });
+    const zmpl_module = b.addModule("zmpl", .{ .root_source_file = b.path("src/zmpl.zig") });
     lib.root_module.addImport("zmpl", zmpl_module);
 
     const zmd_dep = b.dependency("zmd", .{ .target = target, .optimize = optimize });
@@ -63,7 +63,7 @@ pub fn build(b: *std.Build) !void {
 
     const manifest_exe = b.addExecutable(.{
         .name = "manifest",
-        .root_source_file = .{ .path = "src/manifest/main.zig" },
+        .root_source_file = b.path("src/manifest/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -80,11 +80,11 @@ pub fn build(b: *std.Build) !void {
     const manifest_exe_run = b.addRunArtifact(manifest_exe);
     const manifest_lazy_path = manifest_exe_run.addOutputFileArg("zmpl.manifest.zig");
 
-    manifest_exe_run.setCwd(.{ .path = try std.fs.cwd().realpathAlloc(b.allocator, ".") });
+    manifest_exe_run.setCwd(.{ .cwd_relative = try std.fs.cwd().realpathAlloc(b.allocator, ".") });
     manifest_exe_run.expectExitCode(0);
     manifest_exe_run.addArg(try std.mem.join(b.allocator, ";", templates_paths));
 
-    for (try findTemplates(b, templates_paths)) |path| manifest_exe_run.addFileArg(.{ .path = path });
+    for (try findTemplates(b, templates_paths)) |path| manifest_exe_run.addFileArg(.{ .cwd_relative = path });
 
     const manifest_module = b.addModule("zmpl.manifest", .{ .root_source_file = manifest_lazy_path });
     manifest_module.addImport("zmpl", zmpl_module);
@@ -95,7 +95,7 @@ pub fn build(b: *std.Build) !void {
         const tests_path = "src/tests.zig";
 
         const main_tests = b.addTest(.{
-            .root_source_file = .{ .path = tests_path },
+            .root_source_file = b.path(tests_path),
             .target = target,
             .optimize = optimize,
         });
@@ -136,7 +136,7 @@ pub fn templatesPaths(allocator: std.mem.Allocator, paths: []const TemplatesPath
             std.fs.cwd().realpathAlloc(allocator, joined) catch |err| {
                 switch (err) {
                     error.FileNotFound => {
-                        std.debug.print("[zmpl] Templates path not found: `{s}` - skipping.\n", .{joined});
+                        std.log.warn("[zmpl] Templates path not found: `{s}` - skipping.", .{joined});
                         continue;
                     },
                     else => return err,
@@ -184,8 +184,8 @@ fn findTemplates(b: *std.Build, templates_paths: []const []const u8) ![][]const 
         var dir = std.fs.cwd().openDir(templates_path, .{ .iterate = true }) catch |err| {
             switch (err) {
                 error.FileNotFound => {
-                    std.debug.print(
-                        "[zmpl] Template directory `{s}` not found, skipping.\n",
+                    std.log.warn(
+                        "[zmpl] Template directory `{s}` not found, skipping.",
                         .{templates_path},
                     );
                     continue;
@@ -241,8 +241,8 @@ fn parseZmplConstants(allocator: std.mem.Allocator, constants_string: ?[]const u
                 }
             }
             if (index > 2) {
-                std.debug.print("Incoherent Zmpl constants argument: {?s}\n", .{constants_string});
-                return error.ZmplConstantsOptionErrro;
+                std.log.err("Incoherent Zmpl constants argument: {?s}", .{constants_string});
+                return error.ZmplConstantsOptionError;
             }
             try array.appendSlice(try std.fmt.allocPrint(
                 allocator,
