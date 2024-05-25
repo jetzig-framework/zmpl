@@ -309,3 +309,30 @@ test "partial arg type coercion" {
         try std.testing.expect(false);
     }
 }
+
+test "inheritance" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    if (zmpl.find("inheritance_child")) |template| {
+        const output = try template.renderWithOptions(
+            &data,
+            .{ .layout = zmpl.find("inheritance_parent3") },
+        );
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\<h2>Parent 1</h2>
+            \\<div class="content-1">
+            \\  <h2>Parent 2</h2>
+            \\<div class="content-2">
+            \\  <h3>Parent 3</h3>
+            \\<div class="content-3">
+            \\  <span>Content</span>
+            \\</div>
+            \\</div>
+            \\</div>
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}

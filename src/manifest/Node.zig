@@ -68,6 +68,7 @@ fn render(self: Node, content: []const u8, options: type) ![]const u8 {
         .markdown => try self.renderHtml(try self.renderMarkdown(content, markdown_fragments), .{}),
         .partial => try self.renderPartial(content),
         .args => try self.renderArgs(),
+        .inherit => try self.renderInherit(),
     };
 }
 
@@ -432,21 +433,23 @@ fn renderArgs(self: Node) ![]const u8 {
     );
 }
 
+fn renderInherit(self: Node) ![]const u8 {
+    const inherit = self.token.mode_line["@inherit".len..];
+    return std.fmt.allocPrint(self.allocator,
+        \\__inherit = __zmpl.find({s});
+        \\
+    , .{try util.zigStringEscape(
+        self.allocator,
+        std.mem.trim(u8, util.strip(inherit), "\""),
+    )});
+}
+
 // Represents a name/value keypair OR a name/type keypair.
 const Arg = struct {
     name: ?[]const u8,
     value: []const u8,
     default: ?[]const u8 = null,
 };
-
-fn parsePartialArgsSignature(self: Node, input: []const u8) ![]Arg {
-    // var args = std.ArrayList(Arg).init(self.allocator);
-    const args = try self.parsePartialArgs(input);
-    for (args) |arg| {
-        std.debug.print("arg: {any}\n", .{arg});
-    }
-    return args;
-}
 
 pub fn parsePartialArgs(self: Node, input: []const u8) ![]Arg {
     var args = std.ArrayList(Arg).init(self.allocator);

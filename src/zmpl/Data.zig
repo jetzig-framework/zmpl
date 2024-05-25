@@ -506,7 +506,7 @@ pub fn get(self: Data, key: []const u8) ?*Value {
 /// (e.g. `.string` returns `[]const u8`).
 pub fn getT(self: *const Data, comptime T: ValueType, key: []const u8) ?switch (T) {
     .object => *Object,
-    .array => *Array,
+    .array => []*const Value,
     .string => []const u8,
     .float => f128,
     .integer => i128,
@@ -775,7 +775,7 @@ pub const Value = union(ValueType) {
                 switch (self.*) {
                     .object => |capture| {
                         var it = capture.hashmap.iterator();
-                        var items_array = std.ArrayList(Item).init(self.allocator());
+                        var items_array = std.ArrayList(Item).init(capture.allocator);
                         while (it.next()) |item| {
                             items_array.append(
                                 .{ .key = item.key_ptr.*, .value = item.value_ptr.* },
@@ -936,7 +936,7 @@ pub const Object = struct {
 
     pub fn getT(self: Object, comptime T: ValueType, key: []const u8) ?switch (T) {
         .object => *Object,
-        .array => *Array,
+        .array => []*Value,
         .string => []const u8,
         .float => f128,
         .integer => i128,
@@ -951,7 +951,7 @@ pub const Object = struct {
                     else => null,
                 },
                 .array => switch (value) {
-                    .array => entry.value_ptr.*,
+                    .array => |capture| capture.array.items,
                     else => null,
                 },
                 .string => switch (value) {
