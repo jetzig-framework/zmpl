@@ -108,7 +108,7 @@ pub fn identifier(self: *Template) ![]const u8 {
     return "";
 }
 
-const Mode = enum { html, zig, partial, args, markdown, inherit };
+const Mode = enum { html, zig, partial, args, markdown, extend };
 const Delimiter = union(enum) {
     string: []const u8,
     eof: void,
@@ -363,7 +363,7 @@ fn getDelimitedMode(line: []const u8) ?DelimitedMode {
         if (std.mem.eql(u8, field.name, first_word)) {
             const mode: Mode = @enumFromInt(field.value);
             const maybe_delimiter: ?Delimiter = switch (mode) {
-                .args, .inherit => .none,
+                .args, .extend => .none,
                 .html,
                 .zig,
                 .partial,
@@ -420,7 +420,7 @@ fn getBlockDelimiter(mode: Mode, first_word: []const u8, line: []const u8) ?Deli
         return if (std.mem.eql(u8, first_word, last_word)) null else delimiterFromString(last_word);
     } else {
         return switch (mode) {
-            .partial, .args, .inherit => .none,
+            .partial, .args, .extend => .none,
             .html, .zig, .markdown => delimiterFromString(stripped),
         };
     }
@@ -488,7 +488,7 @@ fn getBraceDepth(mode: Mode, line: []const u8) isize {
             }
             break :blk depth;
         },
-        .html, .partial, .markdown, .args, .inherit => blk: {
+        .html, .partial, .markdown, .args, .extend => blk: {
             if (util.firstMeaningfulChar(line)) |char| {
                 if (char == '}') break :blk -1;
             }
@@ -553,8 +553,8 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
         \\pub fn {0s}_render{1s}(zmpl: *__zmpl.Data, {2s}) anyerror![]const u8 {{
         \\{3s}
         \\    const allocator = zmpl.allocator();
-        \\    var __inherit: ?__Manifest.Template = null;
-        \\    if (__inherit) |*__capture| zmpl.noop(*__Manifest.Template, __capture);
+        \\    var __extend: ?__Manifest.Template = null;
+        \\    if (__extend) |*__capture| zmpl.noop(*__Manifest.Template, __capture);
         \\    zmpl.noop(std.mem.Allocator, allocator);
         \\    {4s}
         \\
@@ -576,7 +576,7 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
 fn renderFooter(self: Template, writer: anytype) !void {
     try writer.writeAll(
         \\
-        \\    if (__inherit) |__capture| {
+        \\    if (__extend) |__capture| {
         \\        const __inner_content = try allocator.dupe(u8, zmpl.output_buf.items);
         \\        zmpl.content = .{ .data = zmpl.strip(__inner_content) };
         \\        zmpl.output_buf.clearAndFree();

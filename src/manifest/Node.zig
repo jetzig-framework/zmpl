@@ -68,7 +68,7 @@ fn render(self: Node, content: []const u8, options: type) ![]const u8 {
         .markdown => try self.renderHtml(try self.renderMarkdown(content, markdown_fragments), .{}),
         .partial => try self.renderPartial(content),
         .args => try self.renderArgs(),
-        .inherit => try self.renderInherit(),
+        .extend => try self.renderExtend(),
     };
 }
 
@@ -433,14 +433,14 @@ fn renderArgs(self: Node) ![]const u8 {
     );
 }
 
-fn renderInherit(self: Node) ![]const u8 {
-    const inherit = self.token.mode_line["@inherit".len..];
+fn renderExtend(self: Node) ![]const u8 {
+    const extend = self.token.mode_line["@extend".len..];
     return std.fmt.allocPrint(self.allocator,
-        \\__inherit = __zmpl.find({s});
+        \\__extend = __zmpl.find({s});
         \\
     , .{try util.zigStringEscape(
         self.allocator,
-        std.mem.trim(u8, util.strip(inherit), "\""),
+        std.mem.trim(u8, util.strip(extend), "\""),
     )});
 }
 
