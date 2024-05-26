@@ -336,3 +336,49 @@ test "inheritance" {
         try std.testing.expect(false);
     }
 }
+
+test "root init" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+    var user = try data.object();
+    var auth = try data.object();
+
+    try user.put("email", data.string("user@example.com"));
+    try auth.put("token", data.string("abc123-456-def"));
+
+    try root.put("user", user);
+    try root.put("auth", auth);
+
+    if (zmpl.find("example")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+
+        try std.testing.expectEqualStrings(
+            \\<!-- Zig mode for template logic -->
+            \\    <span>Zmpl is simple!</span>
+            \\
+            \\
+            \\<!-- Easy data lookup syntax -->
+            \\<div>Email: user@example.com</div>
+            \\<div>Token: abc123-456-def</div>
+            \\
+            \\<!-- Partials -->
+            \\<span>An example partial</span>
+            \\<!-- Partials with positional args -->
+            \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\<!-- Partials with keyword args --->
+            \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\<!-- Partials with slots --->
+            \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>
+            \\        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
+            \\
+            \\<div><h1>Built-in markdown support</h1>
+            \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}

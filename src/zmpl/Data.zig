@@ -392,6 +392,26 @@ pub fn noop(self: Data, T: type, value: T) void {
     _ = value;
 }
 
+/// Set or retrieve the root value. Must be `array` or `object`. Raise an error if root value
+/// already present and not matching requested value type.
+pub fn root(self: *Data, root_type: enum { object, array }) !*Value {
+    if (self.value) |value| {
+        switch (value.*) {
+            .object => if (root_type != .object) return error.ZmplIncompatibleRootObject,
+            .array => if (root_type != .array) return error.ZmplIncompatibleRootObject,
+            else => unreachable,
+        }
+
+        return value;
+    } else {
+        self.value = switch (root_type) {
+            .object => try self.createObject(),
+            .array => try self.createArray(),
+        };
+        return self.value.?;
+    }
+}
+
 /// Creates a new `Object`. The first call to `array()` or `object()` sets the root value.
 /// Subsequent calls create a new `Object` without setting the root value. e.g.:
 ///
