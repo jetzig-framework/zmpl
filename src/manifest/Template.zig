@@ -38,6 +38,7 @@ pub const Token = struct {
     start: usize,
     end: usize,
     mode_line: []const u8,
+    line_no: usize,
     index: usize,
     depth: usize,
     args: ?[]const u8 = null,
@@ -127,6 +128,7 @@ const Context = struct {
     delimiter: Delimiter,
     start: usize,
     depth: isize = 1,
+    line_no: usize,
     mode_line: ?[]const u8 = null,
 
     pub fn delimiterLen(self: Context) usize {
@@ -150,11 +152,12 @@ fn tokenize(self: *Template) !void {
     var line_it = std.mem.splitScalar(u8, self.input, '\n');
     var cursor: usize = 0;
     var depth: usize = 0;
-    var line_index: usize = 0;
+    var line_no: usize = 0;
 
-    while (line_it.next()) |line| : (cursor += line.len + 1) {
-        line_index += 1;
-
+    while (line_it.next()) |line| : ({
+        cursor += line.len + 1;
+        line_no += 1;
+    }) {
         if (getDelimitedMode(line)) |delimited_mode| {
             const context: Context = .{
                 .mode = delimited_mode.mode,
@@ -162,6 +165,7 @@ fn tokenize(self: *Template) !void {
                 .start = cursor,
                 .depth = 1,
                 .mode_line = line,
+                .line_no = line_no,
             };
 
             if (context.delimiter == .none) {
@@ -189,7 +193,7 @@ fn tokenize(self: *Template) !void {
             try self.appendToken(context, end, depth);
 
             if (depth == 0) {
-                self.debugError(line, line_index);
+                self.debugError(line, line_no);
                 return error.ZmplSyntaxError;
             } else {
                 depth -= 1;
@@ -227,6 +231,7 @@ fn appendToken(self: *Template, context: Context, end: usize, depth: usize) !voi
             .mode = context.mode,
             .start = context.start,
             .delimiter = context.delimiter,
+            .line_no = context.line_no,
             .end = end,
             .mode_line = mode_line,
             .args = if (args.len > 0) args else null,
