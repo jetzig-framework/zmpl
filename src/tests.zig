@@ -382,3 +382,22 @@ test "root init" {
         try std.testing.expect(false);
     }
 }
+
+test "reference stripping" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+    try root.put("message", data.string("hello"));
+
+    if (zmpl.find("reference_with_spaces")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+
+        try std.testing.expectEqualStrings(
+            \\<div>hello</div>
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}

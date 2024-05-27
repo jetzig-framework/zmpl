@@ -547,12 +547,13 @@ fn renderWrite(self: Node, input: []const u8, writer_options: WriterOptions) ![]
 }
 
 fn renderRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
-    if (std.mem.startsWith(u8, input, ".")) {
-        return try self.renderDataRef(input[1..], writer_options);
-    } else if (std.mem.indexOfAny(u8, input, " \"+-/*{}!?()")) |_| {
-        return try self.renderZigLiteral(input, writer_options);
+    const stripped = util.strip(input);
+    if (std.mem.startsWith(u8, stripped, ".")) {
+        return try self.renderDataRef(stripped[1..], writer_options);
+    } else if (std.mem.indexOfAny(u8, stripped, " \"+-/*{}!?()")) |_| {
+        return try self.renderZigLiteral(stripped, writer_options);
     } else {
-        return try self.renderValueRef(input, writer_options);
+        return try self.renderValueRef(stripped, writer_options);
     }
 }
 
