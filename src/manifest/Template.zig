@@ -552,6 +552,8 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
         self.allocator,
         \\pub fn {0s}_render{1s}(zmpl: *__zmpl.Data, {2s}) anyerror![]const u8 {{
         \\{3s}
+        \\    var data = zmpl;
+        \\    zmpl.noop(**__zmpl.Data, &data);
         \\    const allocator = zmpl.allocator();
         \\    var __extend: ?__Manifest.Template = null;
         \\    if (__extend) |*__capture| zmpl.noop(*__Manifest.Template, __capture);

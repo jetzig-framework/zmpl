@@ -541,6 +541,14 @@ pub fn getT(self: *const Data, comptime T: ValueType, key: []const u8) ?switch (
     };
 }
 
+/// Get a typed value from the data tree using an exact key. Returns `null` if key not found or
+/// if root object is not `Object`. Use this function to resolve the underlying value in a Value.
+/// (e.g. `.string` returns `[]const u8`).
+pub fn getPresence(self: *const Data, key: []const u8) bool {
+    const value = self.get(key) orelse return false;
+
+    return value.isPresent();
+}
 /// Receives an array of keys and recursively gets each key from nested objects, returning `null`
 /// if a key is not found, or `*Value` if all keys are found.
 pub fn chain(self: *Data, keys: []const []const u8) ?*Value {
@@ -694,6 +702,18 @@ pub const Value = union(ValueType) {
         };
     }
 
+    pub fn isPresent(self: *const Value) bool {
+        return switch (self.*) {
+            .object => |*capture| capture.count() > 0,
+            .array => |*capture| capture.count() > 0,
+            .string => |capture| capture.value.len > 0,
+            .boolean => |capture| capture.value,
+            .integer => |capture| capture.value > 0,
+            .float => |capture| capture.value > 0,
+            .Null => false,
+        };
+    }
+
     /// Receives an array of keys and recursively gets each key from nested objects, returning `null`
     /// if a key is not found, or `*Value` if all keys are found.
     pub fn chain(self: *const Value, keys: []const []const u8) ?*Value {
@@ -704,17 +724,17 @@ pub const Value = union(ValueType) {
     }
 
     /// Puts a `Value` into an `Object`.
-    pub fn put(self: *Value, key: []const u8, value: ?*Value) !void {
+    pub fn put(self: *Value, key: []const u8, value: anytype) !void {
         switch (self.*) {
-            .object => |*capture| try capture.put(key, value orelse _null(capture.allocator)),
+            .object => |*capture| try capture.put(key, value),
             inline else => unreachable,
         }
     }
 
     /// Appends a `Value` to an `Array`.
-    pub fn append(self: *Value, value: ?*Value) !void {
+    pub fn append(self: *Value, value: anytype) !void {
         switch (self.*) {
-            .array => |*capture| try capture.append(value orelse _null(capture.allocator)),
+            .array => |*capture| try capture.append(value),
             inline else => unreachable,
         }
     }
@@ -758,7 +778,8 @@ pub const Value = union(ValueType) {
     /// Converts a primitive type (string, integer, float) to a string representation.
     pub fn toString(self: *Value) ![]const u8 {
         return switch (self.*) {
-            .object, .array => unreachable,
+            .object => "{}",
+            .array => "[]",
             inline else => |*capture| try capture.toString(),
         };
     }
@@ -937,15 +958,10 @@ pub const Object = struct {
         return true;
     }
 
-    pub fn put(self: *Object, key: []const u8, value: ?*Value) !void {
+    pub fn put(self: *Object, key: []const u8, value: anytype) !void {
+        const zmpl_value = try zmplValue(value, self.allocator);
         const key_dupe = try self.allocator.dupe(u8, key);
-        if (value) |capture| {
-            switch (capture.*) {
-                inline else => try self.hashmap.put(key_dupe, capture),
-            }
-        } else {
-            try self.hashmap.put(key_dupe, _null(self.allocator));
-        }
+        try self.hashmap.put(key_dupe, zmpl_value);
     }
 
     pub fn get(self: Object, key: []const u8) ?*Value {
@@ -980,14 +996,18 @@ pub const Object = struct {
                 },
                 .float => switch (value) {
                     .float => |capture| capture.value,
+                    .string => |capture| std.fmt.parseFloat(f128, capture.value) catch null,
                     else => null,
                 },
                 .integer => switch (value) {
                     .integer => |capture| capture.value,
+                    .string => |capture| std.fmt.parseInt(i128, capture.value, 10) catch null,
                     else => null,
                 },
                 .boolean => switch (value) {
                     .boolean => |capture| capture.value,
+                    .string => |capture| std.mem.eql(u8, capture.value, "1"),
+                    .integer => |capture| capture > 0,
                     else => null,
                 },
                 .Null => null,
@@ -1066,8 +1086,9 @@ pub const Array = struct {
         return if (self.array.items.len > index) self.array.items[index] else null;
     }
 
-    pub fn append(self: *Array, value: ?*Value) !void {
-        try self.array.append(value orelse _null(self.allocator));
+    pub fn append(self: *Array, value: anytype) !void {
+        const zmpl_value = try zmplValue(value, self.allocator);
+        try self.array.append(zmpl_value);
     }
 
     pub fn toJson(self: *const Array, writer: Writer, pretty: bool, level: usize) anyerror!void {
@@ -1124,4 +1145,42 @@ fn isStringCoercablePointer(pointer: std.builtin.Type.Pointer, child: type, arra
         child == .Array and
         &child.Array.child == array_child) return true;
     return false;
+}
+
+fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
+    const val = switch (@typeInfo(@TypeOf(value))) {
+        .Int, .ComptimeInt => Value{ .integer = .{ .value = value, .allocator = alloc } },
+        .Float, .ComptimeFloat => Value{ .float = .{ .value = value, .allocator = alloc } },
+        .Bool => Value{ .boolean = .{ .value = value, .allocator = alloc } },
+        .Null => Value{ .Null = NullType{ .allocator = alloc } },
+        .Pointer => |info| switch (info.child) {
+            Value => return value,
+            // Assume a string and let the compiler fail if incompatible.
+            else => Value{ .string = .{ .value = value, .allocator = alloc } },
+        },
+        .Array => |info| switch (info.child) {
+            u8 => Value{ .string = .{ .value = value, .allocator = alloc } },
+            else => @compileError("Unsupported pointer/array: " ++ @typeName(@TypeOf(value))),
+        },
+        .Optional => |optional| switch (@typeInfo(optional.child)) {
+            .Int, .ComptimeInt => if (value) |val| Value{ .integer = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = allocator } },
+            .Float, .ComptimeFloat => if (value) |val| Value{ .float = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = allocator } },
+            .Bool => if (value) |val| Value{ .boolean = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = allocator } },
+            .Null => Value{ .Null = NullType{ .allocator = alloc } },
+            .Pointer => |info| switch (info.child) {
+                Value => if (value) |val| val.* else Value{ .Null = NullType{ .allocator = alloc } },
+                // Assume a string and let the compiler fail if incompatible.
+                else => if (value) |val| Value{ .string = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = allocator } },
+            },
+            .Array => |info| switch (info.child) {
+                u8 => if (value) |val| Value{ .string = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = allocator } },
+                else => @compileError("Unsupported pointer/array: " ++ @typeName(@TypeOf(value))),
+            },
+            else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(value))),
+        },
+        else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(value))),
+    };
+    const copy = try alloc.create(Value);
+    copy.* = val;
+    return copy;
 }

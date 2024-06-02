@@ -401,3 +401,27 @@ test "reference stripping" {
         try std.testing.expect(false);
     }
 }
+
+test "inferred type in put/append" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+    try root.put("foo", "hello");
+    try root.put("bar", 10);
+    try root.put("baz", 100.0);
+    try root.put("qux", true);
+
+    if (zmpl.find("basic")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+
+        try std.testing.expectEqualStrings(
+            \\hello
+            \\10
+            \\100    <span>qux was true</span>
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
