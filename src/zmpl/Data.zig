@@ -568,21 +568,21 @@ pub fn _get(self: Data, key: []const u8) !*Value {
 
 /// Returns the entire `Data` tree as a JSON string.
 pub fn toJson(self: *Data) ![]const u8 {
-    if (self.value) |_| {} else return "";
-
-    const writer = self.json_buf.writer();
-    self.json_buf.clearAndFree();
-    try self.value.?._toJson(writer, false, 0);
-    return self.allocator().dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
+    return try self.toJsonOptions(.{});
 }
 
+const ToJsonOptions = struct {
+    pretty: bool = false,
+    color: bool = false,
+};
+
 /// Returns the entire `Data` tree as a pretty-printed JSON string.
-pub fn toPrettyJson(self: *Data) ![]const u8 {
+pub fn toJsonOptions(self: *Data, comptime options: ToJsonOptions) ![]const u8 {
     if (self.value) |_| {} else return "";
 
     const writer = self.json_buf.writer();
     self.json_buf.clearAndFree();
-    try self.value.?._toJson(writer, true, 0);
+    try self.value.?._toJson(writer, options, 0);
     try writer.writeByte('\n');
     return self.allocator().dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
 }
@@ -745,16 +745,21 @@ pub const Value = union(ValueType) {
         };
         var buf = std.ArrayList(u8).init(arena);
         const writer = buf.writer();
-        try self._toJson(writer, false, 0);
+        try self._toJson(writer, .{}, 0);
         return try buf.toOwnedSlice();
     }
 
     /// Generates a JSON string representing the complete data tree.
-    pub fn _toJson(self: *const Value, writer: Writer, pretty: bool, level: usize) !void {
+    pub fn _toJson(
+        self: *const Value,
+        writer: Writer,
+        comptime options: ToJsonOptions,
+        level: usize,
+    ) !void {
         return switch (self.*) {
-            .array => |*capture| try capture.toJson(writer, pretty, level),
-            .object => |*capture| try capture.toJson(writer, pretty, level),
-            inline else => |*capture| try capture.toJson(writer),
+            .array => |*capture| try capture.toJson(writer, options, level),
+            .object => |*capture| try capture.toJson(writer, options, level),
+            inline else => |*capture| try capture.toJson(writer, options),
         };
     }
 
@@ -842,9 +847,9 @@ pub const Value = union(ValueType) {
 pub const NullType = struct {
     allocator: std.mem.Allocator,
 
-    pub fn toJson(self: NullType, writer: Writer) !void {
+    pub fn toJson(self: NullType, writer: Writer, comptime options: ToJsonOptions) !void {
         _ = self;
-        try writer.writeAll("null");
+        try highlight(writer, .Null, .{}, options.color);
     }
 
     pub fn eql(self: *const NullType, other: *const NullType) bool {
@@ -867,8 +872,8 @@ pub const Float = struct {
         return self.value == other.value;
     }
 
-    pub fn toJson(self: Float, writer: Writer) !void {
-        try writer.print("{d}", .{self.value});
+    pub fn toJson(self: Float, writer: Writer, comptime options: ToJsonOptions) !void {
+        try highlight(writer, .float, .{self.value}, options.color);
     }
 
     pub fn toString(self: Float) ![]const u8 {
@@ -884,8 +889,8 @@ pub const Integer = struct {
         return self.value == other.value;
     }
 
-    pub fn toJson(self: Integer, writer: Writer) !void {
-        try writer.print("{}", .{self.value});
+    pub fn toJson(self: Integer, writer: Writer, comptime options: ToJsonOptions) !void {
+        try highlight(writer, .integer, .{self.value}, options.color);
     }
 
     pub fn toString(self: Integer) ![]const u8 {
@@ -901,8 +906,8 @@ pub const Boolean = struct {
         return self.value == other.value;
     }
 
-    pub fn toJson(self: Boolean, writer: Writer) !void {
-        try writer.writeAll(if (self.value) "true" else "false");
+    pub fn toJson(self: Boolean, writer: Writer, comptime options: ToJsonOptions) !void {
+        try highlight(writer, .boolean, .{self.value}, options.color);
     }
 
     pub fn toString(self: Boolean) ![]const u8 {
@@ -918,8 +923,15 @@ pub const String = struct {
         return std.mem.eql(u8, self.value, other.value);
     }
 
-    pub fn toJson(self: String, writer: Writer) !void {
-        try std.json.encodeJsonString(self.value, .{}, writer);
+    pub fn toJson(self: String, writer: Writer, comptime options: ToJsonOptions) !void {
+        var buf = std.ArrayList(u8).init(self.allocator);
+        try std.json.encodeJsonString(self.value, .{}, buf.writer());
+        try highlight(
+            writer,
+            .string,
+            .{try buf.toOwnedSlice()},
+            options.color,
+        );
     }
 
     pub fn toString(self: String) ![]const u8 {
@@ -1038,25 +1050,31 @@ pub const Object = struct {
         return self.hashmap.count();
     }
 
-    pub fn toJson(self: *const Object, writer: Writer, pretty: bool, level: usize) anyerror!void {
-        try writer.writeByte('{');
-        if (pretty) try writer.writeByte('\n');
+    pub fn toJson(
+        self: *const Object,
+        writer: Writer,
+        comptime options: ToJsonOptions,
+        level: usize,
+    ) anyerror!void {
+        try highlight(writer, .open_object, .{}, options.color);
+        if (options.pretty) try writer.writeByte('\n');
         var it = self.hashmap.keyIterator();
         var index: usize = 0;
         const size = self.hashmap.count();
         while (it.next()) |key| {
-            if (pretty) try writer.writeBytesNTimes(indent, level + 1);
-            try std.json.encodeJsonString(key.*, .{}, writer);
+            if (options.pretty) try writer.writeBytesNTimes(indent, level + 1);
+            var field = Field{ .allocator = self.allocator, .value = key.* };
+            try field.toJson(writer, options);
             try writer.writeAll(":");
-            if (pretty) try writer.writeByte(' ');
+            if (options.pretty) try writer.writeByte(' ');
             var value = self.hashmap.get(key.*).?;
-            try value._toJson(writer, pretty, level + 1);
+            try value._toJson(writer, options, level + 1);
             index += 1;
             if (index < size) try writer.writeAll(",");
-            if (pretty) try writer.writeByte('\n');
+            if (options.pretty) try writer.writeByte('\n');
         }
-        if (pretty) try writer.writeBytesNTimes(indent, level);
-        try writer.writeByte('}');
+        if (options.pretty) try writer.writeBytesNTimes(indent, level);
+        try highlight(writer, .close_object, .{}, options.color);
     }
 };
 
@@ -1091,17 +1109,22 @@ pub const Array = struct {
         try self.array.append(zmpl_value);
     }
 
-    pub fn toJson(self: *const Array, writer: Writer, pretty: bool, level: usize) anyerror!void {
-        try writer.writeAll("[");
-        if (pretty) try writer.writeByte('\n');
+    pub fn toJson(
+        self: *const Array,
+        writer: Writer,
+        comptime options: ToJsonOptions,
+        level: usize,
+    ) anyerror!void {
+        try highlight(writer, .open_array, .{}, options.color);
+        if (options.pretty) try writer.writeByte('\n');
         for (self.array.items, 0..) |*item, index| {
-            if (pretty) try writer.writeBytesNTimes(indent, level + 1);
-            try item.*._toJson(writer, pretty, level + 1);
+            if (options.pretty) try writer.writeBytesNTimes(indent, level + 1);
+            try item.*._toJson(writer, options, level + 1);
             if (index < self.array.items.len - 1) try writer.writeAll(",");
-            if (pretty) try writer.writeByte('\n');
+            if (options.pretty) try writer.writeByte('\n');
         }
-        if (pretty) try writer.writeBytesNTimes(indent, level);
-        try writer.writeAll("]");
+        if (options.pretty) try writer.writeBytesNTimes(indent, level);
+        try highlight(writer, .close_array, .{}, options.color);
     }
 
     pub fn count(self: Array) usize {
@@ -1147,6 +1170,36 @@ fn isStringCoercablePointer(pointer: std.builtin.Type.Pointer, child: type, arra
     return false;
 }
 
+const Syntax = enum {
+    open_array,
+    close_array,
+    open_object,
+    close_object,
+    field,
+    float,
+    integer,
+    string,
+    boolean,
+    Null,
+};
+
+fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime color: bool) !void {
+    const template = comptime switch (syntax) {
+        .open_array => if (color) zmpl.colors.cyan("[") else "[",
+        .close_array => if (color) zmpl.colors.cyan("]") else "]",
+        .open_object => if (color) zmpl.colors.cyan("{{") else "{{",
+        .close_object => if (color) zmpl.colors.cyan("}}") else "}}",
+        .field => if (color) zmpl.colors.yellow("{s}") else "{s}",
+        .float => if (color) zmpl.colors.magenta("{}") else "{}",
+        .integer => if (color) zmpl.colors.blue("{}") else "{}",
+        .string => if (color) zmpl.colors.green("{s}") else "{s}",
+        .boolean => if (color) zmpl.colors.green("{}") else "{}",
+        .Null => if (color) zmpl.colors.cyan("null") else "null",
+    };
+
+    try writer.print(template, args);
+}
+
 fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
     const val = switch (@typeInfo(@TypeOf(value))) {
         .Int, .ComptimeInt => Value{ .integer = .{ .value = value, .allocator = alloc } },
@@ -1184,3 +1237,19 @@ fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
     copy.* = val;
     return copy;
 }
+
+const Field = struct {
+    value: []const u8,
+    allocator: std.mem.Allocator,
+
+    pub fn toJson(self: Field, writer: Writer, comptime options: ToJsonOptions) !void {
+        var buf = std.ArrayList(u8).init(self.allocator);
+        try std.json.encodeJsonString(self.value, .{}, buf.writer());
+        try highlight(
+            writer,
+            .field,
+            .{try buf.toOwnedSlice()},
+            options.color,
+        );
+    }
+};

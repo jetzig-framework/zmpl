@@ -10,6 +10,7 @@ pub const zmpl = @This();
 pub const Data = @import("zmpl/Data.zig");
 pub const Template = @import("zmpl/Template.zig");
 pub const manifest = Template.manifest;
+pub const colors = @import("zmpl/colors.zig");
 
 pub const InitOptions = struct {
     templates_path: []const u8 = "src/templates",
