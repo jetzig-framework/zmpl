@@ -1019,7 +1019,7 @@ pub const Object = struct {
                 .boolean => switch (value) {
                     .boolean => |capture| capture.value,
                     .string => |capture| std.mem.eql(u8, capture.value, "1"),
-                    .integer => |capture| capture > 0,
+                    .integer => |capture| capture.value > 0,
                     else => null,
                 },
                 .Null => null,
@@ -1216,17 +1216,17 @@ fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
             else => @compileError("Unsupported pointer/array: " ++ @typeName(@TypeOf(value))),
         },
         .Optional => |optional| switch (@typeInfo(optional.child)) {
-            .Int, .ComptimeInt => if (value) |val| Value{ .integer = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = allocator } },
-            .Float, .ComptimeFloat => if (value) |val| Value{ .float = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = allocator } },
-            .Bool => if (value) |val| Value{ .boolean = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = allocator } },
+            .Int, .ComptimeInt => if (value) |val| Value{ .integer = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
+            .Float, .ComptimeFloat => if (value) |val| Value{ .float = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
+            .Bool => if (value) |val| Value{ .boolean = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
             .Null => Value{ .Null = NullType{ .allocator = alloc } },
             .Pointer => |info| switch (info.child) {
                 Value => if (value) |val| val.* else Value{ .Null = NullType{ .allocator = alloc } },
                 // Assume a string and let the compiler fail if incompatible.
-                else => if (value) |val| Value{ .string = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = allocator } },
+                else => if (value) |val| Value{ .string = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
             },
             .Array => |info| switch (info.child) {
-                u8 => if (value) |val| Value{ .string = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = allocator } },
+                u8 => if (value) |val| Value{ .string = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
                 else => @compileError("Unsupported pointer/array: " ++ @typeName(@TypeOf(value))),
             },
             else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(value))),
