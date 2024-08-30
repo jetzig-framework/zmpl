@@ -1165,7 +1165,7 @@ fn isStringCoercablePointer(pointer: std.builtin.Type.Pointer, child: type, arra
         pointer.size == .Slice) return true;
     if (!pointer.is_volatile and
         !pointer.is_allowzero and pointer.size == .One and
-        child == .Array and
+        child == .array and
         &child.Array.child == array_child) return true;
     return false;
 }
