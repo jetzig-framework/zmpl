@@ -268,8 +268,8 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
             },
             inline else => blk: {
                 const child = @typeInfo(pointer.child);
-                if (child == .Array) {
-                    const arr = &child.Array;
+                if (child == .array) {
+                    const arr = &child.array;
                     if (arr.child == u8) break :blk .string;
                 }
                 std.debug.print("Unsupported type: {}\n", .{pointer});
