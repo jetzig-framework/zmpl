@@ -216,10 +216,10 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
     };
 
     const formatter: Formatter = switch (@typeInfo(@TypeOf(value))) {
-        .Bool => .default,
-        .Int => .default,
-        .Float => .float,
-        .Struct => switch (@TypeOf(value)) {
+        .bool => .default,
+        .int => .default,
+        .float => .float,
+        .@"struct" => switch (@TypeOf(value)) {
             Value, String, Integer, Float, Boolean, NullType => .zmpl,
             inline else => blk: {
                 if (@hasDecl(@TypeOf(value), "format")) {
@@ -230,16 +230,16 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
                 }
             },
         },
-        .ComptimeFloat => .float,
-        .ComptimeInt => .default,
-        .Null => .none,
-        .Optional => if (@TypeOf(value) == ?[]const u8) .optional_string else .optional_default,
-        .Union => |Union| blk: {
+        .comptime_float => .float,
+        .comptime_int => .default,
+        .null => .none,
+        .optional => if (@TypeOf(value) == ?[]const u8) .optional_string else .optional_default,
+        .@"union" => |Union| blk: {
             break :blk switch (Union) {
                 inline else => |capture| if (@hasField(@TypeOf(capture), "toString")) .zmpl_union else .default,
             };
         },
-        .Pointer => |pointer| switch (pointer.child) {
+        .pointer => |pointer| switch (pointer.child) {
             Value, String, Integer, Float, Boolean, NullType => .zmpl,
             []const u8 => |child| blk: {
                 if (isStringCoercablePointer(pointer, child, []const u8)) {
@@ -279,20 +279,20 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
 
         // This must be consistent with `std.builtin.Type` - we want to see an error if a new
         // field is added so we specifically do not want an `else` clause here:
-        .Type,
-        .Void,
-        .NoReturn,
-        .Array,
-        .Undefined,
-        .ErrorUnion,
-        .ErrorSet,
-        .Enum,
-        .Fn,
-        .Opaque,
-        .Frame,
-        .AnyFrame,
-        .Vector,
-        .EnumLiteral,
+        .type,
+        .void,
+        .noreturn,
+        .array,
+        .undefined,
+        .error_union,
+        .error_set,
+        .@"enum",
+        .@"fn",
+        .@"opaque",
+        .frame,
+        .@"anyframe",
+        .vector,
+        .enum_literal,
         => |Type| {
             std.debug.print("Unsupported type: {}\n", .{Type});
             return error.ZmplSyntaxError;
@@ -1202,30 +1202,30 @@ fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime c
 
 fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
     const val = switch (@typeInfo(@TypeOf(value))) {
-        .Int, .ComptimeInt => Value{ .integer = .{ .value = value, .allocator = alloc } },
-        .Float, .ComptimeFloat => Value{ .float = .{ .value = value, .allocator = alloc } },
-        .Bool => Value{ .boolean = .{ .value = value, .allocator = alloc } },
-        .Null => Value{ .Null = NullType{ .allocator = alloc } },
-        .Pointer => |info| switch (info.child) {
+        .int, .comptime_int => Value{ .integer = .{ .value = value, .allocator = alloc } },
+        .float, .comptime_float => Value{ .float = .{ .value = value, .allocator = alloc } },
+        .bool => Value{ .boolean = .{ .value = value, .allocator = alloc } },
+        .null => Value{ .Null = NullType{ .allocator = alloc } },
+        .pointer => |info| switch (info.child) {
             Value => return value,
             // Assume a string and let the compiler fail if incompatible.
             else => Value{ .string = .{ .value = value, .allocator = alloc } },
         },
-        .Array => |info| switch (info.child) {
+        .array => |info| switch (info.child) {
             u8 => Value{ .string = .{ .value = value, .allocator = alloc } },
             else => @compileError("Unsupported pointer/array: " ++ @typeName(@TypeOf(value))),
         },
-        .Optional => |optional| switch (@typeInfo(optional.child)) {
-            .Int, .ComptimeInt => if (value) |val| Value{ .integer = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
-            .Float, .ComptimeFloat => if (value) |val| Value{ .float = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
-            .Bool => if (value) |val| Value{ .boolean = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
-            .Null => Value{ .Null = NullType{ .allocator = alloc } },
-            .Pointer => |info| switch (info.child) {
+        .optional => |optional| switch (@typeInfo(optional.child)) {
+            .int, .comptime_int => if (value) |val| Value{ .integer = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
+            .float, .comptime_float => if (value) |val| Value{ .float = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
+            .bool => if (value) |val| Value{ .boolean = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
+            .null => Value{ .Null = NullType{ .allocator = alloc } },
+            .pointer => |info| switch (info.child) {
                 Value => if (value) |val| val.* else Value{ .Null = NullType{ .allocator = alloc } },
                 // Assume a string and let the compiler fail if incompatible.
                 else => if (value) |val| Value{ .string = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
             },
-            .Array => |info| switch (info.child) {
+            .array => |info| switch (info.child) {
                 u8 => if (value) |val| Value{ .string = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
                 else => @compileError("Unsupported pointer/array: " ++ @typeName(@TypeOf(value))),
             },

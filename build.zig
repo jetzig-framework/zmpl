@@ -153,7 +153,7 @@ pub fn templatesPaths(allocator: std.mem.Allocator, paths: []const TemplatesPath
 
 pub fn addTemplateConstants(b: *std.Build, comptime constants: type) ![]const u8 {
     const fields = switch (@typeInfo(constants)) {
-        .Struct => |info| info.fields,
+        .@"struct" => |info| info.fields,
         else => @panic("Expected struct, found: " ++ @typeName(constants)),
     };
     var array: [fields.len][]const u8 = undefined;

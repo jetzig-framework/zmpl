@@ -6,7 +6,7 @@ const zmpl_options = @import("zmpl_options");
 
 pub fn main() !void {
     const options_fields = switch (@typeInfo(zmpl_options)) {
-        .Struct => |info| info.fields,
+        .@"struct" => |info| info.fields,
         else => @compileError("Invalid type for template constants, expected struct, found: " ++
             @typeName(zmpl_options)),
     };
