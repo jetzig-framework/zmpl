@@ -406,11 +406,32 @@ test "inferred type in put/append" {
     var data = zmpl.Data.init(std.testing.allocator);
     defer data.deinit();
 
+    const TestEnum = enum { field_a, field_b };
+    const StructC = struct {
+        a: i32,
+        @"enum": TestEnum,
+    };
+    const TestStruct = struct {
+        a: f64,
+        nested_struct: *StructC,
+    };
+    var nested_struct = StructC{
+        .a = 5,
+        .@"enum" = TestEnum.field_b,
+    };
+    const test_struct = TestStruct{
+        .a = 2e0,
+        .nested_struct = &nested_struct,
+    };
+    const optional: ?i32 = null;
+
     var root = try data.root(.object);
     try root.put("foo", "hello");
     try root.put("bar", 10);
     try root.put("baz", 100.0);
     try root.put("qux", true);
+    try root.put("test_struct", test_struct);
+    try root.put("optional", optional);
 
     if (zmpl.find("basic")) |template| {
         const output = try template.render(&data);
@@ -419,7 +440,10 @@ test "inferred type in put/append" {
         try std.testing.expectEqualStrings(
             \\hello
             \\10
-            \\100    <span>qux was true</span>
+            \\100
+            \\2
+            \\5
+            \\field_b    <span>qux was true</span>
         , output);
     } else {
         try std.testing.expect(false);
