@@ -1206,8 +1206,15 @@ fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
         .float, .comptime_float => Value{ .float = .{ .value = value, .allocator = alloc } },
         .bool => Value{ .boolean = .{ .value = value, .allocator = alloc } },
         .null => Value{ .Null = NullType{ .allocator = alloc } },
-        .pointer => |info| switch (info.child) {
-            Value => return value,
+        .@"enum" => Value{ .string = .{ .value = @tagName(value), .allocator = alloc } },
+        .pointer => |info| switch (@typeInfo(info.child)) {
+            .@"union" => {
+                switch (info.child) {
+                    Value => return value,
+                    else => @compileError("Unsupported pointer/union: " ++ @typeName(@TypeOf(value))),
+                }
+            },
+            .@"struct" => try structToValue(value.*, alloc),
             // Assume a string and let the compiler fail if incompatible.
             else => Value{ .string = .{ .value = value, .allocator = alloc } },
         },
@@ -1216,6 +1223,7 @@ fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
             else => @compileError("Unsupported pointer/array: " ++ @typeName(@TypeOf(value))),
         },
         .optional => |optional| switch (@typeInfo(optional.child)) {
+            // zmplValue(optional.child, alloc);
             .int, .comptime_int => if (value) |val| Value{ .integer = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
             .float, .comptime_float => if (value) |val| Value{ .float = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
             .bool => if (value) |val| Value{ .boolean = .{ .value = val, .allocator = alloc } } else Value{ .Null = NullType{ .allocator = alloc } },
@@ -1231,11 +1239,20 @@ fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
             },
             else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(value))),
         },
+        .@"struct" => try structToValue(value, alloc),
         else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(value))),
     };
     const copy = try alloc.create(Value);
     copy.* = val;
     return copy;
+}
+
+fn structToValue(value: anytype, alloc: std.mem.Allocator) !Value {
+    var obj = Data.Object.init(alloc);
+    inline for (std.meta.fields(@TypeOf(value))) |f| {
+        try obj.put(f.name, @field(value, f.name));
+    }
+    return Value{ .object = obj };
 }
 
 const Field = struct {
