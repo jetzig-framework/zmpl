@@ -470,3 +470,32 @@ test "getT(.array, ...) and getT(.object, ...)" {
     try std.testing.expectEqual(&arr.array, res_arr);
     try std.testing.expectEqual(&obj.object, res_obj);
 }
+
+test "Data.Value.Object to struct" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+    var root = try data.root(.object);
+    var obj_test_struct = try data.object();
+
+    try obj_test_struct.put("a", 1);
+    try obj_test_struct.put("b", 2e0);
+    // try obj_test_struct.put("baz", 100.0);
+    // try obj_test_struct.put("qux", true);
+
+    try root.put("test_struct", obj_test_struct);
+
+    const TestStruct = struct {
+        a: i128,
+        b: f128,
+    };
+    // const test_struct: TestStruct = undefined;
+
+    std.debug.print("x: {s} \n", .{try root.get("test_struct").?.toJson()});
+    const x = root.getT(.object, "test_struct");
+    const tested_struct = try x.?.getStruct(TestStruct);
+    const expected = TestStruct{
+        .a = 1,
+        .b = 2,
+    };
+    try std.testing.expectEqual(expected, tested_struct.?);
+}

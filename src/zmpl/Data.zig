@@ -1027,6 +1027,32 @@ pub const Object = struct {
         } else return null;
     }
 
+    ///supported struct fields: i128, f128, bool
+    pub fn getStruct(self: Object, Struct: type) !?Struct {
+        var return_struct: Struct = undefined;
+        switch (@typeInfo(Struct)) {
+            .@"struct" => {
+                inline for (std.meta.fields(Struct)) |f| {
+                    switch (@typeInfo(f.type)) {
+                        .int => |int| switch (int.bits) {
+                            128 => @field(return_struct, f.name) = self.getT(.integer, f.name) orelse return null,
+                            else => @compileError("Type int of struct field has to be i128, type: " ++ @typeName(Struct)),
+                        },
+                        .float => |int| switch (int.bits) {
+                            128 => @field(return_struct, f.name) = self.getT(.float, f.name) orelse return null,
+                            else => @compileError("Type int of struct field has to be f128, type: " ++ @typeName(Struct)),
+                        },
+                        .bool => @field(return_struct, f.name) = self.getT(.boolean, f.name) orelse return null,
+                        else => @compileError("Type not supported, type: " ++ @typeName(Struct)),
+                        // .pointer => @field(value, f.name) = self.getT(f.type, f.name),
+                    }
+                }
+                return return_struct;
+            },
+            else => @compileError("Type is not a sturct, type: " ++ @typeName(Struct)),
+        }
+    }
+
     pub fn chain(self: Object, keys: []const []const u8) ?*Value {
         var current_object = self;
 
