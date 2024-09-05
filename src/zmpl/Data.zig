@@ -526,7 +526,7 @@ pub fn get(self: Data, key: []const u8) ?*Value {
 /// (e.g. `.string` returns `[]const u8`).
 pub fn getT(self: *const Data, comptime T: ValueType, key: []const u8) ?switch (T) {
     .object => *Object,
-    .array => []*const Value,
+    .array => *Array,
     .string => []const u8,
     .float => f128,
     .integer => i128,
@@ -984,7 +984,7 @@ pub const Object = struct {
 
     pub fn getT(self: Object, comptime T: ValueType, key: []const u8) ?switch (T) {
         .object => *Object,
-        .array => []*Value,
+        .array => *Array,
         .string => []const u8,
         .float => f128,
         .integer => i128,
@@ -995,11 +995,11 @@ pub const Object = struct {
             const value = entry.value_ptr.*.*;
             return switch (T) {
                 .object => switch (value) {
-                    .object => entry.value_ptr.*,
+                    .object => &entry.value_ptr.*.object,
                     else => null,
                 },
                 .array => switch (value) {
-                    .array => |capture| capture.array.items,
+                    .array => &entry.value_ptr.*.array,
                     else => null,
                 },
                 .string => switch (value) {

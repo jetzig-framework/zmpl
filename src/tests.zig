@@ -449,3 +449,24 @@ test "inferred type in put/append" {
         try std.testing.expect(false);
     }
 }
+
+test "getT(.array, ...) and getT(.object, ...)" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+    var root = try data.root(.object);
+    var obj = try data.object();
+    var arr = try data.array();
+    try arr.append(1);
+    try arr.append(2);
+
+    try obj.put("a", 1);
+    try obj.put("b", 2e0);
+
+    try root.put("test_struct", obj);
+    try root.put("test_list", arr);
+
+    const res_arr = root.getT(.array, "test_list").?;
+    const res_obj = root.getT(.object, "test_struct").?;
+    try std.testing.expectEqual(&arr.array, res_arr);
+    try std.testing.expectEqual(&obj.object, res_obj);
+}
