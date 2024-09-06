@@ -541,6 +541,11 @@ pub fn getT(self: *const Data, comptime T: ValueType, key: []const u8) ?switch (
     };
 }
 
+pub fn getStruct(self: *const Data, Struct: type, key: []const u8) !?Struct {
+    const obj = self.getT(.object, key) orelse return null;
+    return obj.getStruct(Struct);
+}
+
 /// Get a typed value from the data tree using an exact key. Returns `null` if key not found or
 /// if root object is not `Object`. Use this function to resolve the underlying value in a Value.
 /// (e.g. `.string` returns `[]const u8`).
@@ -700,6 +705,11 @@ pub const Value = union(ValueType) {
             .object => |value| value.getT(T, key),
             else => null,
         };
+    }
+
+    pub fn getStruct(self: *const Value, Struct: type, key: []const u8) !?Struct {
+        const obj = self.getT(.object, key) orelse return null;
+        return obj.getStruct(Struct);
     }
 
     pub fn isPresent(self: *const Value) bool {
@@ -1027,8 +1037,9 @@ pub const Object = struct {
         } else return null;
     }
 
-    ///supported struct fields: i128, f128, bool
-    pub fn getStruct(self: Object, Struct: type) !?Struct {
+    ///returns null if struct does not match object
+    ///supported struct fields: i128, f128, bool, struct, []u8, enum
+    pub fn getStruct(self: Object, Struct: type) ?Struct {
         var return_struct: Struct = undefined;
         switch (@typeInfo(Struct)) {
             .@"struct" => {
@@ -1036,15 +1047,36 @@ pub const Object = struct {
                     switch (@typeInfo(f.type)) {
                         .int => |int| switch (int.bits) {
                             128 => @field(return_struct, f.name) = self.getT(.integer, f.name) orelse return null,
-                            else => @compileError("Type int of struct field has to be i128, type: " ++ @typeName(Struct)),
+                            else => @compileError("Type int of struct field has to be i128, type: " ++ @typeName(f.type)),
                         },
                         .float => |int| switch (int.bits) {
                             128 => @field(return_struct, f.name) = self.getT(.float, f.name) orelse return null,
-                            else => @compileError("Type int of struct field has to be f128, type: " ++ @typeName(Struct)),
+                            else => @compileError("Type int of struct field has to be f128, type: " ++ @typeName(f.type)),
                         },
                         .bool => @field(return_struct, f.name) = self.getT(.boolean, f.name) orelse return null,
-                        else => @compileError("Type not supported, type: " ++ @typeName(Struct)),
-                        // .pointer => @field(value, f.name) = self.getT(f.type, f.name),
+                        .@"struct" => {
+                            const obj = self.getT(.object, f.name) orelse return null;
+                            @field(return_struct, f.name) = obj.getStruct(f.type) orelse return null;
+                        },
+                        .pointer => |info| switch (info.size) {
+                            .Slice => {
+                                switch (info.child) {
+                                    u8 => @field(return_struct, f.name) = self.getT(.string, f.name) orelse return null,
+                                    else => @compileError("Slice type not supported, type: " ++ @typeName(info.child)),
+                                }
+                            },
+                            else => @compileError("Pointer to type not supported, type: " ++ @typeName(info.size)),
+                        },
+                        .@"enum" => |info| {
+                            const enum_val_str = self.getT(.string, f.name) orelse return null;
+                            inline for (info.fields) |enum_field| {
+                                if (std.mem.eql(u8, enum_field.name, enum_val_str)) {
+                                    @field(return_struct, f.name) = @enumFromInt(enum_field.value);
+                                    break;
+                                }
+                            }
+                        },
+                        else => @compileError("Type not supported, type: " ++ @typeName(f.type)),
                     }
                 }
                 return return_struct;
