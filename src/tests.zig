@@ -470,3 +470,44 @@ test "getT(.array, ...) and getT(.object, ...)" {
     try std.testing.expectEqual(&arr.array, res_arr);
     try std.testing.expectEqual(&obj.object, res_obj);
 }
+
+test "getStruct from object" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+    var root = try data.root(.object);
+    var obj = try data.object();
+    var nested_obj = try data.object();
+
+    const TestEnum = enum {
+        option_a,
+        option_b,
+    };
+    const NestedObj = struct { c: i128 };
+    const TestStruct = struct {
+        fied_a: i128,
+        field_b: f128,
+        enum_val: TestEnum,
+        str: []const u8,
+        nested_obj: NestedObj,
+    };
+
+    try obj.put("fied_a", 1);
+    try obj.put("field_b", 2e0);
+    try obj.put("enum_val", "option_a");
+    try obj.put("str", "fdfs");
+    try nested_obj.put("c", 1);
+    try obj.put("nested_obj", nested_obj);
+    try root.put("test_struct", obj);
+
+    const tested_struct = root.getT(.object, "test_struct").?.getStruct(TestStruct);
+
+    const nested_struct = NestedObj{ .c = 1 };
+    const expected = TestStruct{
+        .fied_a = 1,
+        .field_b = 2,
+        .enum_val = TestEnum.option_a,
+        .str = "fdfs",
+        .nested_obj = nested_struct,
+    };
+    try std.testing.expectEqual(expected, tested_struct.?);
+}
