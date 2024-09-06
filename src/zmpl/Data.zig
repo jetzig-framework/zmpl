@@ -1038,7 +1038,7 @@ pub const Object = struct {
     }
 
     ///returns null if struct does not match object
-    ///supported struct fields: i128, f128, bool, struct, []u8, enum
+    ///supported struct fields: i128, f128, bool, struct, []const u8, enum
     pub fn getStruct(self: Object, Struct: type) ?Struct {
         var return_struct: Struct = undefined;
         switch (@typeInfo(Struct)) {
