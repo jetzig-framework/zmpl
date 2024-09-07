@@ -1096,12 +1096,9 @@ pub const Object = struct {
     }
 
     pub fn items(self: Object) []const Item {
-        var it = self.hashmap.iterator();
         var items_array = std.ArrayList(Item).init(self.allocator);
-        while (it.next()) |item| {
-            items_array.append(
-                .{ .key = item.key_ptr.*, .value = item.value_ptr.* },
-            ) catch @panic("OOM");
+        for (self.hashmap.keys(), self.hashmap.values()) |key, value| {
+            items_array.append(.{ .key = key, .value = value }) catch @panic("OOM");
         }
         return items_array.toOwnedSlice() catch @panic("OOM");
     }
@@ -1114,19 +1111,17 @@ pub const Object = struct {
     ) anyerror!void {
         try highlight(writer, .open_object, .{}, options.color);
         if (options.pretty) try writer.writeByte('\n');
-        var it = self.hashmap.keyIterator();
-        var index: usize = 0;
-        const size = self.hashmap.count();
-        while (it.next()) |key| {
+        const keys = self.hashmap.keys();
+
+        for (keys, 0..) |key, index| {
             if (options.pretty) try writer.writeBytesNTimes(indent, level + 1);
-            var field = Field{ .allocator = self.allocator, .value = key.* };
+            var field = Field{ .allocator = self.allocator, .value = key };
             try field.toJson(writer, options);
             try writer.writeAll(":");
             if (options.pretty) try writer.writeByte(' ');
-            var value = self.hashmap.get(key.*).?;
+            var value = self.hashmap.get(key).?;
             try value._toJson(writer, options, level + 1);
-            index += 1;
-            if (index < size) try writer.writeAll(",");
+            if (index + 1 < keys.len) try writer.writeAll(",");
             if (options.pretty) try writer.writeByte('\n');
         }
         if (options.pretty) try writer.writeBytesNTimes(indent, level);

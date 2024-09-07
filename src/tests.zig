@@ -540,3 +540,18 @@ test "Object.items()" {
         try std.testing.expectEqualStrings(item.value.string.value, expected_value);
     }
 }
+
+test "toJson()" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+    var object = try data.object();
+    try object.put("foo", "bar");
+    try object.put("baz", "qux");
+
+    try std.testing.expectEqualStrings(
+        try data.toJson(),
+        \\{"foo":"bar","baz":"qux"}
+        \\
+        ,
+    );
+}
