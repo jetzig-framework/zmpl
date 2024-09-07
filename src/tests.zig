@@ -511,3 +511,32 @@ test "getStruct from object" {
     };
     try std.testing.expectEqual(expected, tested_struct.?);
 }
+
+test "Array.items()" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+    var array = try data.array();
+    try array.append("foo");
+    try array.append("bar");
+
+    for (array.array.items(), &[_][]const u8{ "foo", "bar" }) |item, expected| {
+        try std.testing.expectEqualStrings(item.string.value, expected);
+    }
+}
+
+test "Object.items()" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+    var object = try data.object();
+    try object.put("foo", "bar");
+    try object.put("baz", "qux");
+
+    for (
+        object.object.items(),
+        &[_][]const u8{ "foo", "baz" },
+        &[_][]const u8{ "bar", "qux" },
+    ) |item, expected_key, expected_value| {
+        try std.testing.expectEqualStrings(item.key, expected_key);
+        try std.testing.expectEqualStrings(item.value.string.value, expected_value);
+    }
+}

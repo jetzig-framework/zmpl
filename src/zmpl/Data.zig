@@ -821,26 +821,13 @@ pub const Value = union(ValueType) {
         .object => Item,
     } {
         return switch (selector) {
-            .array => blk: {
-                switch (self.*) {
-                    .array => |capture| break :blk capture.array.items,
-                    else => return &.{},
-                }
+            .array => switch (self.*) {
+                .array => |capture| capture.items(),
+                else => &.{},
             },
-            .object => blk: {
-                switch (self.*) {
-                    .object => |capture| {
-                        var it = capture.hashmap.iterator();
-                        var items_array = std.ArrayList(Item).init(capture.allocator);
-                        while (it.next()) |item| {
-                            items_array.append(
-                                .{ .key = item.key_ptr.*, .value = item.value_ptr.* },
-                            ) catch @panic("OOM");
-                        }
-                        break :blk items_array.items;
-                    },
-                    else => return &.{},
-                }
+            .object => switch (self.*) {
+                .object => |capture| capture.items(),
+                else => &.{},
             },
         };
     }
@@ -950,11 +937,11 @@ pub const String = struct {
 };
 
 pub const Object = struct {
-    hashmap: std.StringHashMap(*Value),
+    hashmap: std.StringArrayHashMap(*Value),
     allocator: std.mem.Allocator,
 
     pub fn init(arena: std.mem.Allocator) Object {
-        return .{ .hashmap = std.StringHashMap(*Value).init(arena), .allocator = arena };
+        return .{ .hashmap = std.StringArrayHashMap(*Value).init(arena), .allocator = arena };
     }
 
     pub fn deinit(self: *Object) void {
@@ -1104,8 +1091,19 @@ pub const Object = struct {
         return self.hashmap.contains(key);
     }
 
-    pub fn count(self: Object) u32 {
+    pub fn count(self: Object) usize {
         return self.hashmap.count();
+    }
+
+    pub fn items(self: Object) []const Item {
+        var it = self.hashmap.iterator();
+        var items_array = std.ArrayList(Item).init(self.allocator);
+        while (it.next()) |item| {
+            items_array.append(
+                .{ .key = item.key_ptr.*, .value = item.value_ptr.* },
+            ) catch @panic("OOM");
+        }
+        return items_array.toOwnedSlice() catch @panic("OOM");
     }
 
     pub fn toJson(
@@ -1192,6 +1190,10 @@ pub const Array = struct {
     pub fn iterator(self: *Array) *Iterator {
         self.it = .{ .array = self.array };
         return &self.it;
+    }
+
+    pub fn items(self: Array) []*Value {
+        return self.array.items;
     }
 };
 
