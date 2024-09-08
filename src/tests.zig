@@ -555,3 +555,24 @@ test "toJson()" {
         ,
     );
 }
+
+test "put slice" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+    var root = try data.root(.object);
+
+    const T = struct { foo: []const u8, bar: []const u8 };
+    var array = std.ArrayList(T).init(std.testing.allocator);
+    try array.append(.{ .foo = "abc", .bar = "def" });
+    try array.append(.{ .foo = "ghi", .bar = "jkl" });
+
+    const slice = try array.toOwnedSlice();
+    defer std.testing.allocator.free(slice);
+
+    try root.put("slice", slice);
+
+    try std.testing.expectEqualStrings((try data.getValue("slice.0.foo")).?.string.value, "abc");
+    try std.testing.expectEqualStrings((try data.getValue("slice.0.bar")).?.string.value, "def");
+    try std.testing.expectEqualStrings((try data.getValue("slice.1.foo")).?.string.value, "ghi");
+    try std.testing.expectEqualStrings((try data.getValue("slice.1.bar")).?.string.value, "jkl");
+}

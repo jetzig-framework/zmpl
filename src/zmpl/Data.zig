@@ -1269,7 +1269,11 @@ fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
                     else => @compileError("Unsupported pointer/union: " ++ @typeName(@TypeOf(value))),
                 }
             },
-            .@"struct" => try structToValue(value.*, alloc),
+            .@"struct" => if (info.size == .Slice) blk: {
+                var inner_array = Array.init(alloc);
+                for (value) |item| try inner_array.append(item);
+                break :blk Value{ .array = inner_array };
+            } else try structToValue(value.*, alloc),
             // Assume a string and let the compiler fail if incompatible.
             else => Value{ .string = .{ .value = value, .allocator = alloc } },
         },
