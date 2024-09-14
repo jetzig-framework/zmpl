@@ -131,7 +131,7 @@ pub fn eql(self: *const Data, other: *const Data) bool {
     } else return false;
 }
 
-/// Takes a string such as `.foo.bar.baz` and translates into a path into the data tree to return
+/// Takes a string such as `foo.bar.baz` and translates into a path into the data tree to return
 /// a value that can be rendered in a template.
 pub fn getValue(self: Data, key: []const u8) !?*Value {
     // Partial data always takes precedence over underlying template data.
@@ -180,8 +180,7 @@ pub fn getValueString(self: Data, key: []const u8) ![]const u8 {
             },
         }
     } else {
-        std.debug.print("[zmpl] Unknown data reference: `{s}`\n", .{key});
-        return error.ZmplUnknownDataReferenceError;
+        return zmplError(.ref, "Unknown data reference: " ++ zmpl.colors.red("{s}"), .{key});
     }
 }
 
@@ -225,8 +224,11 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
                 if (@hasDecl(@TypeOf(value), "format")) {
                     break :blk .default;
                 } else {
-                    std.debug.print("[zmpl] Error: Struct does not implement `format()`: {}\n", .{@TypeOf(value)});
-                    return error.ZmplSyntaxError;
+                    return zmplError(
+                        .syntax,
+                        "Struct does not implement `format()`: " ++ zmpl.colors.red("{s}"),
+                        .{@TypeOf(value)},
+                    );
                 }
             },
         },
@@ -245,16 +247,22 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
                 if (isStringCoercablePointer(pointer, child, []const u8)) {
                     break :blk .string_array;
                 } else {
-                    std.debug.print("[zmpl] Error: Unsupported type: {}\n", .{pointer});
-                    return error.ZmplSyntaxError;
+                    return zmplError(
+                        .type,
+                        "Unsupported type: " ++ zmpl.colors.red("{s}"),
+                        .{@typeName(@TypeOf(pointer))},
+                    );
                 }
             },
             u8 => |child| blk: {
                 if (isStringCoercablePointer(pointer, child, u8)) {
                     break :blk .string;
                 } else {
-                    std.debug.print("[zmpl] Error: Unsupported type: {}\n", .{pointer});
-                    return error.ZmplSyntaxError;
+                    return zmplError(
+                        .syntax,
+                        "Unsupported type: " ++ zmpl.colors.red("{s}"),
+                        .{@typeName(@TypeOf(pointer))},
+                    );
                 }
             },
             []u8 => .string,
@@ -262,8 +270,11 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
                 if (@hasDecl(@TypeOf(value.*), "format")) {
                     break :blk .default;
                 } else {
-                    std.debug.print("[zmpl] Error: Struct does not implement `format()`: {}\n", .{@TypeOf(value.*)});
-                    return error.ZmplSyntaxError;
+                    return zmplError(
+                        .type,
+                        "Struct does not implement `format()`: " ++ zmpl.colors.red("{s}"),
+                        .{@TypeOf(value.*)},
+                    );
                 }
             },
             inline else => blk: {
@@ -272,8 +283,11 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
                     const arr = &child.array;
                     if (arr.child == u8) break :blk .string;
                 }
-                std.debug.print("Unsupported type: {}\n", .{pointer});
-                return error.ZmplSyntaxError;
+                return zmplError(
+                    .type,
+                    "Unsupported type: " ++ zmpl.colors.red("{s}"),
+                    .{@typeName(@TypeOf(pointer))},
+                );
             },
         },
 
@@ -294,8 +308,11 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
         .vector,
         .enum_literal,
         => |Type| {
-            std.debug.print("Unsupported type: {}\n", .{Type});
-            return error.ZmplSyntaxError;
+            return zmplError(
+                .type,
+                "Unsupported type: " ++ zmpl.colors.red("{s}"),
+                .{@typeName(Type)},
+            );
         },
     };
 
@@ -313,6 +330,34 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
             inline else => |capture| try capture.toString(),
         },
         .none => "",
+    };
+}
+
+pub fn coerceArray(self: *Data, key: []const u8) ![]const *Value {
+    if (try self.getValue(key)) |zmpl_value| return switch (zmpl_value.*) {
+        .array => |*ptr| ptr.items(),
+        else => |tag| zmplError(
+            .ref,
+            "Non-iterable type for reference " ++ zmpl.colors.cyan("`{s}`") ++ ": " ++ zmpl.colors.cyan("{s}"),
+            .{ key, @tagName(tag) },
+        ),
+    } else {
+        return zmplError(.ref, "Unknown data reference: " ++ zmpl.colors.red("{s}"), .{key});
+    }
+}
+
+pub fn maybeRef(self: *Data, value: *const Value, key: []const u8) ![]const u8 {
+    return switch (value.*) {
+        // TODO: Recursive lookup
+        .object => |*ptr| if (ptr.chain(try splitRef(self.allocator(), key))) |capture|
+            try capture.toString()
+        else
+            zmplError(.ref, "Unknown data reference: " ++ zmpl.colors.red("{s}"), .{key}),
+        else => |tag| zmplError(
+            .type,
+            "Unsupported type for lookup: " ++ zmpl.colors.red("{s}"),
+            .{@tagName(tag)},
+        ),
     };
 }
 
@@ -334,8 +379,11 @@ pub fn getConst(self: *Data, T: type, name: []const u8) !T {
             else => @compileError("Unsupported constant type: " ++ @typeName(T)),
         };
     } else {
-        std.debug.print("[zmpl] Undefined constant: `{s}` - must call `Data.addConst(...)` before rendering.\n", .{name});
-        return error.ZmplMissingConstant;
+        return zmplError(
+            .constant,
+            "Undefined constant: " ++ zmpl.colors.red("{s}") ++ " must call `Data.addConst(...)` before rendering.",
+            .{name},
+        );
     }
 }
 
@@ -1279,6 +1327,11 @@ fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
         },
         .array => |info| switch (info.child) {
             u8 => Value{ .string = .{ .value = value, .allocator = alloc } },
+            []const u8 => blk: {
+                var inner_array = Array.init(alloc);
+                for (value) |item| try inner_array.append(item);
+                break :blk Value{ .array = inner_array };
+            },
             else => @compileError("Unsupported pointer/array: " ++ @typeName(@TypeOf(value))),
         },
         .optional => blk: {
@@ -1319,3 +1372,24 @@ const Field = struct {
         );
     }
 };
+
+fn splitRef(alloc: std.mem.Allocator, key: []const u8) ![][]const u8 {
+    var keys = std.ArrayList([]const u8).init(alloc);
+    var it = std.mem.tokenizeScalar(u8, key, '.');
+    while (it.next()) |item| try keys.append(item);
+    return try keys.toOwnedSlice();
+}
+
+pub const ZmplError = enum { ref, type, syntax, constant };
+fn zmplError(err: ZmplError, comptime message: []const u8, args: anytype) anyerror {
+    std.debug.print(
+        zmpl.colors.cyan("[zmpl]") ++ " " ++ zmpl.colors.red("[error]") ++ " " ++ message ++ "\n",
+        args,
+    );
+    return switch (err) {
+        .ref => error.ZmplUnknownDataReferenceError,
+        .type => error.ZmplTypeError,
+        .syntax => error.ZmplSyntaxError,
+        .constant => error.ZmplConstantError,
+    };
+}
