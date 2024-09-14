@@ -69,6 +69,7 @@ fn render(self: Node, content: []const u8, options: type) ![]const u8 {
         .partial => try self.renderPartial(content),
         .args => try self.renderArgs(),
         .extend => try self.renderExtend(),
+        .@"for" => try self.renderFor(content),
     };
 }
 
@@ -299,7 +300,7 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
     }
 
     for (expected_partial_args, 0..) |expected_arg, index| {
-        if (index > reordered_args.items.len - 1) {
+        if (index + 1 > reordered_args.items.len) {
             if (expected_arg.default) |default| try reordered_args.append(
                 .{ .name = expected_arg.name, .value = default },
             );
@@ -444,6 +445,65 @@ fn renderExtend(self: Node) ![]const u8 {
     )});
 }
 
+fn renderFor(self: Node, content: []const u8) ![]const u8 {
+    const expected_format_message = "Expected format `for (foo) |arg| { in {s}";
+    const mode_line = self.token.mode_line["@for".len..];
+    const for_args_start = std.mem.indexOfScalar(u8, mode_line, '(');
+    const for_args_end = std.mem.indexOfScalar(u8, mode_line, ')');
+    if (for_args_start == null) {
+        std.debug.print("{s}\n", .{expected_format_message});
+        return error.ZmplSyntaxError;
+    }
+    if (for_args_end == null) {
+        std.debug.print("{s}\n", .{expected_format_message});
+        return error.ZmplSyntaxError;
+    }
+    const for_args = util.strip(mode_line[for_args_start.? + 1 .. for_args_end.?]);
+
+    const rest = mode_line[for_args_end.? + 2 ..];
+    const block_args_start = std.mem.indexOfScalar(u8, rest, '|');
+    if (block_args_start == null) {
+        std.debug.print("{s}\n", .{expected_format_message});
+        return error.ZmplSyntaxError;
+    }
+
+    const block_args_end = std.mem.indexOfScalar(u8, rest[block_args_start.? + 1 ..], '|');
+    if (block_args_end == null) {
+        std.debug.print("{s}\n", .{expected_format_message});
+        return error.ZmplSyntaxError;
+    }
+
+    const block_args = util.strip(rest[block_args_start.? + 1 .. block_args_end.? + 1]);
+
+    var buf = std.ArrayList(u8).init(self.allocator);
+    const writer = buf.writer();
+
+    var for_args_joined = std.ArrayList(u8).init(self.allocator);
+    var for_args_writer = for_args_joined.writer();
+    var for_args_it = std.mem.tokenizeScalar(u8, for_args, ',');
+    while (for_args_it.next()) |arg| {
+        if (std.mem.startsWith(u8, arg, ".")) {
+            try for_args_writer.print(
+                "try zmpl.coerceArray({s}), ",
+                .{try util.zigStringEscape(self.allocator, arg[1..])},
+            );
+        } else {
+            try for_args_writer.print("{s}, ", .{arg});
+        }
+    }
+
+    try writer.print(
+        \\for ({s}) |{s}| {{
+        \\    {s}
+        \\}}
+        \\
+    ,
+        .{ try for_args_joined.toOwnedSlice(), block_args, try self.renderHtml(content, .{}) },
+    );
+
+    return try buf.toOwnedSlice();
+}
+
 // Represents a name/value keypair OR a name/type keypair.
 const Arg = struct {
     name: ?[]const u8,
@@ -570,7 +630,24 @@ fn renderDataRef(self: Node, input: []const u8, writer_options: WriterOptions) !
 fn renderValueRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
     var buf: [32]u8 = undefined;
     util.generateVariableName(&buf);
-    return std.fmt.allocPrint(
+    return if (std.mem.containsAtLeast(u8, input, 1, ".")) blk: {
+        const start = std.mem.indexOfScalar(u8, input, '.').?;
+        break :blk try std.fmt.allocPrint(
+            self.allocator,
+            \\_ = switch (@TypeOf({1s})) {{
+            \\    *ZmplValue => try {0s}(try zmpl.maybeRef({1s}, {2s})),
+            \\    else => try {0s}(try zmpl.coerceString({3s})),
+            \\}};
+            \\
+        ,
+            .{
+                writer_options.zmpl_write,
+                input[0..start],
+                try util.zigStringEscape(self.allocator, input[start + 1 ..]),
+                input,
+            },
+        );
+    } else try std.fmt.allocPrint(
         self.allocator,
         \\const {0s} = {1s};
         \\_ = try {2s}(try zmpl.coerceString({0s}));

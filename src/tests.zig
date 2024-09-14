@@ -576,3 +576,74 @@ test "put slice" {
     try std.testing.expectEqualStrings((try data.getValue("slice.1.foo")).?.string.value, "ghi");
     try std.testing.expectEqualStrings((try data.getValue("slice.1.bar")).?.string.value, "jkl");
 }
+
+test "iteration" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+    var array = try data.array();
+    for ([_][]const u8{ "baz", "qux", "quux" }) |item| try array.append(data.string(item));
+
+    try root.put("foo", array);
+    try root.put("bar", [_][]const u8{ "corge", "grault", "garply" });
+
+    var objects = try data.array();
+    try objects.append(.{ .foo = "bar" });
+    try objects.append(.{ .foo = "corge" });
+    try root.put("objects", objects);
+
+    if (zmpl.find("iteration")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\<div>baz</div>
+            \\
+            \\  <div>qux</div>
+            \\
+            \\  <div>quux</div>
+            \\
+            \\
+            \\
+            \\  <div>corge</div>
+            \\
+            \\  <div>grault</div>
+            \\
+            \\  <div>garply</div>
+            \\
+            \\
+            \\
+            \\
+            \\
+            \\  <div>waldo</div>
+            \\
+            \\  <div>fred</div>
+            \\
+            \\  <div>plugh</div>
+            \\
+            \\
+            \\
+            \\  <div>0: baz</div>
+            \\
+            \\  <div>1: qux</div>
+            \\
+            \\  <div>2: quux</div>
+            \\
+            \\
+            \\
+            \\  <div>bar</div>
+            \\
+            \\  <div>corge</div>
+            \\
+            \\
+            \\
+            \\
+            \\
+            \\  <div>bar</div>
+            \\
+            \\  <div>baz</div>
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}

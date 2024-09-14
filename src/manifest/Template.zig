@@ -108,7 +108,7 @@ pub fn identifier(self: *Template) ![]const u8 {
     return "";
 }
 
-const Mode = enum { html, zig, partial, args, markdown, extend };
+const Mode = enum { html, zig, partial, args, markdown, extend, @"for" };
 const Delimiter = union(enum) {
     string: []const u8,
     eof: void,
@@ -368,6 +368,7 @@ fn getDelimitedMode(line: []const u8) ?DelimitedMode {
                 .zig,
                 .partial,
                 .markdown,
+                .@"for",
                 => getBlockDelimiter(mode, first_word, stripped[end_of_first_word.?..]),
             };
             if (maybe_delimiter) |delimiter| {
@@ -400,9 +401,9 @@ fn getBlockDelimiter(mode: Mode, first_word: []const u8, line: []const u8) ?Deli
             single_quoted = true;
         } else if (char == '\'' and !double_quoted and single_quoted) {
             single_quoted = false;
-        } else if (char == '(') {
+        } else if (mode != .@"for" and char == '(') {
             parenthesis_depth += 1;
-        } else if (char == ')') {
+        } else if (mode != .@"for" and char == ')') {
             parenthesis_depth -= 1;
             if (parenthesis_depth == 0) {
                 if (index < line.len - 1) {
@@ -421,7 +422,7 @@ fn getBlockDelimiter(mode: Mode, first_word: []const u8, line: []const u8) ?Deli
     } else {
         return switch (mode) {
             .partial, .args, .extend => .none,
-            .html, .zig, .markdown => delimiterFromString(stripped),
+            .html, .zig, .markdown, .@"for" => delimiterFromString(stripped),
         };
     }
 }
@@ -488,7 +489,7 @@ fn getBraceDepth(mode: Mode, line: []const u8) isize {
             }
             break :blk depth;
         },
-        .html, .partial, .markdown, .args, .extend => blk: {
+        .html, .partial, .markdown, .args, .extend, .@"for" => blk: {
             if (util.firstMeaningfulChar(line)) |char| {
                 if (char == '}') break :blk -1;
             }
