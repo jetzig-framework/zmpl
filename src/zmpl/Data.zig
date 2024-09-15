@@ -131,7 +131,7 @@ pub fn eql(self: *const Data, other: *const Data) bool {
     } else return false;
 }
 
-/// Takes a string such as `.foo.bar.baz` and translates into a path into the data tree to return
+/// Takes a string such as `foo.bar.baz` and translates into a path into the data tree to return
 /// a value that can be rendered in a template.
 pub fn getValue(self: Data, key: []const u8) !?*Value {
     // Partial data always takes precedence over underlying template data.
@@ -180,8 +180,7 @@ pub fn getValueString(self: Data, key: []const u8) ![]const u8 {
             },
         }
     } else {
-        std.debug.print("[zmpl] Unknown data reference: `{s}`\n", .{key});
-        return error.ZmplUnknownDataReferenceError;
+        return zmplError(.ref, "Unknown data reference: " ++ zmpl.colors.red("{s}"), .{key});
     }
 }
 
@@ -225,8 +224,11 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
                 if (@hasDecl(@TypeOf(value), "format")) {
                     break :blk .default;
                 } else {
-                    std.debug.print("[zmpl] Error: Struct does not implement `format()`: {}\n", .{@TypeOf(value)});
-                    return error.ZmplSyntaxError;
+                    return zmplError(
+                        .syntax,
+                        "Struct does not implement `format()`: " ++ zmpl.colors.red("{s}"),
+                        .{@TypeOf(value)},
+                    );
                 }
             },
         },
@@ -245,16 +247,22 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
                 if (isStringCoercablePointer(pointer, child, []const u8)) {
                     break :blk .string_array;
                 } else {
-                    std.debug.print("[zmpl] Error: Unsupported type: {}\n", .{pointer});
-                    return error.ZmplSyntaxError;
+                    return zmplError(
+                        .type,
+                        "Unsupported type: " ++ zmpl.colors.red("{s}"),
+                        .{@typeName(@TypeOf(pointer))},
+                    );
                 }
             },
             u8 => |child| blk: {
                 if (isStringCoercablePointer(pointer, child, u8)) {
                     break :blk .string;
                 } else {
-                    std.debug.print("[zmpl] Error: Unsupported type: {}\n", .{pointer});
-                    return error.ZmplSyntaxError;
+                    return zmplError(
+                        .syntax,
+                        "Unsupported type: " ++ zmpl.colors.red("{s}"),
+                        .{@typeName(@TypeOf(pointer))},
+                    );
                 }
             },
             []u8 => .string,
@@ -262,18 +270,24 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
                 if (@hasDecl(@TypeOf(value.*), "format")) {
                     break :blk .default;
                 } else {
-                    std.debug.print("[zmpl] Error: Struct does not implement `format()`: {}\n", .{@TypeOf(value.*)});
-                    return error.ZmplSyntaxError;
+                    return zmplError(
+                        .type,
+                        "Struct does not implement `format()`: " ++ zmpl.colors.red("{s}"),
+                        .{@TypeOf(value.*)},
+                    );
                 }
             },
             inline else => blk: {
                 const child = @typeInfo(pointer.child);
-                if (child == .Array) {
-                    const arr = &child.Array;
+                if (child == .array) {
+                    const arr = &child.array;
                     if (arr.child == u8) break :blk .string;
                 }
-                std.debug.print("Unsupported type: {}\n", .{pointer});
-                return error.ZmplSyntaxError;
+                return zmplError(
+                    .type,
+                    "Unsupported type: " ++ zmpl.colors.red("{s}"),
+                    .{@typeName(@TypeOf(pointer))},
+                );
             },
         },
 
@@ -294,8 +308,11 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
         .Vector,
         .EnumLiteral,
         => |Type| {
-            std.debug.print("Unsupported type: {}\n", .{Type});
-            return error.ZmplSyntaxError;
+            return zmplError(
+                .type,
+                "Unsupported type: " ++ zmpl.colors.red("{s}"),
+                .{@typeName(Type)},
+            );
         },
     };
 
@@ -313,6 +330,34 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
             inline else => |capture| try capture.toString(),
         },
         .none => "",
+    };
+}
+
+pub fn coerceArray(self: *Data, key: []const u8) ![]const *Value {
+    if (try self.getValue(key)) |zmpl_value| return switch (zmpl_value.*) {
+        .array => |*ptr| ptr.items(),
+        else => |tag| zmplError(
+            .ref,
+            "Non-iterable type for reference " ++ zmpl.colors.cyan("`{s}`") ++ ": " ++ zmpl.colors.cyan("{s}"),
+            .{ key, @tagName(tag) },
+        ),
+    } else {
+        return zmplError(.ref, "Unknown data reference: " ++ zmpl.colors.red("{s}"), .{key});
+    }
+}
+
+pub fn maybeRef(self: *Data, value: *const Value, key: []const u8) ![]const u8 {
+    return switch (value.*) {
+        // TODO: Recursive lookup
+        .object => |*ptr| if (ptr.chain(try splitRef(self.allocator(), key))) |capture|
+            try capture.toString()
+        else
+            zmplError(.ref, "Unknown data reference: " ++ zmpl.colors.red("{s}"), .{key}),
+        else => |tag| zmplError(
+            .type,
+            "Unsupported type for lookup: " ++ zmpl.colors.red("{s}"),
+            .{@tagName(tag)},
+        ),
     };
 }
 
@@ -334,8 +379,11 @@ pub fn getConst(self: *Data, T: type, name: []const u8) !T {
             else => @compileError("Unsupported constant type: " ++ @typeName(T)),
         };
     } else {
-        std.debug.print("[zmpl] Undefined constant: `{s}` - must call `Data.addConst(...)` before rendering.\n", .{name});
-        return error.ZmplMissingConstant;
+        return zmplError(
+            .constant,
+            "Undefined constant: " ++ zmpl.colors.red("{s}") ++ " must call `Data.addConst(...)` before rendering.",
+            .{name},
+        );
     }
 }
 
@@ -390,6 +438,26 @@ pub fn reset(self: *Data) void {
 pub fn noop(self: Data, T: type, value: T) void {
     _ = self;
     _ = value;
+}
+
+/// Set or retrieve the root value. Must be `array` or `object`. Raise an error if root value
+/// already present and not matching requested value type.
+pub fn root(self: *Data, root_type: enum { object, array }) !*Value {
+    if (self.value) |value| {
+        switch (value.*) {
+            .object => if (root_type != .object) return error.ZmplIncompatibleRootObject,
+            .array => if (root_type != .array) return error.ZmplIncompatibleRootObject,
+            else => unreachable,
+        }
+
+        return value;
+    } else {
+        self.value = switch (root_type) {
+            .object => try self.createObject(),
+            .array => try self.createArray(),
+        };
+        return self.value.?;
+    }
 }
 
 /// Creates a new `Object`. The first call to `array()` or `object()` sets the root value.
@@ -521,6 +589,19 @@ pub fn getT(self: *const Data, comptime T: ValueType, key: []const u8) ?switch (
     };
 }
 
+pub fn getStruct(self: *const Data, Struct: type, key: []const u8) !?Struct {
+    const obj = self.getT(.object, key) orelse return null;
+    return obj.getStruct(Struct);
+}
+
+/// Get a typed value from the data tree using an exact key. Returns `null` if key not found or
+/// if root object is not `Object`. Use this function to resolve the underlying value in a Value.
+/// (e.g. `.string` returns `[]const u8`).
+pub fn getPresence(self: *const Data, key: []const u8) bool {
+    const value = self.get(key) orelse return false;
+
+    return value.isPresent();
+}
 /// Receives an array of keys and recursively gets each key from nested objects, returning `null`
 /// if a key is not found, or `*Value` if all keys are found.
 pub fn chain(self: *Data, keys: []const []const u8) ?*Value {
@@ -540,21 +621,21 @@ pub fn _get(self: Data, key: []const u8) !*Value {
 
 /// Returns the entire `Data` tree as a JSON string.
 pub fn toJson(self: *Data) ![]const u8 {
-    if (self.value) |_| {} else return "";
-
-    const writer = self.json_buf.writer();
-    self.json_buf.clearAndFree();
-    try self.value.?._toJson(writer, false, 0);
-    return self.allocator().dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
+    return try self.toJsonOptions(.{});
 }
 
+const ToJsonOptions = struct {
+    pretty: bool = false,
+    color: bool = false,
+};
+
 /// Returns the entire `Data` tree as a pretty-printed JSON string.
-pub fn toPrettyJson(self: *Data) ![]const u8 {
+pub fn toJsonOptions(self: *Data, comptime options: ToJsonOptions) ![]const u8 {
     if (self.value) |_| {} else return "";
 
     const writer = self.json_buf.writer();
     self.json_buf.clearAndFree();
-    try self.value.?._toJson(writer, true, 0);
+    try self.value.?._toJson(writer, options, 0);
     try writer.writeByte('\n');
     return self.allocator().dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
 }
@@ -674,6 +755,23 @@ pub const Value = union(ValueType) {
         };
     }
 
+    pub fn getStruct(self: *const Value, Struct: type, key: []const u8) !?Struct {
+        const obj = self.getT(.object, key) orelse return null;
+        return obj.getStruct(Struct);
+    }
+
+    pub fn isPresent(self: *const Value) bool {
+        return switch (self.*) {
+            .object => |*capture| capture.count() > 0,
+            .array => |*capture| capture.count() > 0,
+            .string => |capture| capture.value.len > 0,
+            .boolean => |capture| capture.value,
+            .integer => |capture| capture.value > 0,
+            .float => |capture| capture.value > 0,
+            .Null => false,
+        };
+    }
+
     /// Receives an array of keys and recursively gets each key from nested objects, returning `null`
     /// if a key is not found, or `*Value` if all keys are found.
     pub fn chain(self: *const Value, keys: []const []const u8) ?*Value {
@@ -684,17 +782,17 @@ pub const Value = union(ValueType) {
     }
 
     /// Puts a `Value` into an `Object`.
-    pub fn put(self: *Value, key: []const u8, value: ?*Value) !void {
+    pub fn put(self: *Value, key: []const u8, value: anytype) !void {
         switch (self.*) {
-            .object => |*capture| try capture.put(key, value orelse _null(capture.allocator)),
+            .object => |*capture| try capture.put(key, value),
             inline else => unreachable,
         }
     }
 
     /// Appends a `Value` to an `Array`.
-    pub fn append(self: *Value, value: ?*Value) !void {
+    pub fn append(self: *Value, value: anytype) !void {
         switch (self.*) {
-            .array => |*capture| try capture.append(value orelse _null(capture.allocator)),
+            .array => |*capture| try capture.append(value),
             inline else => unreachable,
         }
     }
@@ -705,16 +803,21 @@ pub const Value = union(ValueType) {
         };
         var buf = std.ArrayList(u8).init(arena);
         const writer = buf.writer();
-        try self._toJson(writer, false, 0);
+        try self._toJson(writer, .{}, 0);
         return try buf.toOwnedSlice();
     }
 
     /// Generates a JSON string representing the complete data tree.
-    pub fn _toJson(self: *const Value, writer: Writer, pretty: bool, level: usize) !void {
+    pub fn _toJson(
+        self: *const Value,
+        writer: Writer,
+        comptime options: ToJsonOptions,
+        level: usize,
+    ) !void {
         return switch (self.*) {
-            .array => |*capture| try capture.toJson(writer, pretty, level),
-            .object => |*capture| try capture.toJson(writer, pretty, level),
-            inline else => |*capture| try capture.toJson(writer),
+            .array => |*capture| try capture.toJson(writer, options, level),
+            .object => |*capture| try capture.toJson(writer, options, level),
+            inline else => |*capture| try capture.toJson(writer, options),
         };
     }
 
@@ -738,7 +841,8 @@ pub const Value = union(ValueType) {
     /// Converts a primitive type (string, integer, float) to a string representation.
     pub fn toString(self: *Value) ![]const u8 {
         return switch (self.*) {
-            .object, .array => unreachable,
+            .object => "{}",
+            .array => "[]",
             inline else => |*capture| try capture.toString(),
         };
     }
@@ -765,26 +869,13 @@ pub const Value = union(ValueType) {
         .object => Item,
     } {
         return switch (selector) {
-            .array => blk: {
-                switch (self.*) {
-                    .array => |capture| break :blk capture.array.items,
-                    else => return &.{},
-                }
+            .array => switch (self.*) {
+                .array => |capture| capture.items(),
+                else => &.{},
             },
-            .object => blk: {
-                switch (self.*) {
-                    .object => |capture| {
-                        var it = capture.hashmap.iterator();
-                        var items_array = std.ArrayList(Item).init(self.allocator());
-                        while (it.next()) |item| {
-                            items_array.append(
-                                .{ .key = item.key_ptr.*, .value = item.value_ptr.* },
-                            ) catch @panic("OOM");
-                        }
-                        break :blk items_array.items;
-                    },
-                    else => return &.{},
-                }
+            .object => switch (self.*) {
+                .object => |capture| capture.items(),
+                else => &.{},
             },
         };
     }
@@ -801,9 +892,9 @@ pub const Value = union(ValueType) {
 pub const NullType = struct {
     allocator: std.mem.Allocator,
 
-    pub fn toJson(self: NullType, writer: Writer) !void {
+    pub fn toJson(self: NullType, writer: Writer, comptime options: ToJsonOptions) !void {
         _ = self;
-        try writer.writeAll("null");
+        try highlight(writer, .Null, .{}, options.color);
     }
 
     pub fn eql(self: *const NullType, other: *const NullType) bool {
@@ -826,8 +917,8 @@ pub const Float = struct {
         return self.value == other.value;
     }
 
-    pub fn toJson(self: Float, writer: Writer) !void {
-        try writer.print("{d}", .{self.value});
+    pub fn toJson(self: Float, writer: Writer, comptime options: ToJsonOptions) !void {
+        try highlight(writer, .float, .{self.value}, options.color);
     }
 
     pub fn toString(self: Float) ![]const u8 {
@@ -843,8 +934,8 @@ pub const Integer = struct {
         return self.value == other.value;
     }
 
-    pub fn toJson(self: Integer, writer: Writer) !void {
-        try writer.print("{}", .{self.value});
+    pub fn toJson(self: Integer, writer: Writer, comptime options: ToJsonOptions) !void {
+        try highlight(writer, .integer, .{self.value}, options.color);
     }
 
     pub fn toString(self: Integer) ![]const u8 {
@@ -860,8 +951,8 @@ pub const Boolean = struct {
         return self.value == other.value;
     }
 
-    pub fn toJson(self: Boolean, writer: Writer) !void {
-        try writer.writeAll(if (self.value) "true" else "false");
+    pub fn toJson(self: Boolean, writer: Writer, comptime options: ToJsonOptions) !void {
+        try highlight(writer, .boolean, .{self.value}, options.color);
     }
 
     pub fn toString(self: Boolean) ![]const u8 {
@@ -877,8 +968,15 @@ pub const String = struct {
         return std.mem.eql(u8, self.value, other.value);
     }
 
-    pub fn toJson(self: String, writer: Writer) !void {
-        try std.json.encodeJsonString(self.value, .{}, writer);
+    pub fn toJson(self: String, writer: Writer, comptime options: ToJsonOptions) !void {
+        var buf = std.ArrayList(u8).init(self.allocator);
+        try std.json.encodeJsonString(self.value, .{}, buf.writer());
+        try highlight(
+            writer,
+            .string,
+            .{try buf.toOwnedSlice()},
+            options.color,
+        );
     }
 
     pub fn toString(self: String) ![]const u8 {
@@ -887,11 +985,11 @@ pub const String = struct {
 };
 
 pub const Object = struct {
-    hashmap: std.StringHashMap(*Value),
+    hashmap: std.StringArrayHashMap(*Value),
     allocator: std.mem.Allocator,
 
     pub fn init(arena: std.mem.Allocator) Object {
-        return .{ .hashmap = std.StringHashMap(*Value).init(arena), .allocator = arena };
+        return .{ .hashmap = std.StringArrayHashMap(*Value).init(arena), .allocator = arena };
     }
 
     pub fn deinit(self: *Object) void {
@@ -917,15 +1015,10 @@ pub const Object = struct {
         return true;
     }
 
-    pub fn put(self: *Object, key: []const u8, value: ?*Value) !void {
+    pub fn put(self: *Object, key: []const u8, value: anytype) !void {
+        const zmpl_value = try zmplValue(value, self.allocator);
         const key_dupe = try self.allocator.dupe(u8, key);
-        if (value) |capture| {
-            switch (capture.*) {
-                inline else => try self.hashmap.put(key_dupe, capture),
-            }
-        } else {
-            try self.hashmap.put(key_dupe, _null(self.allocator));
-        }
+        try self.hashmap.put(key_dupe, zmpl_value);
     }
 
     pub fn get(self: Object, key: []const u8) ?*Value {
@@ -947,11 +1040,11 @@ pub const Object = struct {
             const value = entry.value_ptr.*.*;
             return switch (T) {
                 .object => switch (value) {
-                    .object => entry.value_ptr.*,
+                    .object => &entry.value_ptr.*.object,
                     else => null,
                 },
                 .array => switch (value) {
-                    .array => entry.value_ptr.*,
+                    .array => &entry.value_ptr.*.array,
                     else => null,
                 },
                 .string => switch (value) {
@@ -960,19 +1053,71 @@ pub const Object = struct {
                 },
                 .float => switch (value) {
                     .float => |capture| capture.value,
+                    .string => |capture| std.fmt.parseFloat(f128, capture.value) catch null,
                     else => null,
                 },
                 .integer => switch (value) {
                     .integer => |capture| capture.value,
+                    .string => |capture| std.fmt.parseInt(i128, capture.value, 10) catch null,
                     else => null,
                 },
                 .boolean => switch (value) {
                     .boolean => |capture| capture.value,
+                    .string => |capture| std.mem.eql(u8, capture.value, "1"),
+                    .integer => |capture| capture.value > 0,
                     else => null,
                 },
                 .Null => null,
             };
         } else return null;
+    }
+
+    ///returns null if struct does not match object
+    ///supported struct fields: i128, f128, bool, struct, []const u8, enum
+    pub fn getStruct(self: Object, Struct: type) ?Struct {
+        var return_struct: Struct = undefined;
+        switch (@typeInfo(Struct)) {
+            .Struct => {
+                inline for (std.meta.fields(Struct)) |f| {
+                    switch (@typeInfo(f.type)) {
+                        .Int => |int| switch (int.bits) {
+                            128 => @field(return_struct, f.name) = self.getT(.integer, f.name) orelse return null,
+                            else => @compileError("Type int of struct field has to be i128, type: " ++ @typeName(f.type)),
+                        },
+                        .Float => |int| switch (int.bits) {
+                            128 => @field(return_struct, f.name) = self.getT(.float, f.name) orelse return null,
+                            else => @compileError("Type int of struct field has to be f128, type: " ++ @typeName(f.type)),
+                        },
+                        .Bool => @field(return_struct, f.name) = self.getT(.boolean, f.name) orelse return null,
+                        .Struct => {
+                            const obj = self.getT(.object, f.name) orelse return null;
+                            @field(return_struct, f.name) = obj.getStruct(f.type) orelse return null;
+                        },
+                        .Pointer => |info| switch (info.size) {
+                            .Slice => {
+                                switch (info.child) {
+                                    u8 => @field(return_struct, f.name) = self.getT(.string, f.name) orelse return null,
+                                    else => @compileError("Slice type not supported, type: " ++ @typeName(info.child)),
+                                }
+                            },
+                            else => @compileError("Pointer to type not supported, type: " ++ @typeName(info.size)),
+                        },
+                        .Enum => |info| {
+                            const enum_val_str = self.getT(.string, f.name) orelse return null;
+                            inline for (info.fields) |enum_field| {
+                                if (std.mem.eql(u8, enum_field.name, enum_val_str)) {
+                                    @field(return_struct, f.name) = @enumFromInt(enum_field.value);
+                                    break;
+                                }
+                            }
+                        },
+                        else => @compileError("Type not supported, type: " ++ @typeName(f.type)),
+                    }
+                }
+                return return_struct;
+            },
+            else => @compileError("Type is not a sturct, type: " ++ @typeName(Struct)),
+        }
     }
 
     pub fn chain(self: Object, keys: []const []const u8) ?*Value {
@@ -994,29 +1139,41 @@ pub const Object = struct {
         return self.hashmap.contains(key);
     }
 
-    pub fn count(self: Object) u32 {
+    pub fn count(self: Object) usize {
         return self.hashmap.count();
     }
 
-    pub fn toJson(self: *const Object, writer: Writer, pretty: bool, level: usize) anyerror!void {
-        try writer.writeByte('{');
-        if (pretty) try writer.writeByte('\n');
-        var it = self.hashmap.keyIterator();
-        var index: usize = 0;
-        const size = self.hashmap.count();
-        while (it.next()) |key| {
-            if (pretty) try writer.writeBytesNTimes(indent, level + 1);
-            try std.json.encodeJsonString(key.*, .{}, writer);
-            try writer.writeAll(":");
-            if (pretty) try writer.writeByte(' ');
-            var value = self.hashmap.get(key.*).?;
-            try value._toJson(writer, pretty, level + 1);
-            index += 1;
-            if (index < size) try writer.writeAll(",");
-            if (pretty) try writer.writeByte('\n');
+    pub fn items(self: Object) []const Item {
+        var items_array = std.ArrayList(Item).init(self.allocator);
+        for (self.hashmap.keys(), self.hashmap.values()) |key, value| {
+            items_array.append(.{ .key = key, .value = value }) catch @panic("OOM");
         }
-        if (pretty) try writer.writeBytesNTimes(indent, level);
-        try writer.writeByte('}');
+        return items_array.toOwnedSlice() catch @panic("OOM");
+    }
+
+    pub fn toJson(
+        self: *const Object,
+        writer: Writer,
+        comptime options: ToJsonOptions,
+        level: usize,
+    ) anyerror!void {
+        try highlight(writer, .open_object, .{}, options.color);
+        if (options.pretty) try writer.writeByte('\n');
+        const keys = self.hashmap.keys();
+
+        for (keys, 0..) |key, index| {
+            if (options.pretty) try writer.writeBytesNTimes(indent, level + 1);
+            var field = Field{ .allocator = self.allocator, .value = key };
+            try field.toJson(writer, options);
+            try writer.writeAll(":");
+            if (options.pretty) try writer.writeByte(' ');
+            var value = self.hashmap.get(key).?;
+            try value._toJson(writer, options, level + 1);
+            if (index + 1 < keys.len) try writer.writeAll(",");
+            if (options.pretty) try writer.writeByte('\n');
+        }
+        if (options.pretty) try writer.writeBytesNTimes(indent, level);
+        try highlight(writer, .close_object, .{}, options.color);
     }
 };
 
@@ -1046,21 +1203,27 @@ pub const Array = struct {
         return if (self.array.items.len > index) self.array.items[index] else null;
     }
 
-    pub fn append(self: *Array, value: ?*Value) !void {
-        try self.array.append(value orelse _null(self.allocator));
+    pub fn append(self: *Array, value: anytype) !void {
+        const zmpl_value = try zmplValue(value, self.allocator);
+        try self.array.append(zmpl_value);
     }
 
-    pub fn toJson(self: *const Array, writer: Writer, pretty: bool, level: usize) anyerror!void {
-        try writer.writeAll("[");
-        if (pretty) try writer.writeByte('\n');
+    pub fn toJson(
+        self: *const Array,
+        writer: Writer,
+        comptime options: ToJsonOptions,
+        level: usize,
+    ) anyerror!void {
+        try highlight(writer, .open_array, .{}, options.color);
+        if (options.pretty) try writer.writeByte('\n');
         for (self.array.items, 0..) |*item, index| {
-            if (pretty) try writer.writeBytesNTimes(indent, level + 1);
-            try item.*._toJson(writer, pretty, level + 1);
+            if (options.pretty) try writer.writeBytesNTimes(indent, level + 1);
+            try item.*._toJson(writer, options, level + 1);
             if (index < self.array.items.len - 1) try writer.writeAll(",");
-            if (pretty) try writer.writeByte('\n');
+            if (options.pretty) try writer.writeByte('\n');
         }
-        if (pretty) try writer.writeBytesNTimes(indent, level);
-        try writer.writeAll("]");
+        if (options.pretty) try writer.writeBytesNTimes(indent, level);
+        try highlight(writer, .close_array, .{}, options.color);
     }
 
     pub fn count(self: Array) usize {
@@ -1070,6 +1233,10 @@ pub const Array = struct {
     pub fn iterator(self: *Array) *Iterator {
         self.it = .{ .array = self.array };
         return &self.it;
+    }
+
+    pub fn items(self: Array) []*Value {
+        return self.array.items;
     }
 };
 
@@ -1101,7 +1268,128 @@ fn isStringCoercablePointer(pointer: std.builtin.Type.Pointer, child: type, arra
         pointer.size == .Slice) return true;
     if (!pointer.is_volatile and
         !pointer.is_allowzero and pointer.size == .One and
-        child == .Array and
+        child == .array and
         &child.Array.child == array_child) return true;
     return false;
+}
+
+const Syntax = enum {
+    open_array,
+    close_array,
+    open_object,
+    close_object,
+    field,
+    float,
+    integer,
+    string,
+    boolean,
+    Null,
+};
+
+fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime color: bool) !void {
+    const template = comptime switch (syntax) {
+        .open_array => if (color) zmpl.colors.cyan("[") else "[",
+        .close_array => if (color) zmpl.colors.cyan("]") else "]",
+        .open_object => if (color) zmpl.colors.cyan("{{") else "{{",
+        .close_object => if (color) zmpl.colors.cyan("}}") else "}}",
+        .field => if (color) zmpl.colors.yellow("{s}") else "{s}",
+        .float => if (color) zmpl.colors.magenta("{}") else "{}",
+        .integer => if (color) zmpl.colors.blue("{}") else "{}",
+        .string => if (color) zmpl.colors.green("{s}") else "{s}",
+        .boolean => if (color) zmpl.colors.green("{}") else "{}",
+        .Null => if (color) zmpl.colors.cyan("null") else "null",
+    };
+
+    try writer.print(template, args);
+}
+
+fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
+    const val = switch (@typeInfo(@TypeOf(value))) {
+        .Int, .ComptimeInt => Value{ .integer = .{ .value = value, .allocator = alloc } },
+        .Float, .ComptimeFloat => Value{ .float = .{ .value = value, .allocator = alloc } },
+        .Bool => Value{ .boolean = .{ .value = value, .allocator = alloc } },
+        .Null => Value{ .Null = NullType{ .allocator = alloc } },
+        .Enum => Value{ .string = .{ .value = @tagName(value), .allocator = alloc } },
+        .Pointer => |info| switch (@typeInfo(info.child)) {
+            .Union => {
+                switch (info.child) {
+                    Value => return value,
+                    else => @compileError("Unsupported pointer/union: " ++ @typeName(@TypeOf(value))),
+                }
+            },
+            .Struct => if (info.size == .Slice) blk: {
+                var inner_array = Array.init(alloc);
+                for (value) |item| try inner_array.append(item);
+                break :blk Value{ .array = inner_array };
+            } else try structToValue(value.*, alloc),
+            // Assume a string and let the compiler fail if incompatible.
+            else => Value{ .string = .{ .value = value, .allocator = alloc } },
+        },
+        .Array => |info| switch (info.child) {
+            u8 => Value{ .string = .{ .value = value, .allocator = alloc } },
+            []const u8 => blk: {
+                var inner_array = Array.init(alloc);
+                for (value) |item| try inner_array.append(item);
+                break :blk Value{ .array = inner_array };
+            },
+            else => @compileError("Unsupported pointer/array: " ++ @typeName(@TypeOf(value))),
+        },
+        .Optional => blk: {
+            if (value) |is_value| {
+                return zmplValue(is_value, alloc);
+            } else {
+                break :blk Value{ .Null = NullType{ .allocator = alloc } };
+            }
+        },
+        .Struct => try structToValue(value, alloc),
+        else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(value))),
+    };
+    const copy = try alloc.create(Value);
+    copy.* = val;
+    return copy;
+}
+
+fn structToValue(value: anytype, alloc: std.mem.Allocator) !Value {
+    var obj = Data.Object.init(alloc);
+    inline for (std.meta.fields(@TypeOf(value))) |f| {
+        try obj.put(f.name, @field(value, f.name));
+    }
+    return Value{ .object = obj };
+}
+
+const Field = struct {
+    value: []const u8,
+    allocator: std.mem.Allocator,
+
+    pub fn toJson(self: Field, writer: Writer, comptime options: ToJsonOptions) !void {
+        var buf = std.ArrayList(u8).init(self.allocator);
+        try std.json.encodeJsonString(self.value, .{}, buf.writer());
+        try highlight(
+            writer,
+            .field,
+            .{try buf.toOwnedSlice()},
+            options.color,
+        );
+    }
+};
+
+fn splitRef(alloc: std.mem.Allocator, key: []const u8) ![][]const u8 {
+    var keys = std.ArrayList([]const u8).init(alloc);
+    var it = std.mem.tokenizeScalar(u8, key, '.');
+    while (it.next()) |item| try keys.append(item);
+    return try keys.toOwnedSlice();
+}
+
+pub const ZmplError = enum { ref, type, syntax, constant };
+fn zmplError(err: ZmplError, comptime message: []const u8, args: anytype) anyerror {
+    std.debug.print(
+        zmpl.colors.cyan("[zmpl]") ++ " " ++ zmpl.colors.red("[error]") ++ " " ++ message ++ "\n",
+        args,
+    );
+    return switch (err) {
+        .ref => error.ZmplUnknownDataReferenceError,
+        .type => error.ZmplTypeError,
+        .syntax => error.ZmplSyntaxError,
+        .constant => error.ZmplConstantError,
+    };
 }
