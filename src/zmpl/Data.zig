@@ -348,7 +348,6 @@ pub fn coerceArray(self: *Data, key: []const u8) ![]const *Value {
 
 pub fn maybeRef(self: *Data, value: *const Value, key: []const u8) ![]const u8 {
     return switch (value.*) {
-        // TODO: Recursive lookup
         .object => |*ptr| if (ptr.chain(try splitRef(self.allocator(), key))) |capture|
             try capture.toString()
         else
@@ -755,11 +754,13 @@ pub const Value = union(ValueType) {
         };
     }
 
+    /// Get an instance of `Struct` from `key` if present.
     pub fn getStruct(self: *const Value, Struct: type, key: []const u8) !?Struct {
         const obj = self.getT(.object, key) orelse return null;
         return obj.getStruct(Struct);
     }
 
+    /// Detect presence of a value, use for truthiness testing.
     pub fn isPresent(self: *const Value) bool {
         return switch (self.*) {
             .object => |*capture| capture.count() > 0,
@@ -797,6 +798,7 @@ pub const Value = union(ValueType) {
         }
     }
 
+    /// Convert the value to a JSON string.
     pub fn toJson(self: *const Value) ![]const u8 {
         const arena = switch (self.*) {
             inline else => |capture| capture.allocator,
@@ -821,6 +823,7 @@ pub const Value = union(ValueType) {
         };
     }
 
+    /// Create a deep copy of the value.
     pub fn clone(self: *const Value, gpa: std.mem.Allocator) !*Value {
         const json = try self.toJson();
         const arena = switch (self.*) {
@@ -832,6 +835,7 @@ pub const Value = union(ValueType) {
         return data.value.?;
     }
 
+    /// Permit usage of `Value` in a Zig format string.
     pub fn format(self: *Value, actual_fmt: []const u8, options: anytype, writer: anytype) !void {
         _ = options;
         _ = actual_fmt;
@@ -856,6 +860,7 @@ pub const Value = union(ValueType) {
         }
     }
 
+    /// Iterate over compatible values (array, object).
     pub fn iterator(self: *Value) *Iterator {
         switch (self.*) {
             .array => |*capture| return capture.*.iterator(),
@@ -864,6 +869,8 @@ pub const Value = union(ValueType) {
         }
     }
 
+    /// Return an array of Value or Item, whether value is an array or object (respectively).
+    /// Item provides `key` and `value` fields.
     pub fn items(self: *Value, comptime selector: IteratorSelector) []switch (selector) {
         .array => *Value,
         .object => Item,
@@ -880,12 +887,39 @@ pub const Value = union(ValueType) {
         };
     }
 
+    /// Free claimed memory.
     pub fn deinit(self: *Value) void {
         switch (self.*) {
             .array => |*ptr| ptr.deinit(),
             .object => |*ptr| ptr.deinit(),
             else => {},
         }
+    }
+
+    /// Coerce a value to a given type, intented for use with JetQuery for passing Value as query
+    /// parameters.
+    pub fn toJetQuery(self: *const Value, T: type, alloc: std.mem.Allocator) T {
+        _ = alloc;
+
+        return switch (T) {
+            []const u8 => switch (self.*) {
+                .string => |capture| capture.value,
+                else => unreachable,
+            },
+            f64 => switch (self.*) {
+                .float => |capture| capture.value,
+                else => unreachable,
+            },
+            usize => switch (self.*) {
+                .integer => |capture| capture.value,
+                else => unreachable,
+            },
+            bool => switch (self.*) {
+                .boolean => |capture| capture.value,
+                else => unreachable,
+            },
+            else => @compileError("Cannot corece Zmpl Value to type: " ++ @typeName(T)),
+        };
     }
 };
 
