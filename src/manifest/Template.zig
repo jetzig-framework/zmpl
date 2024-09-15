@@ -108,7 +108,7 @@ pub fn identifier(self: *Template) ![]const u8 {
     return "";
 }
 
-const Mode = enum { html, zig, partial, args, markdown };
+const Mode = enum { html, zig, partial, args, markdown, extend, @"for" };
 const Delimiter = union(enum) {
     string: []const u8,
     eof: void,
@@ -363,11 +363,12 @@ fn getDelimitedMode(line: []const u8) ?DelimitedMode {
         if (std.mem.eql(u8, field.name, first_word)) {
             const mode: Mode = @enumFromInt(field.value);
             const maybe_delimiter: ?Delimiter = switch (mode) {
-                .args => .none,
+                .args, .extend => .none,
                 .html,
                 .zig,
                 .partial,
                 .markdown,
+                .@"for",
                 => getBlockDelimiter(mode, first_word, stripped[end_of_first_word.?..]),
             };
             if (maybe_delimiter) |delimiter| {
@@ -400,9 +401,9 @@ fn getBlockDelimiter(mode: Mode, first_word: []const u8, line: []const u8) ?Deli
             single_quoted = true;
         } else if (char == '\'' and !double_quoted and single_quoted) {
             single_quoted = false;
-        } else if (char == '(') {
+        } else if (mode != .@"for" and char == '(') {
             parenthesis_depth += 1;
-        } else if (char == ')') {
+        } else if (mode != .@"for" and char == ')') {
             parenthesis_depth -= 1;
             if (parenthesis_depth == 0) {
                 if (index < line.len - 1) {
@@ -420,8 +421,8 @@ fn getBlockDelimiter(mode: Mode, first_word: []const u8, line: []const u8) ?Deli
         return if (std.mem.eql(u8, first_word, last_word)) null else delimiterFromString(last_word);
     } else {
         return switch (mode) {
-            .partial, .args => .none,
-            .html, .zig, .markdown => delimiterFromString(stripped),
+            .partial, .args, .extend => .none,
+            .html, .zig, .markdown, .@"for" => delimiterFromString(stripped),
         };
     }
 }
@@ -488,7 +489,7 @@ fn getBraceDepth(mode: Mode, line: []const u8) isize {
             }
             break :blk depth;
         },
-        .html, .partial, .markdown, .args => blk: {
+        .html, .partial, .markdown, .args, .extend, .@"for" => blk: {
             if (util.firstMeaningfulChar(line)) |char| {
                 if (char == '}') break :blk -1;
             }
@@ -552,7 +553,11 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
         self.allocator,
         \\pub fn {0s}_render{1s}(zmpl: *__zmpl.Data, {2s}) anyerror![]const u8 {{
         \\{3s}
+        \\    var data = zmpl;
+        \\    zmpl.noop(**__zmpl.Data, &data);
         \\    const allocator = zmpl.allocator();
+        \\    var __extend: ?__Manifest.Template = null;
+        \\    if (__extend) |*__capture| zmpl.noop(*__Manifest.Template, __capture);
         \\    zmpl.noop(std.mem.Allocator, allocator);
         \\    {4s}
         \\
@@ -574,7 +579,15 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
 fn renderFooter(self: Template, writer: anytype) !void {
     try writer.writeAll(
         \\
-        \\return zmpl.parent_allocator.dupe(u8, zmpl.strip(zmpl.output_buf.items));
+        \\    if (__extend) |__capture| {
+        \\        const __inner_content = try allocator.dupe(u8, zmpl.output_buf.items);
+        \\        zmpl.content = .{ .data = zmpl.strip(__inner_content) };
+        \\        zmpl.output_buf.clearAndFree();
+        \\        const __content = try __capture._render(zmpl);
+        \\        return __content;
+        \\    } else {
+        \\        return try zmpl.parent_allocator.dupe(u8, zmpl.strip(zmpl.output_buf.items));
+        \\    }
         \\}
         \\
     );
