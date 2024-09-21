@@ -898,25 +898,23 @@ pub const Value = union(ValueType) {
 
     /// Coerce a value to a given type, intented for use with JetQuery for passing Value as query
     /// parameters.
-    pub fn toJetQuery(self: *const Value, T: type, alloc: std.mem.Allocator) T {
-        _ = alloc;
-
+    pub fn toJetQuery(self: *const Value, T: type) !T {
         return switch (T) {
             []const u8 => switch (self.*) {
                 .string => |capture| capture.value,
-                else => unreachable,
+                else => error.ZmplIncompatibleType,
             },
             f64 => switch (self.*) {
                 .float => |capture| capture.value,
-                else => unreachable,
+                else => error.ZmplIncompatibleType,
             },
             usize => switch (self.*) {
                 .integer => |capture| capture.value,
-                else => unreachable,
+                else => error.ZmplIncompatibleType,
             },
             bool => switch (self.*) {
                 .boolean => |capture| capture.value,
-                else => unreachable,
+                else => error.ZmplIncompatibleType,
             },
             else => @compileError("Cannot corece Zmpl Value to type: " ++ @typeName(T)),
         };
