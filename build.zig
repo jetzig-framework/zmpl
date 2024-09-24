@@ -24,6 +24,11 @@ pub fn build(b: *std.Build) !void {
     lib.root_module.addImport("zmd", zmd_module);
     zmpl_module.addImport("zmd", zmd_module);
 
+    const jetcommon_dep = b.dependency("jetcommon", .{ .target = target, .optimize = optimize });
+    const jetcommon_module = jetcommon_dep.module("jetcommon");
+    lib.root_module.addImport("jetcommon", jetcommon_module);
+    zmpl_module.addImport("jetcommon", jetcommon_module);
+
     const zmpl_constants_option = b.option([]const u8, "zmpl_constants", "Template constants");
 
     const templates_path = b.option(
@@ -104,6 +109,7 @@ pub fn build(b: *std.Build) !void {
 
         main_tests.root_module.addImport("zmpl", zmpl_module);
         main_tests.root_module.addImport("zmpl.manifest", manifest_module);
+        main_tests.root_module.addImport("jetcommon", jetcommon_module);
         const run_main_tests = b.addRunArtifact(main_tests);
         const test_step = b.step("test", "Run library tests");
         test_step.dependOn(&run_main_tests.step);
