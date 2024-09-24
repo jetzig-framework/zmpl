@@ -67,6 +67,7 @@ content: LayoutContent = .{ .data = "" },
 partial_data: ?*Object = null,
 template_decls: std.StringHashMap(*Value),
 slots: ?[]const String = null,
+fmt: zmpl.Format,
 
 const indent = "  ";
 
@@ -80,6 +81,7 @@ pub fn init(parent_allocator: std.mem.Allocator) Data {
         .json_buf = json_buf,
         .output_buf = output_buf,
         .template_decls = std.StringHashMap(*Value).init(parent_allocator),
+        .fmt = zmpl.Format{ .writer = undefined }, // We assign writer on render.
     };
 }
 
@@ -553,6 +555,7 @@ pub fn write(self: *Data, slice: []const u8) !void {
         try writer.writeAll(slice);
     } else {
         self.output_writer = self.output_buf.writer();
+        self.fmt.writer = self.output_writer.?;
         try (self.output_writer.?).writeAll(util.chomp(slice));
     }
 }
@@ -1413,7 +1416,7 @@ fn splitRef(alloc: std.mem.Allocator, key: []const u8) ![][]const u8 {
 }
 
 pub const ZmplError = enum { ref, type, syntax, constant };
-fn zmplError(err: ZmplError, comptime message: []const u8, args: anytype) anyerror {
+pub fn zmplError(err: ZmplError, comptime message: []const u8, args: anytype) anyerror {
     std.debug.print(
         zmpl.colors.cyan("[zmpl]") ++ " " ++ zmpl.colors.red("[error]") ++ " " ++ message ++ "\n",
         args,

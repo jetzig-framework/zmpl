@@ -647,3 +647,22 @@ test "iteration" {
         try std.testing.expect(false);
     }
 }
+
+test "datetime format" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+
+    try root.put("foo", "2024-09-24T19:30:35Z");
+
+    if (zmpl.find("datetime_format")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\<div>Tue Sep 24 19:30:35 2024</div>
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
