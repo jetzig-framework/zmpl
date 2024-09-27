@@ -8,10 +8,7 @@ writer: zmpl.Data.Writer,
 
 const Format = @This();
 
-pub const FormatType = enum { default };
-
-pub fn datetime(self: Format, value: anytype, fmt: FormatType) ![]const u8 {
-    _ = fmt;
+pub fn datetime(self: Format, value: anytype, fmt: []const u8) ![]const u8 {
     const Type = switch (@typeInfo(@TypeOf(value))) {
         .pointer => |info| info.child,
         inline else => @TypeOf(value),
@@ -34,6 +31,6 @@ pub fn datetime(self: Format, value: anytype, fmt: FormatType) ![]const u8 {
         else => |T| @compileError(std.fmt.comptimePrint("Unsupported type: `{s}`", .{@typeName(T)})),
     };
 
-    try parsed_datetime.strftime(self.writer, "%c");
+    try parsed_datetime.strftime(self.writer, fmt);
     return ""; // We use the writer to output but Zmpl expects a string returned by `{{foo}}`
 }

@@ -611,7 +611,53 @@ fn renderRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]co
     if (std.mem.startsWith(u8, stripped, ".")) {
         return try self.renderDataRef(stripped[1..], writer_options);
     } else if (std.mem.indexOfAny(u8, stripped, " \"+-/*{}!?()")) |_| {
-        return try self.renderZigLiteral(stripped, writer_options);
+        var buf = std.ArrayList(u8).init(self.allocator);
+        const writer = buf.writer();
+        std.debug.print("******* {s}\n", .{stripped});
+        const ast = try std.zig.Ast.parse(
+            self.allocator,
+            try std.mem.joinZ(self.allocator, "", &.{stripped}),
+            .zig,
+        );
+
+        var identifier_buf = std.ArrayList([]const u8).init(self.allocator);
+
+        for (ast.tokens.items(.tag), 0..) |tag, index| {
+            std.debug.print("token [{s}]: {s}\n", .{ @tagName(tag), ast.tokenSlice(@intCast(index)) });
+            const slice = ast.tokenSlice(@intCast(index));
+            switch (tag) {
+                .identifier, .period => try identifier_buf.append(slice),
+                else => {
+                    std.debug.print("[{s}]: {s}\n", .{ @tagName(tag), slice });
+                    if (identifier_buf.items.len > 0) {
+                        var args_buf = std.ArrayList([]const u8).init(self.allocator);
+                        var identifiers_buf = std.ArrayList([]const u8).init(self.allocator);
+                        for (identifier_buf.items, 0..) |identifier, identifier_index| {
+                            if (std.mem.eql(u8, identifier, ".")) continue;
+                            if (identifier_index == 0) continue;
+                            try args_buf.append(try std.fmt.allocPrint(
+                                self.allocator,
+                                "\"{s}\"",
+                                .{identifier},
+                            ));
+                            try identifiers_buf.append(identifier);
+                        }
+                        const args = try std.mem.join(self.allocator, ", ", args_buf.items);
+                        try writer.print(
+                            "(if (@TypeOf({0s}) == *ZmplValue) {0s}.chain(&.{{{1s}}}) else {0s}.{2s})",
+                            .{
+                                identifier_buf.items[0],
+                                args,
+                                try std.mem.join(self.allocator, ".", identifiers_buf.items),
+                            },
+                        );
+                        identifier_buf.clearAndFree();
+                    }
+                    try writer.print("{s}", .{slice});
+                },
+            }
+        }
+        return try self.renderZigLiteral(try buf.toOwnedSlice(), writer_options);
     } else {
         return try self.renderValueRef(stripped, writer_options);
     }
