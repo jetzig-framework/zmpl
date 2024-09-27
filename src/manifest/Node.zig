@@ -611,49 +611,80 @@ fn renderRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]co
     if (std.mem.startsWith(u8, stripped, ".")) {
         return try self.renderDataRef(stripped[1..], writer_options);
     } else if (std.mem.indexOfAny(u8, stripped, " \"+-/*{}!?()")) |_| {
+        // This is a pretty naive implementation that does some magic to detect Zmpl types when
+        // passed to functions, allowing things like:
+        //
+        // <div>{{zmpl.fmt.datetime(.foo, "%c")}}</div>
+        //
+        // `.foo` will be translated to a Zmpl lookup. Also works with loops:
+        //
+        // @for (.foo) |item| {
+        //   <div>{{zmpl.fmt.datetime(item.bar, "%Y-%m-%d")}}</div>
+        // }
+        //
+        // However it is not very clever at the moment and will fall over when using nested
+        // parentheses etc. - it will need a re-work to solve more complex scenarios.
         var buf = std.ArrayList(u8).init(self.allocator);
         const writer = buf.writer();
-        std.debug.print("******* {s}\n", .{stripped});
         const ast = try std.zig.Ast.parse(
             self.allocator,
             try std.mem.joinZ(self.allocator, "", &.{stripped}),
             .zig,
         );
 
-        var identifier_buf = std.ArrayList([]const u8).init(self.allocator);
+        var paren_stack: usize = 0;
+        var identifier: ?[]const u8 = null;
+        var chain_buf = std.ArrayList([]const u8).init(self.allocator);
 
-        for (ast.tokens.items(.tag), 0..) |tag, index| {
-            std.debug.print("token [{s}]: {s}\n", .{ @tagName(tag), ast.tokenSlice(@intCast(index)) });
+        const tags = ast.tokens.items(.tag);
+
+        for (tags, 0..) |tag, index| {
             const slice = ast.tokenSlice(@intCast(index));
+
+            const next_tag = if (index + 2 < tags.len) tags[index + 1] else null;
+
             switch (tag) {
-                .identifier, .period => try identifier_buf.append(slice),
-                else => {
-                    std.debug.print("[{s}]: {s}\n", .{ @tagName(tag), slice });
-                    if (identifier_buf.items.len > 0) {
-                        var args_buf = std.ArrayList([]const u8).init(self.allocator);
-                        var identifiers_buf = std.ArrayList([]const u8).init(self.allocator);
-                        for (identifier_buf.items, 0..) |identifier, identifier_index| {
-                            if (std.mem.eql(u8, identifier, ".")) continue;
-                            if (identifier_index == 0) continue;
-                            try args_buf.append(try std.fmt.allocPrint(
-                                self.allocator,
-                                "\"{s}\"",
-                                .{identifier},
-                            ));
-                            try identifiers_buf.append(identifier);
-                        }
-                        const args = try std.mem.join(self.allocator, ", ", args_buf.items);
+                .l_paren => {
+                    paren_stack += 1;
+                    try writer.writeAll(slice);
+                },
+                .r_paren => {
+                    paren_stack -= 1;
+                    try writer.writeAll(slice);
+                },
+                .comma => {
+                    if (paren_stack > 0 and identifier != null) {
+                        const chain = try std.mem.join(self.allocator, ", ", chain_buf.items);
                         try writer.print(
-                            "(if (@TypeOf({0s}) == *ZmplValue) {0s}.chain(&.{{{1s}}}) else {0s}.{2s})",
-                            .{
-                                identifier_buf.items[0],
-                                args,
-                                try std.mem.join(self.allocator, ".", identifiers_buf.items),
-                            },
-                        );
-                        identifier_buf.clearAndFree();
+                            \\if (@TypeOf({0s}) == *ZmplValue or @TypeOf({0s}) == @TypeOf(zmpl)) {0s}.chain(&.{{{1s}}}) else {0s}
+                        , .{ identifier.?, chain });
+                        identifier = null;
+                        chain_buf.clearAndFree();
                     }
-                    try writer.print("{s}", .{slice});
+                    try writer.writeAll(slice);
+                },
+                .identifier => {
+                    if (paren_stack == 0) {
+                        try writer.writeAll(slice);
+                    } else if (identifier == null) {
+                        identifier = slice;
+                    } else {
+                        std.debug.print("identifier: {s}\n", .{identifier.?});
+                        const quoted = try std.fmt.allocPrint(self.allocator,
+                            \\"{s}"
+                        , .{slice});
+                        try chain_buf.append(quoted);
+                    }
+                },
+                .period => {
+                    if (identifier == null and paren_stack > 0 and next_tag != null and next_tag.? == .identifier) {
+                        identifier = "zmpl"; // reference to root object (`.foo`)
+                    } else if (identifier == null) {
+                        try writer.writeAll(slice);
+                    }
+                },
+                else => {
+                    try writer.print(" {s} ", .{slice});
                 },
             }
         }
