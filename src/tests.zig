@@ -1,5 +1,6 @@
 const std = @import("std");
 const zmpl = @import("zmpl");
+const jetcommon = @import("jetcommon");
 
 test "readme example" {
     var data = zmpl.Data.init(std.testing.allocator);
@@ -668,14 +669,31 @@ test "datetime format" {
     var root = try data.root(.object);
 
     try root.put("foo", "2024-09-24T19:30:35Z");
+    var bar = try data.array();
+    try bar.append(.{ .baz = "2024-09-27T20:19:14Z" });
+    try root.put("bar", bar);
 
     if (zmpl.find("datetime_format")) |template| {
         const output = try template.render(&data);
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\<div>Tue Sep 24 19:30:35 2024</div>
+            \\<div>2024-09-24</div>
+            \\
+            \\  <div>Fri Sep 27 20:19:14 2024</div>
         , output);
     } else {
         try std.testing.expect(false);
     }
+}
+
+test "datetime" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+    const datetime = try jetcommon.types.DateTime.parse("2024-09-27T21:29:51Z");
+    try root.put("foo", datetime);
+    const foo = root.getT(.datetime, "foo") orelse return std.testing.expect(false);
+    try std.testing.expect(datetime.eql(foo));
 }

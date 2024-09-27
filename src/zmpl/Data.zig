@@ -34,6 +34,8 @@
 /// automatically.
 const std = @import("std");
 
+const jetcommon = @import("jetcommon");
+
 const manifest = @import("zmpl.manifest").__Manifest;
 const zmpl = @import("../zmpl.zig");
 const util = zmpl.util;
@@ -172,7 +174,7 @@ pub fn getValue(self: Data, key: []const u8) !?*Value {
 
 /// Converts any `Value` in a root `Object` to a string. Returns an empty string if no match or
 /// no compatible data type.
-pub fn getValueString(self: Data, key: []const u8) ![]const u8 {
+pub fn getValueString(self: *Data, key: []const u8) ![]const u8 {
     if (try self.getValue(key)) |val| {
         switch (val.*) {
             .object, .array => return "", // No sense in trying to convert an object/array to a string
@@ -419,6 +421,7 @@ pub fn getCoerce(self: Data, T: type, name: []const u8) !T {
         else
             error.ZmplUnknownDataReferenceError,
         bool => self.getT(.boolean, name) orelse error.ZmplUnknownDataReferenceError,
+        jetcommon.types.DateTime => self.getT(.datetime, name) orelse error.ZmplUnknownDataReferenceError,
         *Value => try self._get(name),
         else => @compileError("Unsupported type for data lookup in partial args: " ++ @typeName(T)),
     };
@@ -541,6 +544,14 @@ pub fn boolean(self: *Data, value: bool) *Value {
     return val;
 }
 
+/// Creates a new `Value` representing a datetime.
+pub fn datetime(self: *Data, value: jetcommon.types.DateTime) *Value {
+    const arena = self.allocator();
+    const val = arena.create(Value) catch @panic("Out of memory");
+    val.* = .{ .datetime = .{ .value = value, .allocator = arena } };
+    return val;
+}
+
 /// Create a new `Value` representing a `null` value. Public, but for internal use only.
 pub fn _null(arena: std.mem.Allocator) *Value {
     const val = arena.create(Value) catch @panic("Out of memory");
@@ -581,6 +592,7 @@ pub fn getT(self: *const Data, comptime T: ValueType, key: []const u8) ?switch (
     .float => f128,
     .integer => i128,
     .boolean => bool,
+    .datetime => jetcommon.types.DateTime,
     .Null => null,
 } {
     if (self.value == null) return null;
@@ -664,7 +676,7 @@ fn parseJsonValue(self: *Data, value: std.json.Value) !*Value {
             for (val.items) |item| try arr.append(try self.parseJsonValue(item));
             break :blk arr;
         },
-        .string => |val| self.string(val),
+        .string => |val| self.string(val), // TODO: maybe try to parse datetimes ?
         .number_string => |val| if (std.mem.containsAtLeast(u8, val, 1, "."))
             self.float(try std.fmt.parseFloat(f128, val))
         else
@@ -683,6 +695,7 @@ pub const ValueType = enum {
     integer,
     boolean,
     string,
+    datetime,
     Null,
 };
 
@@ -695,6 +708,7 @@ pub const Value = union(ValueType) {
     integer: Integer,
     boolean: Boolean,
     string: String,
+    datetime: DateTime,
     Null: NullType,
 
     /// Compares one `Value` to another `Value` recursively. Order of `Object` keys is ignored.
@@ -724,6 +738,10 @@ pub const Value = union(ValueType) {
                 .boolean => |*other_capture| return capture.eql(other_capture),
                 inline else => return false,
             },
+            .datetime => |*capture| switch (other.*) {
+                .datetime => |*other_capture| return capture.eql(other_capture),
+                inline else => return false,
+            },
             .Null => |*capture| switch (other.*) {
                 .Null => |*other_capture| return capture.eql(other_capture),
                 inline else => return false,
@@ -749,6 +767,7 @@ pub const Value = union(ValueType) {
         .float => f128,
         .integer => i128,
         .boolean => bool,
+        .datetime => jetcommon.types.DateTime,
         .Null => null,
     } {
         return switch (self.*) {
@@ -772,6 +791,7 @@ pub const Value = union(ValueType) {
             .boolean => |capture| capture.value,
             .integer => |capture| capture.value > 0,
             .float => |capture| capture.value > 0,
+            .datetime => true,
             .Null => false,
         };
     }
@@ -919,6 +939,10 @@ pub const Value = union(ValueType) {
                 .boolean => |capture| capture.value,
                 else => error.ZmplIncompatibleType,
             },
+            jetcommon.types.DateTime => switch (self.*) {
+                .datetime => |capture| capture.value,
+                else => error.ZmplIncompatibleType,
+            },
             else => @compileError("Cannot corece Zmpl Value to type: " ++ @typeName(T)),
         };
     }
@@ -1019,6 +1043,33 @@ pub const String = struct {
     }
 };
 
+pub const DateTime = struct {
+    value: jetcommon.types.DateTime,
+    allocator: std.mem.Allocator,
+
+    pub fn eql(self: *const DateTime, other: *const DateTime) bool {
+        return self.*.value.eql(other.*.value);
+    }
+
+    pub fn toJson(self: DateTime, writer: Writer, comptime options: ToJsonOptions) !void {
+        var buf = std.ArrayList(u8).init(self.allocator);
+        try self.value.toJson(buf.writer());
+        try highlight(
+            writer,
+            .datetime,
+            .{try buf.toOwnedSlice()},
+            options.color,
+        );
+    }
+
+    pub fn toString(self: DateTime) ![]const u8 {
+        var buf = std.ArrayList(u8).init(self.allocator);
+        const writer = buf.writer();
+        try self.value.toString(writer);
+        return try buf.toOwnedSlice();
+    }
+};
+
 pub const Object = struct {
     hashmap: std.StringArrayHashMap(*Value),
     allocator: std.mem.Allocator,
@@ -1069,6 +1120,7 @@ pub const Object = struct {
         .float => f128,
         .integer => i128,
         .boolean => bool,
+        .datetime => jetcommon.types.DateTime,
         .Null => null,
     } {
         if (self.hashmap.getEntry(key)) |entry| {
@@ -1100,6 +1152,10 @@ pub const Object = struct {
                     .boolean => |capture| capture.value,
                     .string => |capture| std.mem.eql(u8, capture.value, "1"),
                     .integer => |capture| capture.value > 0,
+                    else => null,
+                },
+                .datetime => switch (value) {
+                    .datetime => |capture| capture.value,
                     else => null,
                 },
                 .Null => null,
@@ -1331,6 +1387,7 @@ const Syntax = enum {
     integer,
     string,
     boolean,
+    datetime,
     Null,
 };
 
@@ -1344,6 +1401,7 @@ fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime c
         .float => if (color) zmpl.colors.magenta("{}") else "{}",
         .integer => if (color) zmpl.colors.blue("{}") else "{}",
         .string => if (color) zmpl.colors.green("{s}") else "{s}",
+        .datetime => if (color) zmpl.colors.bright_blue("{s}") else "{s}",
         .boolean => if (color) zmpl.colors.green("{}") else "{}",
         .Null => if (color) zmpl.colors.cyan("null") else "null",
     };
@@ -1352,6 +1410,12 @@ fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime c
 }
 
 fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
+    if (@TypeOf(value) == jetcommon.types.DateTime) {
+        const val = try alloc.create(Value);
+        val.* = .{ .datetime = .{ .value = value, .allocator = alloc } };
+        return val;
+    }
+
     const val = switch (@typeInfo(@TypeOf(value))) {
         .int, .comptime_int => Value{ .integer = .{ .value = value, .allocator = alloc } },
         .float, .comptime_float => Value{ .float = .{ .value = value, .allocator = alloc } },
