@@ -1463,8 +1463,11 @@ fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
 
 fn structToValue(value: anytype, alloc: std.mem.Allocator) !Value {
     var obj = Data.Object.init(alloc);
-    inline for (std.meta.fields(@TypeOf(value))) |f| {
-        try obj.put(f.name, @field(value, f.name));
+    inline for (std.meta.fields(@TypeOf(value))) |field| {
+        // Allow serializing structs that may have some extra type fields (e.g. JetQuery results).
+        if (comptime field.type == type) continue;
+
+        try obj.put(field.name, @field(value, field.name));
     }
     return Value{ .object = obj };
 }
