@@ -585,10 +585,10 @@ test "put slice" {
 
     try root.put("slice", slice);
 
-    try std.testing.expectEqualStrings((try data.getValue("slice.0.foo")).?.string.value, "abc");
-    try std.testing.expectEqualStrings((try data.getValue("slice.0.bar")).?.string.value, "def");
-    try std.testing.expectEqualStrings((try data.getValue("slice.1.foo")).?.string.value, "ghi");
-    try std.testing.expectEqualStrings((try data.getValue("slice.1.bar")).?.string.value, "jkl");
+    try std.testing.expectEqualStrings((data.ref("slice.0.foo")).?.string.value, "abc");
+    try std.testing.expectEqualStrings((data.ref("slice.0.bar")).?.string.value, "def");
+    try std.testing.expectEqualStrings((data.ref("slice.1.foo")).?.string.value, "ghi");
+    try std.testing.expectEqualStrings((data.ref("slice.1.bar")).?.string.value, "jkl");
 }
 
 test "iteration" {
