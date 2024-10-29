@@ -157,6 +157,10 @@ pub fn blue(comptime message: []const u8) []const u8 {
     return wrap(codes.blue, message);
 }
 
+pub fn bright(comptime color: anytype, message: []const u8) []const u8 {
+    return wrap(@field(codes, "bright_" ++ @tagName(color)), message);
+}
+
 pub fn runtimeBlue(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
     return try runtimeWrap(allocator, codes.blue, message);
 }

@@ -1464,7 +1464,7 @@ fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime c
         .float => if (color) zmpl.colors.magenta("{}") else "{}",
         .integer => if (color) zmpl.colors.blue("{}") else "{}",
         .string => if (color) zmpl.colors.green("{s}") else "{s}",
-        .datetime => if (color) zmpl.colors.bright_blue("{s}") else "{s}",
+        .datetime => if (color) zmpl.colors.bright(.blue, "{s}") else "{s}",
         .boolean => if (color) zmpl.colors.green("{}") else "{}",
         .Null => if (color) zmpl.colors.cyan("null") else "null",
     };
