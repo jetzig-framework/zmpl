@@ -1175,6 +1175,19 @@ pub const Object = struct {
         if (options.pretty) try writer.writeBytesNTimes(indent, level);
         try highlight(writer, .close_object, .{}, options.color);
     }
+
+    /// removes true if object was removed
+    /// and false otherwise
+    pub fn remove(self: *Object, key: []const u8) bool {
+        // I saw it in `deinit()` so
+        // I tried to do the same
+        if (self.hashmap.getEntry(key)) |entry| {
+            self.allocator.destroy(entry.value_ptr);
+            self.allocator.destroy(entry.key_ptr);
+        } else return false;
+
+        return self.hashmap.swapRemove(key);
+    }
 };
 
 pub const Array = struct {
