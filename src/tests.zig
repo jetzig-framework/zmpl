@@ -471,6 +471,19 @@ test "getT(.array, ...) and getT(.object, ...)" {
     try std.testing.expectEqual(&obj.object, res_obj);
 }
 
+test "object.remove(...)" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+    var obj = try data.object();
+
+    try obj.put("a", try data.object());
+    try obj.put("b", try data.object());
+
+    try std.testing.expect(obj.object.remove("a"));
+    try std.testing.expectEqual(null, obj.getT(.object, "a"));
+    try std.testing.expect(obj.getT(.object, "b") != null);
+}
+
 test "getStruct from object" {
     var data = zmpl.Data.init(std.testing.allocator);
     defer data.deinit();
