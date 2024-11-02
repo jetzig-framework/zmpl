@@ -59,6 +59,15 @@ pub fn compile(
         \\
     );
 
+    if (@hasDecl(options, "manifest_header")) {
+        const manifest_header = options.manifest_header;
+        const decodedHeader: []u8 = try self.allocator.alloc(u8, try std.base64.standard.Decoder.calcSizeForSlice(manifest_header));
+        defer self.allocator.free(decodedHeader);
+        try std.base64.standard.Decoder.decode(decodedHeader, manifest_header);
+
+        try writer.writeAll(decodedHeader);
+    }
+
     for (template_defs.items) |template_def| {
         try writer.writeAll(try std.fmt.allocPrint(self.allocator,
             \\

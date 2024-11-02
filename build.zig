@@ -39,6 +39,8 @@ pub fn build(b: *std.Build) !void {
     );
 
     const zmpl_markdown_fragments_option = b.option([]const u8, "zmpl_markdown_fragments", "Custom markdown fragments");
+    const zmpl_options_header_option = b.option([]const u8, "zmpl_options_header", "Additional options header");
+    const zmpl_manifest_header_option = b.option([]const u8, "zmpl_manifest_header", "Additional manifest header");
 
     const templates_paths: []const []const u8 = if (templates_path) |path|
         try templatesPaths(
@@ -71,9 +73,9 @@ pub fn build(b: *std.Build) !void {
     const options_files = b.addWriteFiles();
     const zmpl_constants_file = options_files.add(
         "zmpl_options.zig",
-        try generateZmplOptions(b.allocator, zmpl_markdown_fragments_option, zmpl_constants_option),
+        try generateZmplOptions(b.allocator, zmpl_options_header_option, zmpl_markdown_fragments_option, zmpl_constants_option, zmpl_manifest_header_option),
     );
-    const zmpl_options_module = b.createModule(.{ .root_source_file = zmpl_constants_file });
+    const zmpl_options_module = b.addModule("zmpl_options", .{ .root_source_file = zmpl_constants_file });
     zmpl_options_module.addImport("zmd", zmd_module);
     manifest_exe.root_module.addImport("zmpl_options", zmpl_options_module);
     manifest_exe.root_module.addImport("zmd", zmd_module);
@@ -209,16 +211,28 @@ fn findTemplates(b: *std.Build, templates_paths: []const []const u8) ![][]const 
 
 fn generateZmplOptions(
     allocator: std.mem.Allocator,
+    options_header_option: ?[]const u8,
     markdown_fragments: ?[]const u8,
     constants: ?[]const u8,
+    manifest_header_option: ?[]const u8,
 ) ![]const u8 {
     const constants_source = try parseZmplConstants(allocator, constants);
+
+    const manifest_header = manifest_header_option orelse "";
+    const encodedHeader: []u8 = try allocator.alloc(u8, std.base64.standard.Encoder.calcSize(manifest_header.len));
+    defer allocator.free(encodedHeader);
+    const base64Header = std.base64.standard.Encoder.encode(encodedHeader, manifest_header);
+
     return try std.fmt.allocPrint(allocator,
         \\{s}
         \\
         \\{s}
         \\
-    , .{ constants_source, markdown_fragments orelse "" });
+        \\{s}
+        \\
+        \\pub const manifest_header: []const u8 = "{s}";
+        \\
+    , .{ options_header_option orelse "", constants_source, markdown_fragments orelse "", base64Header });
 }
 
 fn parseZmplConstants(allocator: std.mem.Allocator, constants_string: ?[]const u8) ![]const u8 {
