@@ -236,9 +236,9 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
         .comptime_int => .default,
         .null => .none,
         .optional => if (@TypeOf(value) == ?[]const u8) .optional_string else .optional_default,
-        .@"union" => |Union| blk: {
-            break :blk switch (Union) {
-                inline else => |capture| if (@hasField(@TypeOf(capture), "toString")) .zmpl_union else .default,
+        .@"union" => |_| blk: {
+            break :blk switch (@TypeOf(value)) {
+                inline else => |capture| if (@hasField(capture, "toString")) .zmpl_union else .default,
             };
         },
         .pointer => |pointer| switch (pointer.child) {
