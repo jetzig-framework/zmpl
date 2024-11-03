@@ -660,3 +660,13 @@ test "iteration" {
         try std.testing.expect(false);
     }
 }
+
+test "error union" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+
+    try root.put("foo", std.fmt.parseInt(u8, "16", 10));
+    try std.testing.expectEqual(16, root.get("foo").?.integer.value);
+}

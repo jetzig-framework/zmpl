@@ -1354,6 +1354,10 @@ fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
                 break :blk Value{ .Null = NullType{ .allocator = alloc } };
             }
         },
+        .error_union => return if (value) |capture|
+            zmplValue(capture, alloc)
+        else |err|
+            err,
         .@"struct" => try structToValue(value, alloc),
         else => @compileError("Unsupported type: " ++ @typeName(@TypeOf(value))),
     };
