@@ -4,8 +4,8 @@
     .minimum_zig_version = "0.11.0",
     .dependencies = .{
         .zmd = .{
-            .url = "https://github.com/jetzig-framework/zmd/archive/6dda080c7fcbe78c39d9e4f52b8eec9aa7cbbaad.tar.gz",
-            .hash = "12208a01a7c10d0583f253787cf7271587d9509862f34e2b6d754cade7bc08500ef6",
+            .url = "https://github.com/jetzig-framework/zmd/archive/d6c8aa9a9cde99674ccb096d8f94ed09cba8dab0.tar.gz",
+            .hash = "1220d0e8734628fd910a73146e804d10a3269e3e7d065de6bb0e3e88d5ba234eb163",
         },
         .jetcommon = .{
             .url = "https://github.com/jetzig-framework/jetcommon/archive/5946df967d3cf2f843035464a6b8a17cb573afd3.tar.gz",
