@@ -647,7 +647,7 @@ pub fn fromJson(self: *Data, json: []const u8) !void {
     self.value = try self.parseJsonValue(parsed.value);
 }
 
-fn parseJsonValue(self: *Data, value: std.json.Value) !*Value {
+pub fn parseJsonValue(self: *Data, value: std.json.Value) !*Value {
     return switch (value) {
         .object => |*val| blk: {
             var it = val.iterator();
