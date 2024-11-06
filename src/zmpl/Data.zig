@@ -338,7 +338,7 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
 }
 
 pub fn coerceArray(self: *Data, key: []const u8) ![]const *Value {
-    if (self.ref(key)) |zmpl_value| return switch (zmpl_value.*) {
+    if (self.chainRef(key)) |zmpl_value| return switch (zmpl_value.*) {
         .array => |*ptr| ptr.items(),
         else => |tag| zmplError(
             .ref,
@@ -452,7 +452,9 @@ pub fn getCoerce(self: Data, T: type, name: []const u8) !T {
 
 /// Same as `chain` but expects a string of `.foo.bar.baz` references.
 pub fn chainRef(self: *Data, ref_key: []const u8) ?*Value {
-    return switch (self.*) {
+    const value = self.value orelse return null;
+
+    return switch (value.*) {
         .object => |*capture| capture.chainRef(ref_key),
         else => null,
     };
@@ -967,16 +969,19 @@ pub const Value = union(ValueType) {
                 .string => |capture| capture.value,
                 else => error.ZmplIncompatibleType,
             },
-            f128 => switch (self.*) {
-                .float => |capture| capture.value,
+            f128, f64 => switch (self.*) {
+                .float => |capture| @floatCast(capture.value),
+                .string => |capture| try std.fmt.parseFloat(T, capture.value),
                 else => error.ZmplIncompatibleType,
             },
-            usize => switch (self.*) {
-                .integer => |capture| capture.value,
+            usize, u8, u16, u32, isize, i8, i16, i32 => switch (self.*) {
+                .integer => |capture| @intCast(capture.value),
+                .string => |capture| try std.fmt.parseInt(T, capture.value, 10),
                 else => error.ZmplIncompatibleType,
             },
             bool => switch (self.*) {
                 .boolean => |capture| capture.value,
+                .string => |capture| std.mem.eql(u8, capture.value, "1"),
                 else => error.ZmplIncompatibleType,
             },
             jetcommon.types.DateTime => switch (self.*) {
