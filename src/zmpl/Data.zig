@@ -640,11 +640,17 @@ pub fn toJsonOptions(self: *Data, comptime options: ToJsonOptions) ![]const u8 {
     return self.allocator().dupe(u8, self.json_buf.items[0..self.json_buf.items.len]);
 }
 
+/// Parses a JSON string and returns a `!*Data.Value`
+/// Inverse of `toJson`
+pub fn parseJsonSlice(self: *Data, json: []const u8) !*Value {
+    const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator(), json, .{});
+    return self.parseJsonValue(parsed.value);
+}
+
 /// Parses a JSON string and updates the current `Data` object with the parsed data. Inverse of
 /// `toJson`.
 pub fn fromJson(self: *Data, json: []const u8) !void {
-    const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator(), json, .{});
-    self.value = try self.parseJsonValue(parsed.value);
+    self.value = try self.parseJsonSlice(json);
 }
 
 pub fn parseJsonValue(self: *Data, value: std.json.Value) !*Value {
