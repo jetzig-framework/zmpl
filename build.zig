@@ -19,6 +19,14 @@ pub fn build(b: *std.Build) !void {
     const zmpl_module = b.addModule("zmpl", .{ .root_source_file = b.path("src/zmpl.zig") });
     lib.root_module.addImport("zmpl", zmpl_module);
 
+    const build_options = b.addOptions();
+    build_options.addOption(
+        bool,
+        "sanitize",
+        b.option(bool, "sanitize", "Disable default sanitization of data references.") orelse true,
+    );
+    zmpl_module.addOptions("build_options", build_options);
+
     const zmd_dep = b.dependency("zmd", .{ .target = target, .optimize = optimize });
     const zmd_module = zmd_dep.module("zmd");
     lib.root_module.addImport("zmd", zmd_module);

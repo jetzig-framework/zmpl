@@ -61,8 +61,8 @@ parent_allocator: std.mem.Allocator,
 arena: ?std.heap.ArenaAllocator = null,
 arena_allocator: std.mem.Allocator = undefined,
 json_buf: std.ArrayList(u8),
-output_buf: std.ArrayList(u8),
-output_writer: ?std.ArrayList(u8).Writer = null,
+output_buf: *std.ArrayList(u8),
+output_writer: std.ArrayList(u8).Writer,
 value: ?*Value = null,
 partial: bool = false,
 content: LayoutContent = .{ .data = "" },
@@ -76,14 +76,16 @@ const indent = "  ";
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
 pub fn init(parent_allocator: std.mem.Allocator) Data {
     const json_buf = std.ArrayList(u8).init(parent_allocator);
-    const output_buf = std.ArrayList(u8).init(parent_allocator);
+    const output_buf = parent_allocator.create(std.ArrayList(u8)) catch unreachable;
+    output_buf.* = std.ArrayList(u8).init(parent_allocator);
 
     return .{
         .parent_allocator = parent_allocator,
         .json_buf = json_buf,
         .output_buf = output_buf,
+        .output_writer = output_buf.writer(),
         .template_decls = std.StringHashMap(*Value).init(parent_allocator),
-        .fmt = zmpl.Format{ .writer = undefined }, // We assign writer on render.
+        .fmt = zmpl.Format{ .writer = output_buf.writer() },
     };
 }
 
@@ -92,6 +94,7 @@ pub fn deinit(self: *Data) void {
     if (self.arena) |arena| arena.deinit();
     self.output_buf.deinit();
     self.json_buf.deinit();
+    self.parent_allocator.destroy(self.output_buf);
 }
 
 /// Chomps output buffer.
@@ -607,14 +610,7 @@ pub fn _null(arena: std.mem.Allocator) *Value {
 /// present. Used by compiled Zmpl templates.
 pub fn write(self: *Data, maybe_err_slice: anytype) !void {
     const slice = try resolveSlice(maybe_err_slice);
-
-    if (self.output_writer) |writer| {
-        try writer.writeAll(slice);
-    } else {
-        self.output_writer = self.output_buf.writer();
-        self.fmt.writer = self.output_writer.?;
-        try (self.output_writer.?).writeAll(util.chomp(slice));
-    }
+    try (self.output_writer).writeAll(slice);
 }
 
 /// Get a value from the data tree using an exact key. Returns `null` if key not found or if

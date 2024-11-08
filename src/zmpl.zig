@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const build_options = @import("build_options");
+
 pub const zmd = @import("zmd");
 
 // XXX: Ensure that `@import("zmpl").zmpl` always works. This is a workaround to allow Zmpl to be
@@ -24,4 +26,16 @@ pub const findPrefixed = manifest.findPrefixed;
 
 pub fn chomp(input: []const u8) []const u8 {
     return std.mem.trimRight(u8, input, "\r\n");
+}
+
+/// Sanitize input. Used internally for rendering data refs. Use `zmpl.fmt.sanitize` to manually
+/// sanitize other values.
+pub fn sanitize(writer: anytype, input: []const u8) !void {
+    if (!build_options.sanitize) {
+        _ = try writer.write(input);
+        return;
+    }
+
+    const fmt = Format{ .writer = if (@TypeOf(writer) == *Data) writer.output_writer else writer };
+    _ = try fmt.sanitize(input);
 }

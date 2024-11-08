@@ -15,7 +15,7 @@ templates_path: []const u8,
 
 const Node = @This();
 
-const WriterOptions = struct { zmpl_write: []const u8 = "zmpl.write" };
+const WriterOptions = struct { zmpl_writer: []const u8 = "zmpl" };
 
 pub fn compile(self: Node, input: []const u8, writer: anytype, options: type) !void {
     if (self.token.mode == .partial and self.children.items.len > 0) {
@@ -237,7 +237,7 @@ fn renderHtml(self: *const Node, content: []const u8, writer_options: WriterOpti
     }
 
     if (html_buf.items.len > 0) {
-        if (std.mem.eql(u8, writer_options.zmpl_write, "zmpl.write")) {
+        if (std.mem.eql(u8, writer_options.zmpl_writer, "zmpl.*.output_writer")) {
             try html_buf.append('\n');
         }
         try buf.appendSlice(try self.renderWrite(
@@ -422,9 +422,7 @@ fn renderSlots(self: Node, content: []const u8) !Slots {
         if (util.strip(slot).len == 0) continue;
 
         const slot_name = try util.generateVariableNameAlloc(self.allocator);
-        const slot_write = try std.fmt.allocPrint(self.allocator,
-            \\{s}_writer.write
-        , .{slot_name});
+        const slot_writer = try std.fmt.allocPrint(self.allocator, "{s}_writer", .{slot_name});
 
         try slots_content_buf.appendSlice(
             try std.fmt.allocPrint(self.allocator,
@@ -434,7 +432,7 @@ fn renderSlots(self: Node, content: []const u8) !Slots {
                 \\
             , .{
                 slot_name,
-                try self.renderHtml(util.strip(slot), .{ .zmpl_write = slot_write }),
+                try self.renderHtml(util.strip(slot), .{ .zmpl_writer = slot_writer }),
             }),
         );
 
@@ -634,10 +632,10 @@ fn renderWrite(self: Node, input: []const u8, writer_options: WriterOptions) ![]
 
     return std.fmt.allocPrint(
         self.allocator,
-        \\_ = try {s}(zmpl.chomp("{s}"));
+        \\_ = try {s}.write(zmpl.chomp("{s}"));
         \\
     ,
-        .{ writer_options.zmpl_write, buf.items },
+        .{ writer_options.zmpl_writer, buf.items },
     );
 }
 
@@ -655,10 +653,10 @@ fn renderRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]co
 fn renderDataRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
     return std.fmt.allocPrint(
         self.allocator,
-        \\_ = try {s}(try zmpl.getValueString("{s}"));
+        \\try __zmpl.sanitize({s}, try zmpl.getValueString("{s}"));
         \\
     ,
-        .{ writer_options.zmpl_write, input },
+        .{ writer_options.zmpl_writer, input },
     );
 }
 
@@ -670,13 +668,16 @@ fn renderValueRef(self: Node, input: []const u8, writer_options: WriterOptions) 
         break :blk try std.fmt.allocPrint(
             self.allocator,
             \\_ = switch (@TypeOf({1s})) {{
-            \\    *ZmplValue => try {0s}(try zmpl.maybeRef({1s}, {2s})),
-            \\    else => try {0s}(try zmpl.coerceString({3s})),
+            \\    *ZmplValue => try __zmpl.sanitize({0s}, try zmpl.maybeRef({1s}, {2s})),
+            \\    else => if (comptime @TypeOf({3s}) == __zmpl.Data.LayoutContent)
+            \\                try {0s}.write({3s}.data)
+            \\            else
+            \\                try __zmpl.sanitize({0s}, try zmpl.coerceString({3s})),
             \\}};
             \\
         ,
             .{
-                writer_options.zmpl_write,
+                writer_options.zmpl_writer,
                 input[0..start],
                 try util.zigStringEscape(self.allocator, input[start + 1 ..]),
                 input,
@@ -685,20 +686,20 @@ fn renderValueRef(self: Node, input: []const u8, writer_options: WriterOptions) 
     } else try std.fmt.allocPrint(
         self.allocator,
         \\const {0s} = {1s};
-        \\_ = try {2s}(try zmpl.coerceString({0s}));
+        \\_ = try {2s}.write(try zmpl.coerceString({0s}));
         \\
     ,
-        .{ &buf, input, writer_options.zmpl_write },
+        .{ &buf, input, writer_options.zmpl_writer },
     );
 }
 
 fn renderZigLiteral(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
     return std.fmt.allocPrint(
         self.allocator,
-        \\_ = try {s}({s});
+        \\_ = try {s}.write({s});
         \\
     ,
-        .{ writer_options.zmpl_write, input },
+        .{ writer_options.zmpl_writer, input },
     );
 }
 

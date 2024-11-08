@@ -24,25 +24,18 @@ test "readme example" {
             \\<!-- Zig mode for template logic -->
             \\    <span>Zmpl is simple!</span>
             \\
-            \\
             \\<!-- Easy data lookup syntax -->
             \\<div>Email: user@example.com</div>
             \\<div>Token: abc123-456-def</div>
             \\
-            \\<!-- Partials -->
-            \\<span>An example partial</span>
+            \\<!-- Partials --><span>An example partial</span>
             \\
-            \\<!-- Partials with positional args -->
-            \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\<!-- Partials with positional args --><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
             \\
-            \\<!-- Partials with keyword args --->
-            \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\<!-- Partials with keyword args ---><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
             \\
-            \\<!-- Partials with slots --->
-            \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
-            \\        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>
-            \\        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
-            \\
+            \\<!-- Partials with slots ---><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
             \\
             \\<div><h1>Built-in markdown support</h1>
             \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
@@ -73,27 +66,19 @@ test "complex example" {
         defer std.testing.allocator.free(output);
 
         try std.testing.expectEqualStrings(
-            \\    <div>hello</div>
-            \\    <span class="foo
+            \\    <div>hello</div>    <span class="foo
             \\                 bar
             \\                 baz qux"
-            \\    >
-            \\      user@example.com    </span>
-            \\<h2>Some slots:</h2>
+            \\    >      user@example.com    </span><h2>Some slots:</h2>
             \\<div>
             \\Slots count: 2
             \\bar: 100
             \\baz: positional
             \\qux: true
             \\
-            \\
             \\      qux was true !
             \\   
-            \\
-            \\
-            \\    <span><div>slot 1</div></span>
-            \\    <span><div>slot 2</div></span>
-            \\
+            \\    <span><div>slot 1</div></span>    <span><div>slot 2</div></span>
             \\</div>
             \\<h2>Some slots:</h2>
             \\<div>
@@ -102,14 +87,9 @@ test "complex example" {
             \\baz: hello
             \\qux: true
             \\
-            \\
             \\      qux was true !
             \\   
-            \\
-            \\
-            \\    <span><div>slot 3</div></span>
-            \\    <span><div>slot 4</div></span>
-            \\
+            \\    <span><div>slot 3</div></span>    <span><div>slot 4</div></span>
             \\</div>
             \\<h2>Some slots:</h2>
             \\<div>
@@ -118,17 +98,10 @@ test "complex example" {
             \\baz: goodbye
             \\qux: false
             \\
-            \\
             \\      qux was false :(
             \\   
-            \\
-            \\
-            \\    <span><div>slot 5</div></span>
-            \\    <span><div>slot 6</div></span>
-            \\    <span><div>user@example.com</div></span>
-            \\
+            \\    <span><div>slot 5</div></span>    <span><div>slot 6</div></span>    <span><div>user@example.com</div></span>
             \\</div>
-            \\
             \\
             \\    <span>Blah partial content</span>
             \\
@@ -136,11 +109,7 @@ test "complex example" {
             \\<div class="foo
             \\            bar
             \\            my-css-class
-            \\            baz"></div>
-            \\<div><ul><li>foo</li><li>bar</li><li>user@example.com</li></ul></div>
-            \\      <span>hello</span>
-            \\
-            \\
+            \\            baz"></div><div><ul><li>foo</li><li>bar</li><li>user@example.com</li></ul></div>      <span>hello</span>
             \\Bar partial content
             \\
             \\
@@ -204,8 +173,7 @@ test "partials without blocks" {
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\    <span>Blah partial content</span>
-            \\      <div>bar</div>
-            \\    <span>Blah partial content</span>
+            \\      <div>bar</div>    <span>Blah partial content</span>
             \\
         , output);
     } else {
@@ -223,7 +191,6 @@ test "custom delimiters" {
         try std.testing.expectEqualStrings(
             \\<div><h1>Built-in markdown support</h1>
             \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
-            \\
             \\        <script>
             \\          const foo = () => {
             \\            console.log("hello");
@@ -247,7 +214,6 @@ test ".md.zmpl extension" {
         try std.testing.expectEqualStrings(
             \\<div><h1>Hello</h1>
             \\</div>
-            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -384,25 +350,18 @@ test "root init" {
             \\<!-- Zig mode for template logic -->
             \\    <span>Zmpl is simple!</span>
             \\
-            \\
             \\<!-- Easy data lookup syntax -->
             \\<div>Email: user@example.com</div>
             \\<div>Token: abc123-456-def</div>
             \\
-            \\<!-- Partials -->
-            \\<span>An example partial</span>
+            \\<!-- Partials --><span>An example partial</span>
             \\
-            \\<!-- Partials with positional args -->
-            \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\<!-- Partials with positional args --><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
             \\
-            \\<!-- Partials with keyword args --->
-            \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\<!-- Partials with keyword args ---><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
             \\
-            \\<!-- Partials with slots --->
-            \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
-            \\        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>
-            \\        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
-            \\
+            \\<!-- Partials with slots ---><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
             \\
             \\<div><h1>Built-in markdown support</h1>
             \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
@@ -644,49 +603,27 @@ test "iteration" {
         try std.testing.expectEqualStrings(
             \\
             \\  <div>baz</div>
-            \\
             \\  <div>qux</div>
-            \\
             \\  <div>quux</div>
             \\
-            \\
-            \\
             \\  <div>corge</div>
-            \\
             \\  <div>grault</div>
-            \\
             \\  <div>garply</div>
             \\
             \\
-            \\
-            \\
-            \\
             \\  <div>waldo</div>
-            \\
             \\  <div>fred</div>
-            \\
             \\  <div>plugh</div>
             \\
-            \\
-            \\
             \\  <div>0: baz</div>
-            \\
             \\  <div>1: qux</div>
-            \\
             \\  <div>2: quux</div>
             \\
-            \\
-            \\
             \\  <div>bar</div>
-            \\
             \\  <div>corge</div>
             \\
             \\
-            \\
-            \\
-            \\
             \\  <div>bar</div>
-            \\
             \\  <div>baz</div>
             \\
         , output);
@@ -763,4 +700,24 @@ test "error union" {
 
     try root.put("foo", std.fmt.parseInt(u8, "16", 10));
     try std.testing.expectEqual(16, root.get("foo").?.integer.value);
+}
+
+test "xss sanitization/raw formatter" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+    try root.put("foo", "<script>alert(':)');</script>");
+
+    if (zmpl.find("xss")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\&lt;script&gt;alert(&#039;:)&#039;);&lt;/script&gt;
+            \\<script>alert(':)');</script>
+            \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
 }
