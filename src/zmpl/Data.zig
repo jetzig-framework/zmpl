@@ -605,7 +605,9 @@ pub fn _null(arena: std.mem.Allocator) *Value {
 
 /// Write a given string to the output buffer. Creates a new output buffer if not already
 /// present. Used by compiled Zmpl templates.
-pub fn write(self: *Data, slice: []const u8) !void {
+pub fn write(self: *Data, maybe_err_slice: anytype) !void {
+    const slice = try resolveSlice(maybe_err_slice);
+
     if (self.output_writer) |writer| {
         try writer.writeAll(slice);
     } else {
@@ -1604,6 +1606,16 @@ const Field = struct {
         );
     }
 };
+
+// Resolve an optional or error union to a `[]const u8`. Empty string if optional is null, error
+// if error union is an error.
+fn resolveSlice(maybe_err_slice: anytype) ![]const u8 {
+    return switch (@typeInfo(@TypeOf(maybe_err_slice))) {
+        .error_union => if (maybe_err_slice) |slice| try resolveSlice(slice) else |err| err,
+        .optional => if (maybe_err_slice) |slice| slice else "",
+        else => maybe_err_slice, // Let Zig compiler fail if incorrect type.
+    };
+}
 
 pub const ErrorName = enum { ref, type, syntax, constant };
 pub const ZmplError = error{
