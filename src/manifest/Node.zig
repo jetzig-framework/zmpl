@@ -739,6 +739,7 @@ fn isIdentifier(arg: []const u8) bool {
     const stripped = std.mem.trim(u8, arg, &std.ascii.whitespace);
 
     if (std.mem.indexOfScalar(u8, stripped, ' ')) |_| return false;
+    if (arg.len > 0 and std.ascii.isAlphabetic(arg[0])) return true;
     if (std.mem.indexOfAny(u8, stripped, "0123456789")) |index| return index > 0;
 
     return true;
