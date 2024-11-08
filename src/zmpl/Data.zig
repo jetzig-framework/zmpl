@@ -94,9 +94,7 @@ pub fn deinit(self: *Data) void {
     self.json_buf.deinit();
 }
 
-/// Chomps output buffer. Used for partials to allow user to add an explicit blank line at the
-/// end of a template if needed, otherwise `<div>{^partial_name}</div>` should not output a
-/// newline.
+/// Chomps output buffer.
 pub fn chompOutputBuffer(self: *Data) void {
     if (std.mem.endsWith(u8, self.output_buf.items, "\r\n")) {
         _ = self.output_buf.pop();
@@ -456,6 +454,19 @@ pub fn chainRef(self: *Data, ref_key: []const u8) ?*Value {
 
     return switch (value.*) {
         .object => |*capture| capture.chainRef(ref_key),
+        else => null,
+    };
+}
+
+/// Same as `chainRef` but coerces a Value to the given type.
+pub fn chainRefT(self: *Data, T: type, ref_key: []const u8) !T {
+    const value = self.value orelse return unknownRef(ref_key);
+
+    return switch (value.*) {
+        .object => |*capture| if (capture.chainRef(ref_key)) |val|
+            try val.coerce(T)
+        else
+            unknownRef(ref_key),
         else => null,
     };
 }
@@ -847,6 +858,14 @@ pub const Value = union(ValueType) {
         };
     }
 
+    /// Same as `chainRef` but coerces a Value to the given type.
+    pub fn chainRefT(self: *const Value, T: type, ref_key: []const u8) !T {
+        return switch (self.*) {
+            .object => |*capture| capture.chainRefT(T, ref_key),
+            else => unknownRef(ref_key),
+        };
+    }
+
     /// Puts a `Value` into an `Object`.
     pub fn put(self: *Value, key: []const u8, value: anytype) !void {
         switch (self.*) {
@@ -964,6 +983,11 @@ pub const Value = union(ValueType) {
     /// Coerce a value to a given type, intented for use with JetQuery for passing Value as query
     /// parameters.
     pub fn toJetQuery(self: *const Value, T: type) !T {
+        return try self.coerce(T);
+    }
+
+    /// Coerce a value to a given type. Used when passing `*ZmplValue` to partial args.
+    pub fn coerce(self: *const Value, T: type) !T {
         return switch (T) {
             []const u8 => switch (self.*) {
                 .string => |capture| capture.value,
@@ -988,6 +1012,7 @@ pub const Value = union(ValueType) {
                 .datetime => |capture| capture.value,
                 else => error.ZmplIncompatibleType,
             },
+            *Value, *const Value => self,
             else => @compileError("Cannot corece Zmpl Value to type: " ++ @typeName(T)),
         };
     }
@@ -1292,8 +1317,8 @@ pub const Object = struct {
         return null;
     }
 
-    pub fn chainRef(self: Object, ref_keys: []const u8) ?*Value {
-        var it = std.mem.tokenizeScalar(u8, ref_keys, '.');
+    pub fn chainRef(self: Object, ref_key: []const u8) ?*Value {
+        var it = std.mem.tokenizeScalar(u8, ref_key, '.');
         var current_object = self;
         var current_value: ?*Value = null;
 
@@ -1305,6 +1330,11 @@ pub const Object = struct {
                 }
             } else break null;
         } else current_value;
+    }
+
+    pub fn chainRefT(self: Object, T: type, ref_key: []const u8) !T {
+        const value = self.chainRef(ref_key) orelse return unknownRef(ref_key);
+        return try value.coerce(T);
     }
 
     pub fn contains(self: Object, key: []const u8) bool {

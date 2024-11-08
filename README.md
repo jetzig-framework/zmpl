@@ -84,14 +84,18 @@ See [src/templates](src/templates) for more examples.
 
 <!-- Partials -->
 <span>An example partial</span>
+
 <!-- Partials with positional args -->
 <a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+
 <!-- Partials with keyword args --->
 <a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+
 <!-- Partials with slots --->
 <a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
         <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>
         <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
+
 
 <div><h1>Built-in markdown support</h1>
 <ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>

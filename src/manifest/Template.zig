@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const jetcommon = @import("jetcommon");
+
 const Node = @import("Node.zig");
 const util = @import("util.zig");
 
@@ -98,7 +100,11 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
 
     self.state = .compiled;
 
-    return try buf.toOwnedSlice();
+    return try jetcommon.fmt.zig(
+        self.allocator,
+        try buf.toOwnedSlice(),
+        "Syntax error in Zmpl manifest",
+    );
 }
 
 /// Here for compatibility with `Template` only - manifest generates random names for templates
@@ -586,7 +592,7 @@ fn renderFooter(self: Template, writer: anytype) !void {
         \\        const __content = try __capture._render(zmpl);
         \\        return __content;
         \\    } else {
-        \\        return try zmpl.parent_allocator.dupe(u8, zmpl.strip(zmpl.output_buf.items));
+        \\        return try zmpl.parent_allocator.dupe(u8, zmpl.chomp(zmpl.output_buf.items));
         \\    }
         \\}
         \\
