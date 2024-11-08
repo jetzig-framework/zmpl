@@ -4,10 +4,7 @@ const std = @import("std");
 pub fn chomp(input: []const u8) []const u8 {
     if (input.len == 0 or input.len == 1) return input;
 
-    const start = std.mem.indexOfNone(u8, input, "\n") orelse 0;
     const end = std.mem.lastIndexOfNone(u8, input, "\n") orelse input.len - 1;
-    const trim_start = if (start == 0) 0 else start - 1;
-    _ = trim_start;
     const trim_end = if (end == input.len - 1) input.len else end + 2;
     return input[0..trim_end];
 }

@@ -1,5 +1,6 @@
 const std = @import("std");
 const zmpl = @import("zmpl");
+const jetcommon = @import("jetcommon");
 
 test "readme example" {
     var data = zmpl.Data.init(std.testing.allocator);
@@ -30,17 +31,22 @@ test "readme example" {
             \\
             \\<!-- Partials -->
             \\<span>An example partial</span>
+            \\
             \\<!-- Partials with positional args -->
             \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\
             \\<!-- Partials with keyword args --->
             \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\
             \\<!-- Partials with slots --->
             \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
             \\        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>
             \\        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
             \\
+            \\
             \\<div><h1>Built-in markdown support</h1>
             \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -67,7 +73,7 @@ test "complex example" {
         defer std.testing.allocator.free(output);
 
         try std.testing.expectEqualStrings(
-            \\<div>hello</div>
+            \\    <div>hello</div>
             \\    <span class="foo
             \\                 bar
             \\                 baz qux"
@@ -88,7 +94,8 @@ test "complex example" {
             \\    <span><div>slot 1</div></span>
             \\    <span><div>slot 2</div></span>
             \\
-            \\</div><h2>Some slots:</h2>
+            \\</div>
+            \\<h2>Some slots:</h2>
             \\<div>
             \\Slots count: 2
             \\bar: 10
@@ -103,7 +110,8 @@ test "complex example" {
             \\    <span><div>slot 3</div></span>
             \\    <span><div>slot 4</div></span>
             \\
-            \\</div><h2>Some slots:</h2>
+            \\</div>
+            \\<h2>Some slots:</h2>
             \\<div>
             \\Slots count: 3
             \\bar: 5
@@ -121,7 +129,9 @@ test "complex example" {
             \\
             \\</div>
             \\
-            \\<span>Blah partial content</span>
+            \\
+            \\    <span>Blah partial content</span>
+            \\
             \\
             \\<div class="foo
             \\            bar
@@ -133,7 +143,9 @@ test "complex example" {
             \\
             \\Bar partial content
             \\
+            \\
             \\hello
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -154,6 +166,7 @@ test "direct rendering of slots (render [][]const u8 as line-separated string)" 
             \\<span>slot 2</span>
             \\<span>slot 3</span>
             \\</div>
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -168,12 +181,14 @@ test "javascript" {
         const output = try template.render(&data);
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
-            \\<span>{ is my favorite character</span>
+            \\
+            \\  <span>{ is my favorite character</span>
             \\  <script>
             \\    function foobar() {
             \\      console.log("hello");
             \\    }
             \\  </script>
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -188,8 +203,10 @@ test "partials without blocks" {
         const output = try template.render(&data);
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
-            \\<span>Blah partial content</span>      <div>bar</div>
-            \\<span>Blah partial content</span>
+            \\    <span>Blah partial content</span>
+            \\      <div>bar</div>
+            \\    <span>Blah partial content</span>
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -212,6 +229,8 @@ test "custom delimiters" {
             \\            console.log("hello");
             \\          };
             \\        </script>
+            \\     
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -228,6 +247,7 @@ test ".md.zmpl extension" {
         try std.testing.expectEqualStrings(
             \\<div><h1>Hello</h1>
             \\</div>
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -243,6 +263,7 @@ test "default partial arguments" {
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\bar, default value
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -260,6 +281,7 @@ test "escaping (HTML and backslash escaping" {
             \\<div><pre class="language-html" style="font-family: Monospace;"><code>&lt;div&gt;
             \\  @partial foo("bar")
             \\&lt;/div&gt;</code></pre></div>
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -282,6 +304,7 @@ test "references combined with markdown" {
             \\
             \\<p>  <a href="https://jetzig.dev/">jetzig.dev</a></p>
             \\</div>
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -304,6 +327,7 @@ test "partial arg type coercion" {
             \\100
             \\123.456
             \\qux
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -331,6 +355,7 @@ test "inheritance" {
             \\</div>
             \\</div>
             \\</div>
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -366,17 +391,22 @@ test "root init" {
             \\
             \\<!-- Partials -->
             \\<span>An example partial</span>
+            \\
             \\<!-- Partials with positional args -->
             \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\
             \\<!-- Partials with keyword args --->
             \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+            \\
             \\<!-- Partials with slots --->
             \\<a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
             \\        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>
             \\        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
             \\
+            \\
             \\<div><h1>Built-in markdown support</h1>
             \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -396,6 +426,7 @@ test "reference stripping" {
 
         try std.testing.expectEqualStrings(
             \\<div>hello</div>
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -444,6 +475,7 @@ test "inferred type in put/append" {
             \\2
             \\5
             \\field_b    <span>qux was true</span>
+            \\
         , output);
     } else {
         try std.testing.expect(false);
@@ -584,10 +616,10 @@ test "put slice" {
 
     try root.put("slice", slice);
 
-    try std.testing.expectEqualStrings((try data.getValue("slice.0.foo")).?.string.value, "abc");
-    try std.testing.expectEqualStrings((try data.getValue("slice.0.bar")).?.string.value, "def");
-    try std.testing.expectEqualStrings((try data.getValue("slice.1.foo")).?.string.value, "ghi");
-    try std.testing.expectEqualStrings((try data.getValue("slice.1.bar")).?.string.value, "jkl");
+    try std.testing.expectEqualStrings((data.ref("slice.0.foo")).?.string.value, "abc");
+    try std.testing.expectEqualStrings((data.ref("slice.0.bar")).?.string.value, "def");
+    try std.testing.expectEqualStrings((data.ref("slice.1.foo")).?.string.value, "ghi");
+    try std.testing.expectEqualStrings((data.ref("slice.1.bar")).?.string.value, "jkl");
 }
 
 test "iteration" {
@@ -610,7 +642,8 @@ test "iteration" {
         const output = try template.render(&data);
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
-            \\<div>baz</div>
+            \\
+            \\  <div>baz</div>
             \\
             \\  <div>qux</div>
             \\
@@ -655,6 +688,67 @@ test "iteration" {
             \\  <div>bar</div>
             \\
             \\  <div>baz</div>
+            \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
+
+test "datetime format" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+
+    try root.put("foo", "2024-09-24T19:30:35Z");
+    var bar = try data.array();
+    try bar.append(.{ .baz = "2024-09-27T20:19:14Z" });
+    try root.put("bar", bar);
+
+    if (zmpl.find("datetime_format")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\<div>Tue Sep 24 19:30:35 2024</div>
+            \\<div>2024-09-24</div>
+            \\
+            \\  <div>Fri Sep 27 20:19:14 2024</div>
+            \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
+
+test "datetime" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+    const datetime = try jetcommon.types.DateTime.parse("2024-09-27T21:29:51Z");
+    try root.put("foo", datetime);
+    const foo = root.getT(.datetime, "foo") orelse return std.testing.expect(false);
+    try std.testing.expect(datetime.eql(foo));
+}
+
+test "for with partial" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+    var array = try data.array();
+    try array.append(.{ .foo = "foo1", .bar = "bar1" });
+    try array.append(.{ .foo = "foo2", .bar = "bar2" });
+    try root.put("things", array);
+
+    if (zmpl.find("for_with_partial")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\foo1: bar1
+            \\foo2: bar2
+            \\
         , output);
     } else {
         try std.testing.expect(false);

@@ -1,6 +1,6 @@
 @zig EOF
   const foo = 100;
-  const bar = (try zmpl.getValue("test")).?;
+  const bar = (zmpl.ref("test")).?;
   const MyThing = struct {
       pub fn format(self: @This(), actual_fmt: []const u8, options: anytype, writer: anytype) !void {
           _ = self;

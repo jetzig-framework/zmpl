@@ -34,6 +34,8 @@
 /// automatically.
 const std = @import("std");
 
+const jetcommon = @import("jetcommon");
+
 const manifest = @import("zmpl.manifest").__Manifest;
 const zmpl = @import("../zmpl.zig");
 const util = zmpl.util;
@@ -67,6 +69,7 @@ content: LayoutContent = .{ .data = "" },
 partial_data: ?*Object = null,
 template_decls: std.StringHashMap(*Value),
 slots: ?[]const String = null,
+fmt: zmpl.Format,
 
 const indent = "  ";
 
@@ -80,6 +83,7 @@ pub fn init(parent_allocator: std.mem.Allocator) Data {
         .json_buf = json_buf,
         .output_buf = output_buf,
         .template_decls = std.StringHashMap(*Value).init(parent_allocator),
+        .fmt = zmpl.Format{ .writer = undefined }, // We assign writer on render.
     };
 }
 
@@ -90,9 +94,7 @@ pub fn deinit(self: *Data) void {
     self.json_buf.deinit();
 }
 
-/// Chomps output buffer. Used for partials to allow user to add an explicit blank line at the
-/// end of a template if needed, otherwise `<div>{^partial_name}</div>` should not output a
-/// newline.
+/// Chomps output buffer.
 pub fn chompOutputBuffer(self: *Data) void {
     if (std.mem.endsWith(u8, self.output_buf.items, "\r\n")) {
         _ = self.output_buf.pop();
@@ -133,7 +135,7 @@ pub fn eql(self: *const Data, other: *const Data) bool {
 
 /// Takes a string such as `foo.bar.baz` and translates into a path into the data tree to return
 /// a value that can be rendered in a template.
-pub fn getValue(self: Data, key: []const u8) !?*Value {
+pub fn ref(self: Data, key: []const u8) ?*Value {
     // Partial data always takes precedence over underlying template data.
     if (self.partial_data) |val| {
         if (val.get(key)) |partial_value| return partial_value;
@@ -154,7 +156,7 @@ pub fn getValue(self: Data, key: []const u8) !?*Value {
                     const index = std.fmt.parseInt(usize, token, 10) catch |err| {
                         switch (err) {
                             error.InvalidCharacter => return null,
-                            else => return err,
+                            else => return null,
                         }
                     };
                     current_value = capt.get(index) orelse return null;
@@ -170,8 +172,8 @@ pub fn getValue(self: Data, key: []const u8) !?*Value {
 
 /// Converts any `Value` in a root `Object` to a string. Returns an empty string if no match or
 /// no compatible data type.
-pub fn getValueString(self: Data, key: []const u8) ![]const u8 {
-    if (try self.getValue(key)) |val| {
+pub fn getValueString(self: *Data, key: []const u8) ![]const u8 {
+    if (self.ref(key)) |val| {
         switch (val.*) {
             .object, .array => return "", // No sense in trying to convert an object/array to a string
             else => |*capture| {
@@ -180,7 +182,7 @@ pub fn getValueString(self: Data, key: []const u8) ![]const u8 {
             },
         }
     } else {
-        return zmplError(.ref, "Unknown data reference: " ++ zmpl.colors.red("{s}"), .{key});
+        return unknownRef(key);
     }
 }
 
@@ -334,7 +336,7 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
 }
 
 pub fn coerceArray(self: *Data, key: []const u8) ![]const *Value {
-    if (try self.getValue(key)) |zmpl_value| return switch (zmpl_value.*) {
+    if (self.chainRef(key)) |zmpl_value| return switch (zmpl_value.*) {
         .array => |*ptr| ptr.items(),
         else => |tag| zmplError(
             .ref,
@@ -342,17 +344,17 @@ pub fn coerceArray(self: *Data, key: []const u8) ![]const *Value {
             .{ key, @tagName(tag) },
         ),
     } else {
-        return zmplError(.ref, "Unknown data reference: " ++ zmpl.colors.red("{s}"), .{key});
+        return unknownRef(key);
     }
 }
 
 pub fn maybeRef(self: *Data, value: *const Value, key: []const u8) ![]const u8 {
+    _ = self;
     return switch (value.*) {
-        // TODO: Recursive lookup
-        .object => |*ptr| if (ptr.chain(try splitRef(self.allocator(), key))) |capture|
+        .object => |*ptr| if (ptr.chainRef(key)) |capture|
             try capture.toString()
         else
-            zmplError(.ref, "Unknown data reference: " ++ zmpl.colors.red("{s}"), .{key}),
+            unknownRef(key),
         else => |tag| zmplError(
             .type,
             "Unsupported type for lookup: " ++ zmpl.colors.red("{s}"),
@@ -391,8 +393,30 @@ pub fn getConst(self: *Data, T: type, name: []const u8) !T {
 /// If a partial argument is a data reference (as opposed to a local constant/literal/etc.),
 /// attempt to coerce it to the expected argument type.
 pub fn getCoerce(self: Data, T: type, name: []const u8) !T {
+    var it = std.mem.tokenizeScalar(u8, name, '.');
+    const value = self.value orelse return unknownRef(name);
+
+    var current_object = switch (value.*) {
+        .object => |obj| obj,
+        else => return unknownRef(name),
+    };
+
+    var count: usize = 0;
+    var last_key: []const u8 = undefined;
+    while (it.next()) |key| {
+        last_key = key;
+        if (current_object.hashmap.get(key)) |obj| {
+            switch (obj.*) {
+                .object => |capture| current_object = capture,
+                else => count += 1,
+            }
+        }
+    }
+
+    if (count != 1) return unknownRef(name);
+
     return switch (T) {
-        []const u8 => self.getT(.string, name) orelse error.ZmplUnknownDataReferenceError,
+        []const u8 => current_object.getT(.string, last_key) orelse unknownRef(name),
         u1,
         u2,
         u4,
@@ -409,17 +433,41 @@ pub fn getCoerce(self: Data, T: type, name: []const u8) !T {
         i32,
         i64,
         i128,
-        => if (self.getT(.integer, name)) |value|
-            @as(T, @intCast(value))
+        => if (current_object.getT(.integer, last_key)) |capture|
+            @as(T, @intCast(capture))
         else
-            error.ZmplUnknownDataReferenceError,
-        f16, f32, f64, f128 => if (self.getT(.float, name)) |value|
-            @as(T, @floatCast(value))
+            unknownRef(name),
+        f16, f32, f64, f128 => if (current_object.getT(.float, last_key)) |capture|
+            @as(T, @floatCast(capture))
         else
-            error.ZmplUnknownDataReferenceError,
-        bool => self.getT(.boolean, name) orelse error.ZmplUnknownDataReferenceError,
-        *Value => try self._get(name),
+            unknownRef(name),
+        bool => self.getT(.boolean, last_key) orelse unknownRef(name),
+        jetcommon.types.DateTime => current_object.getT(.datetime, last_key) orelse unknownRef(name),
+        *Value => current_object.get(last_key) orelse unknownRef(name),
         else => @compileError("Unsupported type for data lookup in partial args: " ++ @typeName(T)),
+    };
+}
+
+/// Same as `chain` but expects a string of `.foo.bar.baz` references.
+pub fn chainRef(self: *Data, ref_key: []const u8) ?*Value {
+    const value = self.value orelse return null;
+
+    return switch (value.*) {
+        .object => |*capture| capture.chainRef(ref_key),
+        else => null,
+    };
+}
+
+/// Same as `chainRef` but coerces a Value to the given type.
+pub fn chainRefT(self: *Data, T: type, ref_key: []const u8) !T {
+    const value = self.value orelse return unknownRef(ref_key);
+
+    return switch (value.*) {
+        .object => |*capture| if (capture.chainRef(ref_key)) |val|
+            try val.coerce(T)
+        else
+            unknownRef(ref_key),
+        else => null,
     };
 }
 
@@ -540,6 +588,14 @@ pub fn boolean(self: *Data, value: bool) *Value {
     return val;
 }
 
+/// Creates a new `Value` representing a datetime.
+pub fn datetime(self: *Data, value: jetcommon.types.DateTime) *Value {
+    const arena = self.allocator();
+    const val = arena.create(Value) catch @panic("Out of memory");
+    val.* = .{ .datetime = .{ .value = value, .allocator = arena } };
+    return val;
+}
+
 /// Create a new `Value` representing a `null` value. Public, but for internal use only.
 pub fn _null(arena: std.mem.Allocator) *Value {
     const val = arena.create(Value) catch @panic("Out of memory");
@@ -554,6 +610,7 @@ pub fn write(self: *Data, slice: []const u8) !void {
         try writer.writeAll(slice);
     } else {
         self.output_writer = self.output_buf.writer();
+        self.fmt.writer = self.output_writer.?;
         try (self.output_writer.?).writeAll(util.chomp(slice));
     }
 }
@@ -579,6 +636,7 @@ pub fn getT(self: *const Data, comptime T: ValueType, key: []const u8) ?switch (
     .float => f128,
     .integer => i128,
     .boolean => bool,
+    .datetime => jetcommon.types.DateTime,
     .Null => null,
 } {
     if (self.value == null) return null;
@@ -602,6 +660,7 @@ pub fn getPresence(self: *const Data, key: []const u8) bool {
 
     return value.isPresent();
 }
+
 /// Receives an array of keys and recursively gets each key from nested objects, returning `null`
 /// if a key is not found, or `*Value` if all keys are found.
 pub fn chain(self: *Data, keys: []const []const u8) ?*Value {
@@ -613,10 +672,10 @@ pub fn chain(self: *Data, keys: []const []const u8) ?*Value {
 /// Gets a value from the data tree using reference lookup syntax (e.g. `.foo.bar.baz`).
 /// Used internally by templates.
 pub fn _get(self: Data, key: []const u8) !*Value {
-    return if (try self.getValue(key)) |value|
+    return if (self.ref(key)) |value|
         value
     else
-        error.ZmplUnknownDataReferenceError;
+        unknownRef(key);
 }
 
 /// Returns the entire `Data` tree as a JSON string.
@@ -668,7 +727,7 @@ pub fn parseJsonValue(self: *Data, value: std.json.Value) !*Value {
             for (val.items) |item| try arr.append(try self.parseJsonValue(item));
             break :blk arr;
         },
-        .string => |val| self.string(val),
+        .string => |val| self.string(val), // TODO: maybe try to parse datetimes ?
         .number_string => |val| if (std.mem.containsAtLeast(u8, val, 1, "."))
             self.float(try std.fmt.parseFloat(f128, val))
         else
@@ -687,6 +746,7 @@ pub const ValueType = enum {
     integer,
     boolean,
     string,
+    datetime,
     Null,
 };
 
@@ -699,6 +759,7 @@ pub const Value = union(ValueType) {
     integer: Integer,
     boolean: Boolean,
     string: String,
+    datetime: DateTime,
     Null: NullType,
 
     /// Compares one `Value` to another `Value` recursively. Order of `Object` keys is ignored.
@@ -728,6 +789,10 @@ pub const Value = union(ValueType) {
                 .boolean => |*other_capture| return capture.eql(other_capture),
                 inline else => return false,
             },
+            .datetime => |*capture| switch (other.*) {
+                .datetime => |*other_capture| return capture.eql(other_capture),
+                inline else => return false,
+            },
             .Null => |*capture| switch (other.*) {
                 .Null => |*other_capture| return capture.eql(other_capture),
                 inline else => return false,
@@ -753,6 +818,7 @@ pub const Value = union(ValueType) {
         .float => f128,
         .integer => i128,
         .boolean => bool,
+        .datetime => jetcommon.types.DateTime,
         .Null => null,
     } {
         return switch (self.*) {
@@ -761,11 +827,13 @@ pub const Value = union(ValueType) {
         };
     }
 
+    /// Get an instance of `Struct` from `key` if present.
     pub fn getStruct(self: *const Value, Struct: type, key: []const u8) !?Struct {
         const obj = self.getT(.object, key) orelse return null;
         return obj.getStruct(Struct);
     }
 
+    /// Detect presence of a value, use for truthiness testing.
     pub fn isPresent(self: *const Value) bool {
         return switch (self.*) {
             .object => |*capture| capture.count() > 0,
@@ -774,16 +842,33 @@ pub const Value = union(ValueType) {
             .boolean => |capture| capture.value,
             .integer => |capture| capture.value > 0,
             .float => |capture| capture.value > 0,
+            .datetime => true,
             .Null => false,
         };
     }
 
-    /// Receives an array of keys and recursively gets each key from nested objects, returning `null`
-    /// if a key is not found, or `*Value` if all keys are found.
+    /// Receives an array of keys and recursively gets each key from nested objects, returning
+    /// `null` if a key is not found, or `*Value` if all keys are found.
     pub fn chain(self: *const Value, keys: []const []const u8) ?*Value {
         return switch (self.*) {
             .object => |*capture| capture.chain(keys),
             else => null,
+        };
+    }
+
+    /// Same as `chain` but expects a string of `.foo.bar.baz` references.
+    pub fn chainRef(self: *const Value, ref_key: []const u8) ?*Value {
+        return switch (self.*) {
+            .object => |*capture| capture.chainRef(ref_key),
+            else => null,
+        };
+    }
+
+    /// Same as `chainRef` but coerces a Value to the given type.
+    pub fn chainRefT(self: *const Value, T: type, ref_key: []const u8) !T {
+        return switch (self.*) {
+            .object => |*capture| capture.chainRefT(T, ref_key),
+            else => unknownRef(ref_key),
         };
     }
 
@@ -803,6 +888,7 @@ pub const Value = union(ValueType) {
         }
     }
 
+    /// Convert the value to a JSON string.
     pub fn toJson(self: *const Value) ![]const u8 {
         const arena = switch (self.*) {
             inline else => |capture| capture.allocator,
@@ -827,6 +913,7 @@ pub const Value = union(ValueType) {
         };
     }
 
+    /// Create a deep copy of the value.
     pub fn clone(self: *const Value, gpa: std.mem.Allocator) !*Value {
         const json = try self.toJson();
         const arena = switch (self.*) {
@@ -838,6 +925,7 @@ pub const Value = union(ValueType) {
         return data.value.?;
     }
 
+    /// Permit usage of `Value` in a Zig format string.
     pub fn format(self: *Value, actual_fmt: []const u8, options: anytype, writer: anytype) !void {
         _ = options;
         _ = actual_fmt;
@@ -862,6 +950,7 @@ pub const Value = union(ValueType) {
         }
     }
 
+    /// Iterate over compatible values (array, object).
     pub fn iterator(self: *Value) *Iterator {
         switch (self.*) {
             .array => |*capture| return capture.*.iterator(),
@@ -870,6 +959,8 @@ pub const Value = union(ValueType) {
         }
     }
 
+    /// Return an array of Value or Item, whether value is an array or object (respectively).
+    /// Item provides `key` and `value` fields.
     pub fn items(self: *Value, comptime selector: IteratorSelector) []switch (selector) {
         .array => *Value,
         .object => Item,
@@ -886,12 +977,50 @@ pub const Value = union(ValueType) {
         };
     }
 
+    /// Free claimed memory.
     pub fn deinit(self: *Value) void {
         switch (self.*) {
             .array => |*ptr| ptr.deinit(),
             .object => |*ptr| ptr.deinit(),
             else => {},
         }
+    }
+
+    /// Coerce a value to a given type, intented for use with JetQuery for passing Value as query
+    /// parameters.
+    pub fn toJetQuery(self: *const Value, T: type) !T {
+        return try self.coerce(T);
+    }
+
+    /// Coerce a value to a given type. Used when passing `*ZmplValue` to partial args.
+    pub fn coerce(self: *const Value, T: type) !T {
+        return switch (T) {
+            []const u8 => switch (self.*) {
+                .string => |capture| capture.value,
+                else => error.ZmplIncompatibleType,
+            },
+            f128, f64 => switch (self.*) {
+                .float => |capture| @floatCast(capture.value),
+                .string => |capture| try std.fmt.parseFloat(T, capture.value),
+                else => error.ZmplIncompatibleType,
+            },
+            usize, u8, u16, u32, isize, i8, i16, i32 => switch (self.*) {
+                .integer => |capture| @intCast(capture.value),
+                .string => |capture| try std.fmt.parseInt(T, capture.value, 10),
+                else => error.ZmplIncompatibleType,
+            },
+            bool => switch (self.*) {
+                .boolean => |capture| capture.value,
+                .string => |capture| std.mem.eql(u8, capture.value, "1"),
+                else => error.ZmplIncompatibleType,
+            },
+            jetcommon.types.DateTime => switch (self.*) {
+                .datetime => |capture| capture.value,
+                else => error.ZmplIncompatibleType,
+            },
+            *Value, *const Value => self,
+            else => @compileError("Cannot corece Zmpl Value to type: " ++ @typeName(T)),
+        };
     }
 };
 
@@ -990,6 +1119,33 @@ pub const String = struct {
     }
 };
 
+pub const DateTime = struct {
+    value: jetcommon.types.DateTime,
+    allocator: std.mem.Allocator,
+
+    pub fn eql(self: *const DateTime, other: *const DateTime) bool {
+        return self.*.value.eql(other.*.value);
+    }
+
+    pub fn toJson(self: DateTime, writer: Writer, comptime options: ToJsonOptions) !void {
+        var buf = std.ArrayList(u8).init(self.allocator);
+        try self.value.toJson(buf.writer());
+        try highlight(
+            writer,
+            .datetime,
+            .{try buf.toOwnedSlice()},
+            options.color,
+        );
+    }
+
+    pub fn toString(self: DateTime) ![]const u8 {
+        var buf = std.ArrayList(u8).init(self.allocator);
+        const writer = buf.writer();
+        try self.value.toString(writer);
+        return try buf.toOwnedSlice();
+    }
+};
+
 pub const Object = struct {
     hashmap: std.StringArrayHashMap(*Value),
     allocator: std.mem.Allocator,
@@ -1028,8 +1184,8 @@ pub const Object = struct {
     }
 
     pub fn get(self: Object, key: []const u8) ?*Value {
-        if (self.hashmap.getEntry(key)) |entry| {
-            return entry.value_ptr.*;
+        if (self.hashmap.get(key)) |value| {
+            return value;
         } else return null;
     }
 
@@ -1040,37 +1196,41 @@ pub const Object = struct {
         .float => f128,
         .integer => i128,
         .boolean => bool,
+        .datetime => jetcommon.types.DateTime,
         .Null => null,
     } {
-        if (self.hashmap.getEntry(key)) |entry| {
-            const value = entry.value_ptr.*.*;
+        if (self.get(key)) |value| {
             return switch (T) {
-                .object => switch (value) {
-                    .object => &entry.value_ptr.*.object,
+                .object => switch (value.*) {
+                    .object => |*capture| capture,
                     else => null,
                 },
-                .array => switch (value) {
-                    .array => &entry.value_ptr.*.array,
+                .array => switch (value.*) {
+                    .array => |*capture| capture,
                     else => null,
                 },
-                .string => switch (value) {
+                .string => switch (value.*) {
                     .string => |capture| capture.value,
                     else => null,
                 },
-                .float => switch (value) {
+                .float => switch (value.*) {
                     .float => |capture| capture.value,
                     .string => |capture| std.fmt.parseFloat(f128, capture.value) catch null,
                     else => null,
                 },
-                .integer => switch (value) {
+                .integer => switch (value.*) {
                     .integer => |capture| capture.value,
                     .string => |capture| std.fmt.parseInt(i128, capture.value, 10) catch null,
                     else => null,
                 },
-                .boolean => switch (value) {
+                .boolean => switch (value.*) {
                     .boolean => |capture| capture.value,
                     .string => |capture| std.mem.eql(u8, capture.value, "1"),
                     .integer => |capture| capture.value > 0,
+                    else => null,
+                },
+                .datetime => switch (value.*) {
+                    .datetime => |capture| capture.value,
                     else => null,
                 },
                 .Null => null,
@@ -1084,45 +1244,67 @@ pub const Object = struct {
         var return_struct: Struct = undefined;
         switch (@typeInfo(Struct)) {
             .@"struct" => {
-                inline for (std.meta.fields(Struct)) |f| {
-                    switch (@typeInfo(f.type)) {
-                        .int => |int| switch (int.bits) {
-                            128 => @field(return_struct, f.name) = self.getT(.integer, f.name) orelse return null,
-                            else => @compileError("Type int of struct field has to be i128, type: " ++ @typeName(f.type)),
-                        },
-                        .float => |int| switch (int.bits) {
-                            128 => @field(return_struct, f.name) = self.getT(.float, f.name) orelse return null,
-                            else => @compileError("Type int of struct field has to be f128, type: " ++ @typeName(f.type)),
-                        },
-                        .bool => @field(return_struct, f.name) = self.getT(.boolean, f.name) orelse return null,
+                inline for (std.meta.fields(Struct)) |field| {
+                    switch (@typeInfo(field.type)) {
+                        .int => @field(
+                            return_struct,
+                            field.name,
+                        ) = self.getT(
+                            .integer,
+                            field.name,
+                        ) orelse return null,
+                        .float => @field(
+                            return_struct,
+                            field.name,
+                        ) = self.getT(
+                            .float,
+                            field.name,
+                        ) orelse return null,
+                        .bool => @field(return_struct, field.name) = self.getT(
+                            .boolean,
+                            field.name,
+                        ) orelse return null,
                         .@"struct" => {
-                            const obj = self.getT(.object, f.name) orelse return null;
-                            @field(return_struct, f.name) = obj.getStruct(f.type) orelse return null;
+                            const obj = self.getT(.object, field.name) orelse return null;
+                            @field(
+                                return_struct,
+                                field.name,
+                            ) = obj.getStruct(field.type) orelse return null;
                         },
                         .pointer => |info| switch (info.size) {
                             .Slice => {
                                 switch (info.child) {
-                                    u8 => @field(return_struct, f.name) = self.getT(.string, f.name) orelse return null,
-                                    else => @compileError("Slice type not supported, type: " ++ @typeName(info.child)),
+                                    u8 => @field(return_struct, field.name) = self.getT(
+                                        .string,
+                                        field.name,
+                                    ) orelse return null,
+                                    else => @compileError(
+                                        "Slice type not supported, type: " ++ @typeName(info.child),
+                                    ),
                                 }
                             },
-                            else => @compileError("Pointer to type not supported, type: " ++ @typeName(info.size)),
+                            else => @compileError(
+                                "Pointer to type not supported, type: " ++ @typeName(info.size),
+                            ),
                         },
                         .@"enum" => |info| {
-                            const enum_val_str = self.getT(.string, f.name) orelse return null;
+                            const enum_val_str = self.getT(.string, field.name) orelse return null;
                             inline for (info.fields) |enum_field| {
                                 if (std.mem.eql(u8, enum_field.name, enum_val_str)) {
-                                    @field(return_struct, f.name) = @enumFromInt(enum_field.value);
+                                    @field(
+                                        return_struct,
+                                        field.name,
+                                    ) = @enumFromInt(enum_field.value);
                                     break;
                                 }
                             }
                         },
-                        else => @compileError("Type not supported, type: " ++ @typeName(f.type)),
+                        else => @compileError("Type not supported, type: " ++ @typeName(field.type)),
                     }
                 }
                 return return_struct;
             },
-            else => @compileError("Type is not a sturct, type: " ++ @typeName(Struct)),
+            else => @compileError("Type is not a struct, type: " ++ @typeName(Struct)),
         }
     }
 
@@ -1130,7 +1312,7 @@ pub const Object = struct {
         var current_object = self;
 
         for (keys, 1..) |key, depth| {
-            if (current_object.get(key)) |capture| {
+            if (current_object.hashmap.get(key)) |capture| {
                 switch (capture.*) {
                     .object => |obj| current_object = obj,
                     else => |*val| return if (depth == keys.len) return val else null,
@@ -1139,6 +1321,26 @@ pub const Object = struct {
         }
 
         return null;
+    }
+
+    pub fn chainRef(self: Object, ref_key: []const u8) ?*Value {
+        var it = std.mem.tokenizeScalar(u8, ref_key, '.');
+        var current_object = self;
+        var current_value: ?*Value = null;
+
+        return while (it.next()) |key| {
+            if (current_object.hashmap.get(key)) |capture| {
+                switch (capture.*) {
+                    .object => |obj| current_object = obj,
+                    else => |*val| current_value = val,
+                }
+            } else break null;
+        } else current_value;
+    }
+
+    pub fn chainRefT(self: Object, T: type, ref_key: []const u8) !T {
+        const value = self.chainRef(ref_key) orelse return unknownRef(ref_key);
+        return try value.coerce(T);
     }
 
     pub fn contains(self: Object, key: []const u8) bool {
@@ -1302,6 +1504,7 @@ const Syntax = enum {
     integer,
     string,
     boolean,
+    datetime,
     Null,
 };
 
@@ -1315,6 +1518,7 @@ fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime c
         .float => if (color) zmpl.colors.magenta("{}") else "{}",
         .integer => if (color) zmpl.colors.blue("{}") else "{}",
         .string => if (color) zmpl.colors.green("{s}") else "{s}",
+        .datetime => if (color) zmpl.colors.bright(.blue, "{s}") else "{s}",
         .boolean => if (color) zmpl.colors.green("{}") else "{}",
         .Null => if (color) zmpl.colors.cyan("null") else "null",
     };
@@ -1323,6 +1527,12 @@ fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime c
 }
 
 fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
+    if (@TypeOf(value) == jetcommon.types.DateTime) {
+        const val = try alloc.create(Value);
+        val.* = .{ .datetime = .{ .value = value, .allocator = alloc } };
+        return val;
+    }
+
     const val = switch (@typeInfo(@TypeOf(value))) {
         .int, .comptime_int => Value{ .integer = .{ .value = value, .allocator = alloc } },
         .float, .comptime_float => Value{ .float = .{ .value = value, .allocator = alloc } },
@@ -1370,8 +1580,11 @@ fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
 
 fn structToValue(value: anytype, alloc: std.mem.Allocator) !Value {
     var obj = Data.Object.init(alloc);
-    inline for (std.meta.fields(@TypeOf(value))) |f| {
-        try obj.put(f.name, @field(value, f.name));
+    inline for (std.meta.fields(@TypeOf(value))) |field| {
+        // Allow serializing structs that may have some extra type fields (e.g. JetQuery results).
+        if (comptime field.type == type) continue;
+
+        try obj.put(field.name, @field(value, field.name));
     }
     return Value{ .object = obj };
 }
@@ -1392,15 +1605,15 @@ const Field = struct {
     }
 };
 
-fn splitRef(alloc: std.mem.Allocator, key: []const u8) ![][]const u8 {
-    var keys = std.ArrayList([]const u8).init(alloc);
-    var it = std.mem.tokenizeScalar(u8, key, '.');
-    while (it.next()) |item| try keys.append(item);
-    return try keys.toOwnedSlice();
-}
+pub const ErrorName = enum { ref, type, syntax, constant };
+pub const ZmplError = error{
+    ZmplUnknownDataReferenceError,
+    ZmplTypeError,
+    ZmplSyntaxError,
+    ZmplConstantError,
+};
 
-pub const ZmplError = enum { ref, type, syntax, constant };
-fn zmplError(err: ZmplError, comptime message: []const u8, args: anytype) anyerror {
+pub fn zmplError(err: ErrorName, comptime message: []const u8, args: anytype) ZmplError {
     std.debug.print(
         zmpl.colors.cyan("[zmpl]") ++ " " ++ zmpl.colors.red("[error]") ++ " " ++ message ++ "\n",
         args,
@@ -1411,4 +1624,8 @@ fn zmplError(err: ZmplError, comptime message: []const u8, args: anytype) anyerr
         .syntax => error.ZmplSyntaxError,
         .constant => error.ZmplConstantError,
     };
+}
+
+pub fn unknownRef(name: []const u8) ZmplError {
+    return zmplError(.ref, "Unknown data reference: `" ++ zmpl.colors.red("{s}") ++ "`", .{name});
 }

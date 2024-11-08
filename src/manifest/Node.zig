@@ -38,18 +38,21 @@ pub fn compile(self: Node, input: []const u8, writer: anytype, options: type) !v
 
         start = child_node.token.end + 1;
         try child_node.compile(input, writer, options);
+        try writer.writeAll(self.renderClose());
     }
 
     if (self.children.items.len == 0) {
         const content = input[self.token.startOfContent()..self.token.endOfContent()];
         const rendered_content = try self.render(content, options);
         try writer.writeAll(rendered_content);
+        try writer.writeAll(self.renderClose());
     } else {
         const last_child = self.children.items[self.children.items.len - 1];
         if (last_child.token.end + 1 < self.token.endOfContent()) {
             const content = input[last_child.token.end + 1 .. self.token.endOfContent()];
             const rendered_content = try self.render(content, options);
             try writer.writeAll(rendered_content);
+            try writer.writeAll(self.renderClose());
         }
     }
 }
@@ -73,6 +76,12 @@ fn render(self: Node, content: []const u8, options: type) ![]const u8 {
     };
 }
 
+fn renderClose(self: Node) []const u8 {
+    return switch (self.token.mode) {
+        .zig, .html, .markdown, .partial, .args, .extend => "",
+        .@"for" => "}",
+    };
+}
 fn renderZig(self: Node, content: []const u8) ![]const u8 {
     var html_it = self.htmlIterator(content);
     var buf = std.ArrayList(u8).init(self.allocator);
@@ -335,7 +344,7 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
     var args_buf = std.ArrayList([]const u8).init(self.allocator);
     defer args_buf.deinit();
 
-    for (reordered_args.items, expected_partial_args) |arg, expected_arg| {
+    for (reordered_args.items, expected_partial_args, 0..) |arg, expected_arg, index| {
         if (std.mem.startsWith(u8, arg.value, ".")) {
             // Pass a *Zmpl.Value to partial using regular data lookup syntax.
             const value = try std.fmt.allocPrint(
@@ -346,7 +355,32 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
             );
             try args_buf.append(value);
         } else {
-            try args_buf.append(arg.value);
+            var it = std.mem.tokenizeScalar(u8, arg.value, '.');
+            const maybe_root = it.next();
+            if (maybe_root) |root| {
+                if (isIdentifier(root)) {
+                    const chain = try std.fmt.allocPrint(
+                        self.allocator,
+                        \\if (comptime @TypeOf({0s}) == *ZmplValue)
+                        \\    try {0s}.chainRefT(std.meta.fields(std.meta.ArgsTuple(@TypeOf({2s}_renderPartial)))[{3}].type, "{1s}",)
+                        \\else
+                        \\    {0s}{4s}{5s}
+                    ,
+                        .{
+                            root,
+                            it.rest(),
+                            generated_partial_name.?,
+                            // index + 2 to offset `data` and `slots` args:
+                            index + 2,
+                            if (it.rest().len == 0) "" else ".",
+                            it.rest(),
+                        },
+                    );
+                    try args_buf.append(chain);
+                } else try args_buf.append(arg.value);
+            } else {
+                try args_buf.append(arg.value);
+            }
         }
     }
 
@@ -495,7 +529,6 @@ fn renderFor(self: Node, content: []const u8) ![]const u8 {
     try writer.print(
         \\for ({s}) |{s}| {{
         \\    {s}
-        \\}}
         \\
     ,
         .{ try for_args_joined.toOwnedSlice(), block_args, try self.renderHtml(content, .{}) },
@@ -700,6 +733,15 @@ fn getPartialArgsSignature(self: Node, partial_name: []const u8) ![]Arg {
     } else {
         return &.{};
     }
+}
+
+fn isIdentifier(arg: []const u8) bool {
+    const stripped = std.mem.trim(u8, arg, &std.ascii.whitespace);
+
+    if (std.mem.indexOfScalar(u8, stripped, ' ')) |_| return false;
+    if (std.mem.indexOfAny(u8, stripped, "0123456789")) |index| return index > 0;
+
+    return true;
 }
 
 fn debugPartialArgumentError(input: []const u8) void {
