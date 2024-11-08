@@ -100,6 +100,10 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
 
     self.state = .compiled;
 
+    if (true) return try buf.toOwnedSlice();
+
+    // Switch back to this when the line numbers are consistent and the output has been trimmed -
+    // currently a Zig backtrace is more useful.
     return try jetcommon.fmt.zig(
         self.allocator,
         try buf.toOwnedSlice(),

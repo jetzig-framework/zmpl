@@ -29,35 +29,32 @@ pub fn compile(self: Node, input: []const u8, writer: anytype, options: type) !v
     // Write chunks for current token between child token boundaries, rendering child token
     // immediately after.
     var start: usize = self.token.startOfContent();
+    var count: usize = 0;
     for (self.children.items) |child_node| {
         if (start < child_node.token.start) {
             const content = input[start .. child_node.token.start - 1];
-            const rendered_content = try self.render(content, options);
-            try writer.writeAll(rendered_content);
+            try writer.writeAll(try self.render(&count, content, options));
         }
 
         start = child_node.token.end + 1;
         try child_node.compile(input, writer, options);
-        try writer.writeAll(self.renderClose());
     }
 
     if (self.children.items.len == 0) {
         const content = input[self.token.startOfContent()..self.token.endOfContent()];
-        const rendered_content = try self.render(content, options);
-        try writer.writeAll(rendered_content);
-        try writer.writeAll(self.renderClose());
+        try writer.writeAll(try self.render(&count, content, options));
     } else {
         const last_child = self.children.items[self.children.items.len - 1];
         if (last_child.token.end + 1 < self.token.endOfContent()) {
             const content = input[last_child.token.end + 1 .. self.token.endOfContent()];
-            const rendered_content = try self.render(content, options);
-            try writer.writeAll(rendered_content);
-            try writer.writeAll(self.renderClose());
+            try writer.writeAll(try self.render(&count, content, options));
         }
     }
+    try writer.writeAll(self.renderClose());
 }
 
-fn render(self: Node, content: []const u8, options: type) ![]const u8 {
+fn render(self: Node, count: *usize, content: []const u8, options: type) ![]const u8 {
+    count.* += 1;
     const markdown_fragments = if (@hasDecl(options, "markdown_fragments"))
         options.markdown_fragments
     else
@@ -72,7 +69,7 @@ fn render(self: Node, content: []const u8, options: type) ![]const u8 {
         .partial => try self.renderPartial(content),
         .args => try self.renderArgs(),
         .extend => try self.renderExtend(),
-        .@"for" => try self.renderFor(content),
+        .@"for" => try self.renderFor(count.*, content),
     };
 }
 
@@ -479,7 +476,12 @@ fn renderExtend(self: Node) ![]const u8 {
     )});
 }
 
-fn renderFor(self: Node, content: []const u8) ![]const u8 {
+fn renderFor(self: Node, count: usize, content: []const u8) ![]const u8 {
+    // If we have already rendered once, re-rendering the for loop makes no sense so we can just
+    // write the remaining content directly. This can happen when a child node of the for loop
+    // contains whitespace etc.
+    if (count > 1) return try self.renderWrite(content, .{});
+
     const expected_format_message = "Expected format `for (foo) |arg| { in {s}";
     const mode_line = self.token.mode_line["@for".len..];
     const for_args_start = std.mem.indexOfScalar(u8, mode_line, '(');
@@ -740,9 +742,8 @@ fn isIdentifier(arg: []const u8) bool {
 
     if (std.mem.indexOfScalar(u8, stripped, ' ')) |_| return false;
     if (arg.len > 0 and std.ascii.isAlphabetic(arg[0])) return true;
-    if (std.mem.indexOfAny(u8, stripped, "0123456789")) |index| return index > 0;
 
-    return true;
+    return false;
 }
 
 fn debugPartialArgumentError(input: []const u8) void {
