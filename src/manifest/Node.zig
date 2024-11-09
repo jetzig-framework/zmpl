@@ -384,7 +384,7 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
     const template =
         \\{{
         \\{0s}
-        \\        const __slots = [_][]const u8{{
+        \\        const __slots = [_]__zmpl.Data.Slot{{
         \\{1s}
         \\        }};
         \\        var __partial_data = __zmpl.Data.init(allocator);
@@ -438,7 +438,7 @@ fn renderSlots(self: Node, content: []const u8) !Slots {
 
         try slots_buf.appendSlice(try std.fmt.allocPrint(
             self.allocator,
-            \\    {s}_buf.items,
+            \\    __zmpl.Data.Slot{{ .data = {s}_buf.items }},
             \\
         ,
             .{slot_name},
@@ -661,8 +661,15 @@ fn renderDataRef(self: Node, input: []const u8, writer_options: WriterOptions) !
 }
 
 fn renderValueRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
-    var buf: [32]u8 = undefined;
-    util.generateVariableName(&buf);
+    var arg_name: [32]u8 = undefined;
+    util.generateVariableName(&arg_name);
+    var blk_label: [32]u8 = undefined;
+    util.generateVariableName(&blk_label);
+    var blk_arg: [32]u8 = undefined;
+    util.generateVariableName(&blk_arg);
+    var index_arg: [32]u8 = undefined;
+    util.generateVariableName(&index_arg);
+
     return if (std.mem.containsAtLeast(u8, input, 1, ".")) blk: {
         const start = std.mem.indexOfScalar(u8, input, '.').?;
         break :blk try std.fmt.allocPrint(
@@ -686,10 +693,18 @@ fn renderValueRef(self: Node, input: []const u8, writer_options: WriterOptions) 
     } else try std.fmt.allocPrint(
         self.allocator,
         \\const {0s} = {1s};
-        \\_ = try {2s}.write(try zmpl.coerceString({0s}));
+        \\_ = if (comptime @TypeOf({0s}) == __zmpl.Data.Slot)
+        \\        try {2s}.write({0s}.data)
+        \\    else if (@TypeOf({0s}) == []const __zmpl.Data.Slot) {4s}: {{
+        \\        for ({0s}, 0..) |{3s}, {5s}| {{
+        \\          try {2s}.write({3s}.data);
+        \\          if ({5s} + 1 < {0s}.len) try {2s}.write("\n");
+        \\        }}
+        \\        break :{4s} "";
+        \\    }} else try __zmpl.sanitize({2s}, try zmpl.coerceString({0s}));
         \\
     ,
-        .{ &buf, input, writer_options.zmpl_writer },
+        .{ arg_name, input, writer_options.zmpl_writer, blk_label, blk_arg, index_arg },
     );
 }
 

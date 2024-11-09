@@ -557,7 +557,7 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
     const args = try std.mem.concat(
         self.allocator,
         u8,
-        &[_][]const u8{ "slots: []const []const u8, ", self.args orelse "" },
+        &[_][]const u8{ "slots: []const __zmpl.Data.Slot, ", self.args orelse "" },
     );
     const header = try std.fmt.allocPrint(
         self.allocator,
@@ -577,7 +577,7 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
             if (self.partial) "Partial" else "",
             if (self.partial) args else "",
             decls_buf.items,
-            if (self.partial) "zmpl.noop([]const []const u8, slots);" else "",
+            if (self.partial) "zmpl.noop([]const __zmpl.Data.Slot, slots);" else "",
         },
     );
     defer self.allocator.free(header);

@@ -57,6 +57,16 @@ pub const LayoutContent = struct {
     }
 };
 
+pub const Slot = struct {
+    data: []const u8,
+
+    pub fn format(self: Slot, actual_fmt: []const u8, options: anytype, writer: anytype) !void {
+        _ = options;
+        _ = actual_fmt;
+        try writer.writeAll(self.data);
+    }
+};
+
 parent_allocator: std.mem.Allocator,
 arena: ?std.heap.ArenaAllocator = null,
 arena_allocator: std.mem.Allocator = undefined,
