@@ -47,6 +47,8 @@ pub const Writer = std.ArrayList(u8).Writer;
 
 const Data = @This();
 
+pub var log_errors = true;
+
 pub const LayoutContent = struct {
     data: []const u8,
 
@@ -154,8 +156,15 @@ pub fn ref(self: Data, key: []const u8) ?*Value {
         if (val.get(key)) |partial_value| return partial_value;
     }
 
+    // We still support old-style refs without the preceding `$`.
+    const trimmed_key = std.mem.trimLeft(
+        u8,
+        if (std.mem.startsWith(u8, key, "$")) key[1..] else key,
+        ".",
+    );
+
     if (self.value) |val| {
-        var tokens = std.mem.splitSequence(u8, key, ".");
+        var tokens = std.mem.splitScalar(u8, trimmed_key, '.');
         var current_value = val;
 
         while (tokens.next()) |token| {
@@ -259,7 +268,7 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
         .pointer => |pointer| switch (pointer.child) {
             Value, String, Integer, Float, Boolean, NullType => .zmpl,
             []const u8 => |child| blk: {
-                if (isStringCoercablePointer(pointer, child, []const u8)) {
+                if (isStringCoercablePointer(pointer, child)) {
                     break :blk .string_array;
                 } else {
                     return zmplError(
@@ -270,7 +279,7 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
                 }
             },
             u8 => |child| blk: {
-                if (isStringCoercablePointer(pointer, child, u8)) {
+                if (isStringCoercablePointer(pointer, child)) {
                     break :blk .string;
                 } else {
                     return zmplError(
@@ -361,9 +370,9 @@ pub fn coerceArray(self: *Data, key: []const u8) ![]const *Value {
     }
 }
 
-pub fn maybeRef(self: *Data, value: *const Value, key: []const u8) ![]const u8 {
+pub fn maybeRef(self: *Data, value: anytype, key: []const u8) ![]const u8 {
     _ = self;
-    return switch (value.*) {
+    return switch (resolveValue(value)) {
         .object => |*ptr| if (ptr.chainRef(key)) |capture|
             try capture.toString()
         else
@@ -373,6 +382,22 @@ pub fn maybeRef(self: *Data, value: *const Value, key: []const u8) ![]const u8 {
             "Unsupported type for lookup: " ++ zmpl.colors.red("{s}"),
             .{@tagName(tag)},
         ),
+    };
+}
+
+fn resolveValue(value: anytype) Value {
+    switch (@typeInfo(@TypeOf(value))) {
+        .optional => return if (value) |capture|
+            resolveValue(capture)
+        else
+            Value{ .Null = NullType{ .allocator = undefined } },
+        else => {},
+    }
+
+    return switch (@TypeOf(value)) {
+        *const Value, *Value => value.*,
+        Value => value,
+        else => @compileError("Failed resolving ZmplValue: `" ++ @typeName(@TypeOf(value)) ++ "`"),
     };
 }
 
@@ -456,7 +481,8 @@ pub fn getCoerce(self: Data, T: type, name: []const u8) !T {
             unknownRef(name),
         bool => self.getT(.boolean, last_key) orelse unknownRef(name),
         jetcommon.types.DateTime => current_object.getT(.datetime, last_key) orelse unknownRef(name),
-        *Value => current_object.get(last_key) orelse unknownRef(name),
+        *Value, *const Value => current_object.get(last_key) orelse unknownRef(name),
+        Value => if (current_object.get(last_key)) |ptr| ptr.* else unknownRef(name),
         else => @compileError("Unsupported type for data lookup in partial args: " ++ @typeName(T)),
     };
 }
@@ -514,8 +540,8 @@ pub fn root(self: *Data, root_type: enum { object, array }) !*Value {
         return value;
     } else {
         self.value = switch (root_type) {
-            .object => try self.createObject(),
-            .array => try self.createArray(),
+            .object => try createObject(self.allocator()),
+            .array => try createArray(self.allocator()),
         };
         return self.value.?;
     }
@@ -530,16 +556,16 @@ pub fn root(self: *Data, root_type: enum { object, array }) !*Value {
 /// try object.put("nested", nested_object); // <-- adds a nested object to the root object.
 pub fn object(self: *Data) !*Value {
     if (self.value) |_| {
-        return try self.createObject();
+        return try createObject(self.allocator());
     } else {
-        self.value = try self.createObject();
+        self.value = try createObject(self.allocator());
         return self.value.?;
     }
 }
 
-pub fn createObject(self: *Data) !*Value {
-    const obj = Object.init(self.allocator());
-    const ptr = try self.allocator().create(Value);
+pub fn createObject(alloc: std.mem.Allocator) !*Value {
+    const obj = Object.init(alloc);
+    const ptr = try alloc.create(Value);
     ptr.* = Value{ .object = obj };
     return ptr;
 }
@@ -553,17 +579,17 @@ pub fn createObject(self: *Data) !*Value {
 /// try array.append(nested_array); // <-- adds a nested array to the root array.
 pub fn array(self: *Data) !*Value {
     if (self.value) |_| {
-        return try self.createArray();
+        return try createArray(self.allocator());
     } else {
-        self.value = try self.createArray();
+        self.value = try createArray(self.allocator());
         return self.value.?;
     }
 }
 
 /// Creates a new `Array`. For most use cases, use `array()` instead.
-pub fn createArray(self: *Data) !*Value {
-    const arr = Array.init(self.allocator());
-    const ptr = try self.allocator().create(Value);
+pub fn createArray(alloc: std.mem.Allocator) !*Value {
+    const arr = Array.init(alloc);
+    const ptr = try alloc.create(Value);
     ptr.* = Value{ .array = arr };
     return ptr;
 }
@@ -619,7 +645,7 @@ pub fn _null(arena: std.mem.Allocator) *Value {
 /// Write a given string to the output buffer. Creates a new output buffer if not already
 /// present. Used by compiled Zmpl templates.
 pub fn write(self: *Data, maybe_err_slice: anytype) !void {
-    const slice = try resolveSlice(maybe_err_slice);
+    const slice = try self.resolveSlice(maybe_err_slice);
     try (self.output_writer).writeAll(slice);
 }
 
@@ -724,7 +750,7 @@ pub fn parseJsonValue(self: *Data, value: std.json.Value) !*Value {
     return switch (value) {
         .object => |*val| blk: {
             var it = val.iterator();
-            const obj = try self.createObject();
+            const obj = try createObject(self.allocator());
             while (it.next()) |item| {
                 try obj.put(item.key_ptr.*, try self.parseJsonValue(item.value_ptr.*));
             }
@@ -770,7 +796,7 @@ pub const Value = union(ValueType) {
     datetime: DateTime,
     Null: NullType,
 
-    /// Compares one `Value` to another `Value` recursively. Order of `Object` keys is ignored.
+    /// Compare one `Value` to another `Value` recursively. Order of `Object` keys is ignored.
     pub fn eql(self: *const Value, other: *const Value) bool {
         switch (self.*) {
             .object => |*capture| switch (other.*) {
@@ -808,7 +834,251 @@ pub const Value = union(ValueType) {
         }
     }
 
-    /// Gets a `Value` from an `Object`.
+    /// Compare a `Value` to an arbitrary type with the given `operator`.
+    /// ```zig
+    /// const is_less_than = try value.compare(.less_than, 100);
+    /// ```
+    pub fn compare(self: Value, comptime operator: Operator, other: Value) !bool {
+        if (@intFromEnum(self) != @intFromEnum(other)) return zmplError(
+            .compare,
+            "Cannot compare `{s}` with `{s}`",
+            .{ @tagName(self), @tagName(other) },
+        );
+
+        return switch (self) {
+            .integer => |capture| switch (operator) {
+                .equal => capture.value == other.integer.value,
+                .less_than => capture.value < other.integer.value,
+                .greater_than => capture.value > other.integer.value,
+                .less_or_equal => capture.value <= other.integer.value,
+                .greater_or_equal => capture.value >= other.integer.value,
+            },
+            .float => |capture| switch (operator) {
+                .equal => capture.value == other.float.value,
+                .less_than => capture.value < other.float.value,
+                .greater_than => capture.value > other.float.value,
+                .less_or_equal => capture.value <= other.float.value,
+                .greater_or_equal => capture.value >= other.float.value,
+            },
+            .boolean => |capture| switch (operator) {
+                .equal => capture.value == other.boolean.value,
+                else => zmplError(
+                    .compare,
+                    "Zmpl `boolean` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+            },
+            .string => |capture| switch (operator) {
+                .equal => std.mem.eql(u8, capture.value, other.string.value),
+                else => zmplError(
+                    .compare,
+                    "Zmpl `string` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+            },
+            .array => zmplError(
+                .compare,
+                "Zmpl `array` does not support `{s}` comparison.",
+                .{@tagName(operator)},
+            ),
+            .object => zmplError(
+                .compare,
+                "Zmpl `object` does not support `{s}` comparison.",
+                .{@tagName(operator)},
+            ),
+            .datetime => |capture| capture.value.compare(
+                std.enums.nameCast(jetcommon.Operator, operator),
+                other.datetime.value,
+            ),
+            .Null => true, // If both sides are `Null` then this can only be true.
+        };
+    }
+
+    pub fn compareT(self: Value, comptime operator: Operator, T: type, other: T) !bool {
+        const coerced = switch (T) {
+            [:0]const u8, []u8, [:0]u8, [*]u8, [*:0]u8 => try self.coerce([]const u8),
+            else => try self.coerce(T),
+        };
+        return switch (operator) {
+            .equal => switch (self) {
+                .string => if (comptime isString(T))
+                    std.mem.eql(u8, coerced, other)
+                else
+                    unreachable,
+                .integer, .float, .boolean => switch (@typeInfo(T)) {
+                    .int, .comptime_int, .float, .comptime_float, .bool => coerced == other,
+                    else => unreachable, // `coerce` will fail before we get here.
+                },
+                .datetime => switch (@typeInfo(T)) {
+                    .int, .comptime_int => coerced == other,
+                    else => |tag| zmplError(
+                        .compare,
+                        "Zmpl `datetime` does not support comparison with `{s}`",
+                        .{@tagName(tag)},
+                    ),
+                },
+                .array => zmplError(
+                    .compare,
+                    "Zmpl `object` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .object => zmplError(
+                    .compare,
+                    "Zmpl `object` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .Null => switch (@typeInfo(T)) {
+                    .optional => other == null,
+                    else => @TypeOf(T) == @TypeOf(null),
+                },
+            },
+            .less_than => switch (self) {
+                .string => zmplError(
+                    .compare,
+                    "Zmpl `string` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .integer, .float => switch (@typeInfo(T)) {
+                    .int, .comptime_int, .float, .comptime_float => coerced < other,
+                    else => unreachable,
+                },
+                .boolean => zmplError(
+                    .compare,
+                    "Zmpl `boolean` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .datetime => |capture| switch (@typeInfo(T)) {
+                    .int, .comptime_int => capture.value.microseconds() < other,
+                    else => |tag| zmplError(
+                        .compare,
+                        "Zmpl `datetime` does not support comparison with `{s}`",
+                        .{@tagName(tag)},
+                    ),
+                },
+                .array => zmplError(
+                    .compare,
+                    "Zmpl `object` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .object => zmplError(
+                    .compare,
+                    "Zmpl `object` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .Null => switch (@typeInfo(T)) {
+                    .optional => other == null,
+                    else => @TypeOf(T) == @TypeOf(null),
+                },
+            },
+            .greater_than => switch (self) {
+                .string => zmplError(
+                    .compare,
+                    "Zmpl `string` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .integer, .float => coerced > other,
+                .boolean => zmplError(
+                    .compare,
+                    "Zmpl `boolean` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .datetime => |capture| switch (@typeInfo(T)) {
+                    .int, .comptime_int => capture.value.microseconds() > other,
+                    else => |tag| zmplError(
+                        .compare,
+                        "Zmpl `datetime` does not support comparison with `{s}`",
+                        .{@tagName(tag)},
+                    ),
+                },
+                .array => zmplError(
+                    .compare,
+                    "Zmpl `object` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .object => zmplError(
+                    .compare,
+                    "Zmpl `object` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .Null => switch (@typeInfo(T)) {
+                    .optional => other == null,
+                    else => @TypeOf(T) == @TypeOf(null),
+                },
+            },
+            .less_or_equal => switch (self) {
+                .string => zmplError(
+                    .compare,
+                    "Zmpl `string` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .integer, .float => coerced <= other,
+                .boolean => zmplError(
+                    .compare,
+                    "Zmpl `boolean` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .datetime => |capture| switch (@typeInfo(T)) {
+                    .int, .comptime_int => capture.value.microseconds() <= other,
+                    else => |tag| zmplError(
+                        .compare,
+                        "Zmpl `datetime` does not support comparison with `{s}`",
+                        .{@tagName(tag)},
+                    ),
+                },
+                .array => zmplError(
+                    .compare,
+                    "Zmpl `object` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .object => zmplError(
+                    .compare,
+                    "Zmpl `object` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .Null => switch (@typeInfo(T)) {
+                    .optional => other == null,
+                    else => @TypeOf(T) == @TypeOf(null),
+                },
+            },
+            .greater_or_equal => switch (self) {
+                .string => zmplError(
+                    .compare,
+                    "Zmpl `string` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .integer, .float => coerced >= other,
+                .boolean => zmplError(
+                    .compare,
+                    "Zmpl `boolean` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .datetime => |capture| switch (@typeInfo(T)) {
+                    .int, .comptime_int => capture.value.microseconds() >= other,
+                    else => |tag| zmplError(
+                        .compare,
+                        "Zmpl `datetime` does not support comparison with `{s}`",
+                        .{@tagName(tag)},
+                    ),
+                },
+                .array => zmplError(
+                    .compare,
+                    "Zmpl `object` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .object => zmplError(
+                    .compare,
+                    "Zmpl `object` does not support `{s}` comparison.",
+                    .{@tagName(operator)},
+                ),
+                .Null => switch (@typeInfo(T)) {
+                    .optional => other == null,
+                    else => @TypeOf(T) == @TypeOf(null),
+                },
+            },
+        };
+    }
+
+    /// Get a `Value` from an `Object`.
     pub fn get(self: *const Value, key: []const u8) ?*Value {
         switch (self.*) {
             .object => |*capture| return capture.get(key),
@@ -881,11 +1151,11 @@ pub const Value = union(ValueType) {
     }
 
     /// Puts a `Value` into an `Object`.
-    pub fn put(self: *Value, key: []const u8, value: anytype) !void {
-        switch (self.*) {
+    pub fn put(self: *Value, key: []const u8, value: anytype) !Put(@TypeOf(value)) {
+        return switch (self.*) {
             .object => |*capture| try capture.put(key, value),
             inline else => unreachable,
-        }
+        };
     }
 
     /// Appends a `Value` to an `Array`.
@@ -969,16 +1239,16 @@ pub const Value = union(ValueType) {
 
     /// Return an array of Value or Item, whether value is an array or object (respectively).
     /// Item provides `key` and `value` fields.
-    pub fn items(self: *Value, comptime selector: IteratorSelector) []switch (selector) {
+    pub fn items(self: Value, comptime selector: IteratorSelector) []switch (selector) {
         .array => *Value,
         .object => Item,
     } {
         return switch (selector) {
-            .array => switch (self.*) {
+            .array => switch (self) {
                 .array => |capture| capture.items(),
                 else => &.{},
             },
-            .object => switch (self.*) {
+            .object => switch (self) {
                 .object => |capture| capture.items(),
                 else => &.{},
             },
@@ -1000,34 +1270,55 @@ pub const Value = union(ValueType) {
         return try self.coerce(T);
     }
 
-    /// Coerce a value to a given type. Used when passing `*ZmplValue` to partial args.
-    pub fn coerce(self: *const Value, T: type) !T {
-        return switch (T) {
-            []const u8 => switch (self.*) {
+    /// Coerce a value to a given type. Used when passing `ZmplValue` to partial args.
+    pub fn coerce(self: Value, T: type) ZmplError!ComptimeErasedType(T) {
+        const CET = ComptimeErasedType(T);
+        return switch (CET) {
+            []const u8 => switch (self) {
                 .string => |capture| capture.value,
-                else => error.ZmplIncompatibleType,
+                else => error.ZmplIncompatibleTypeError,
             },
-            f128, f64 => switch (self.*) {
+            f128, f64, f32 => switch (self) {
                 .float => |capture| @floatCast(capture.value),
-                .string => |capture| try std.fmt.parseFloat(T, capture.value),
-                else => error.ZmplIncompatibleType,
+                .string => |capture| std.fmt.parseFloat(CET, capture.value) catch |err|
+                    switch (err) {
+                    error.InvalidCharacter => error.ZmplCoerceError,
+                },
+                else => error.ZmplIncompatibleTypeError,
             },
-            usize, u8, u16, u32, isize, i8, i16, i32 => switch (self.*) {
+            usize, u8, u16, u32, u64, u128, isize, i8, i16, i32, i64, i128 => switch (self) {
                 .integer => |capture| @intCast(capture.value),
-                .string => |capture| try std.fmt.parseInt(T, capture.value, 10),
-                else => error.ZmplIncompatibleType,
+                .string => |capture| std.fmt.parseInt(CET, capture.value, 10) catch |err|
+                    switch (err) {
+                    error.InvalidCharacter, error.Overflow => error.ZmplCoerceError,
+                },
+                .datetime => |capture| switch (CET) {
+                    u128, u64, i64, i128 => @intCast(capture.value.microseconds()),
+                    else => error.ZmplIncompatibleTypeError,
+                },
+                else => error.ZmplIncompatibleTypeError,
             },
-            bool => switch (self.*) {
+            bool => switch (self) {
                 .boolean => |capture| capture.value,
                 .string => |capture| std.mem.eql(u8, capture.value, "1"),
-                else => error.ZmplIncompatibleType,
+                else => error.ZmplIncompatibleTypeError,
             },
-            jetcommon.types.DateTime => switch (self.*) {
+            jetcommon.types.DateTime => switch (self) {
                 .datetime => |capture| capture.value,
-                else => error.ZmplIncompatibleType,
+                else => error.ZmplIncompatibleTypeError,
             },
-            *Value, *const Value => self,
-            else => @compileError("Cannot corece Zmpl Value to type: " ++ @typeName(T)),
+            // FIXME: This can be made redundant by using appropriate types for `self` in a few
+            // places:
+            *Value => @constCast(&self),
+            *const Value => &self,
+            Value => self,
+            else => switch (@typeInfo(CET)) {
+                .pointer => if (isString(CET)) switch (self) {
+                    .string => |capture| capture.value,
+                    else => error.ZmplIncompatibleTypeError,
+                },
+                else => @compileError("Cannot corece Zmpl Value to `" ++ @typeName(T) ++ "`"),
+            },
         };
     }
 };
@@ -1185,10 +1476,11 @@ pub const Object = struct {
         return true;
     }
 
-    pub fn put(self: *Object, key: []const u8, value: anytype) !void {
+    pub fn put(self: *Object, key: []const u8, value: anytype) !Put(@TypeOf(value)) {
         const zmpl_value = try zmplValue(value, self.allocator);
         const key_dupe = try self.allocator.dupe(u8, key);
         try self.hashmap.put(key_dupe, zmpl_value);
+        if (Put(@TypeOf(value)) != void) return zmpl_value;
     }
 
     pub fn get(self: Object, key: []const u8) ?*Value {
@@ -1490,16 +1782,75 @@ pub fn allocator(self: *Data) std.mem.Allocator {
     }
 }
 
-fn isStringCoercablePointer(pointer: std.builtin.Type.Pointer, child: type, array_child: type) bool {
+const Operator = enum { equal, less_than, greater_than, less_or_equal, greater_or_equal };
+pub fn compare(self: *Data, comptime operator: Operator, lhs: anytype, rhs: anytype) ZmplError!bool {
+    _ = self;
+    return switch (comptime operator) {
+        .equal => if (comptime isZmplComparable(@TypeOf(lhs), @TypeOf(rhs)))
+            resolveValue(lhs).eql(resolveValue(rhs))
+        else if (comptime isZmplValue(@TypeOf(lhs))) blk: {
+            break :blk try resolveValue(lhs).compareT(.equal, @TypeOf(rhs), rhs);
+        } else if (comptime isZmplValue(@TypeOf(rhs)))
+            try resolveValue(rhs).compareT(.equal, @TypeOf(lhs), lhs)
+        else if (comptime isString(@TypeOf(lhs)) and isString(@TypeOf(rhs)))
+            std.mem.eql(u8, lhs, rhs)
+        else
+            lhs == rhs,
+        .greater_than,
+        .less_than,
+        .greater_or_equal,
+        .less_or_equal,
+        => |op| if (comptime isZmplComparable(@TypeOf(lhs), @TypeOf(rhs)))
+            try resolveValue(lhs).compare(op, resolveValue(rhs))
+        else if (comptime isZmplValue(@TypeOf(lhs))) blk: {
+            break :blk try resolveValue(lhs).compareT(op, @TypeOf(rhs), rhs);
+        } else if (comptime isZmplValue(@TypeOf(rhs)))
+            try resolveValue(rhs).compareT(op, @TypeOf(lhs), lhs)
+        else switch (op) {
+            .greater_than => lhs > rhs,
+            .less_than => lhs < rhs,
+            .greater_or_equal => lhs >= rhs,
+            .less_or_equal => lhs <= rhs,
+            else => unreachable,
+        },
+    };
+}
+
+inline fn isZmplComparable(LHS: type, RHS: type) bool {
+    return zmpl.isZmplValue(LHS) and zmpl.isZmplValue(RHS);
+}
+
+pub fn isZmplValue(T: type) bool {
+    switch (@typeInfo(T)) {
+        .optional => |info| return isZmplValue(info.child),
+        else => {},
+    }
+
+    return switch (T) {
+        Data.Value, *Data.Value, *const Data.Value => true,
+        else => false,
+    };
+}
+
+fn isStringCoercablePointer(pointer: std.builtin.Type.Pointer, child: type) bool {
+    const child_info = @typeInfo(child);
+
     // Logic borrowed from old implementation of std.meta.isZigString
     if (!pointer.is_volatile and
         !pointer.is_allowzero and
         pointer.size == .Slice) return true;
     if (!pointer.is_volatile and
         !pointer.is_allowzero and pointer.size == .One and
-        child == .array and
-        &child.Array.child == array_child) return true;
+        child_info == .array and
+        child_info.array.child == u8) return true;
     return false;
+}
+
+fn isString(T: type) bool {
+    return switch (@typeInfo(T)) {
+        .pointer => |pointer| isStringCoercablePointer(pointer, pointer.child),
+        else => false,
+    };
 }
 
 const Syntax = enum {
@@ -1535,6 +1886,12 @@ fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime c
 }
 
 fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
+    if (comptime @TypeOf(value) == @TypeOf(.enum_literal) and value == .object) {
+        return try createObject(alloc);
+    } else if (comptime @TypeOf(value) == @TypeOf(.enum_literal) and value == .array) {
+        return try createArray(alloc);
+    }
+
     if (@TypeOf(value) == jetcommon.types.DateTime) {
         const val = try alloc.create(Value);
         val.* = .{ .datetime = .{ .value = value, .allocator = alloc } };
@@ -1619,35 +1976,267 @@ const Field = struct {
 
 // Resolve an optional or error union to a `[]const u8`. Empty string if optional is null, error
 // if error union is an error.
-fn resolveSlice(maybe_err_slice: anytype) ![]const u8 {
+fn resolveSlice(self: *Data, maybe_err_slice: anytype) ![]const u8 {
     return switch (@typeInfo(@TypeOf(maybe_err_slice))) {
-        .error_union => if (maybe_err_slice) |slice| try resolveSlice(slice) else |err| err,
-        .optional => if (maybe_err_slice) |slice| slice else "",
-        else => maybe_err_slice, // Let Zig compiler fail if incorrect type.
+        .error_union => if (maybe_err_slice) |slice| try self.resolveSlice(slice) else |err| err,
+        .optional => if (maybe_err_slice) |slice| self.resolveSlice(slice) else "",
+        else => try self.coerceString(maybe_err_slice), // Let Zig compiler fail if incorrect type.
     };
 }
 
-pub const ErrorName = enum { ref, type, syntax, constant };
+fn Put(T: type) type {
+    return if (T == @TypeOf(.object) or T == @TypeOf(.array)) *Value else void;
+}
+
+pub const ErrorName = enum { ref, type, syntax, constant, compare };
 pub const ZmplError = error{
     ZmplUnknownDataReferenceError,
     ZmplTypeError,
     ZmplSyntaxError,
     ZmplConstantError,
+    ZmplCompareError,
+    ZmplIncompatibleTypeError,
+    ZmplCoerceError,
 };
 
 pub fn zmplError(err: ErrorName, comptime message: []const u8, args: anytype) ZmplError {
-    std.debug.print(
-        zmpl.colors.cyan("[zmpl]") ++ " " ++ zmpl.colors.red("[error]") ++ " " ++ message ++ "\n",
-        args,
-    );
+    if (log_errors) {
+        std.debug.print(
+            zmpl.colors.cyan("[zmpl]") ++ " " ++
+                zmpl.colors.red("[error]") ++ " " ++
+                message ++ "\n",
+            args,
+        );
+    }
+
     return switch (err) {
         .ref => error.ZmplUnknownDataReferenceError,
         .type => error.ZmplTypeError,
         .syntax => error.ZmplSyntaxError,
         .constant => error.ZmplConstantError,
+        .compare => error.ZmplCompareError,
     };
 }
 
 pub fn unknownRef(name: []const u8) ZmplError {
     return zmplError(.ref, "Unknown data reference: `" ++ zmpl.colors.red("{s}") ++ "`", .{name});
+}
+
+fn ComptimeErasedType(T: type) type {
+    if (isString(T)) return []const u8;
+
+    return switch (@typeInfo(T)) {
+        .comptime_int => usize,
+        .comptime_float => f64,
+        else => T,
+    };
+}
+
+test {
+    log_errors = false;
+}
+
+test "Value.compare integer" {
+    const a = Value{ .integer = .{ .allocator = undefined, .value = 1 } };
+    const b = Value{ .integer = .{ .allocator = undefined, .value = 2 } };
+    const c = Value{ .integer = .{ .allocator = undefined, .value = 2 } };
+    try std.testing.expect(!try a.compare(.equal, b));
+    try std.testing.expect(try b.compare(.equal, c));
+    try std.testing.expect(try a.compare(.less_than, b));
+    try std.testing.expect(try a.compare(.less_or_equal, b));
+    try std.testing.expect(try b.compare(.less_or_equal, c));
+    try std.testing.expect(try c.compare(.greater_than, a));
+    try std.testing.expect(try c.compare(.greater_or_equal, a));
+    try std.testing.expect(try c.compare(.greater_or_equal, b));
+}
+
+test "Value.compare float" {
+    const a = Value{ .float = .{ .allocator = undefined, .value = 1.0 } };
+    const b = Value{ .float = .{ .allocator = undefined, .value = 1.2 } };
+    const c = Value{ .float = .{ .allocator = undefined, .value = 1.2 } };
+    try std.testing.expect(!try a.compare(.equal, b));
+    try std.testing.expect(try b.compare(.equal, c));
+    try std.testing.expect(try a.compare(.less_than, b));
+    try std.testing.expect(try a.compare(.less_or_equal, b));
+    try std.testing.expect(try b.compare(.less_or_equal, c));
+    try std.testing.expect(try c.compare(.greater_than, a));
+    try std.testing.expect(try c.compare(.greater_or_equal, a));
+    try std.testing.expect(try c.compare(.greater_or_equal, b));
+}
+
+test "Value.compare boolean" {
+    const a = Value{ .boolean = .{ .allocator = undefined, .value = false } };
+    const b = Value{ .boolean = .{ .allocator = undefined, .value = true } };
+    const c = Value{ .boolean = .{ .allocator = undefined, .value = true } };
+    try std.testing.expect(!try a.compare(.equal, b));
+    try std.testing.expect(try b.compare(.equal, c));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try std.testing.expectError(error.ZmplCompareError, b.compare(.less_or_equal, c));
+    try std.testing.expectError(error.ZmplCompareError, c.compare(.greater_than, a));
+    try std.testing.expectError(error.ZmplCompareError, c.compare(.greater_or_equal, a));
+    try std.testing.expectError(error.ZmplCompareError, c.compare(.greater_or_equal, b));
+}
+
+test "Value.compare string" {
+    const a = Value{ .string = .{ .allocator = undefined, .value = "foo" } };
+    const b = Value{ .string = .{ .allocator = undefined, .value = "bar" } };
+    const c = Value{ .string = .{ .allocator = undefined, .value = "bar" } };
+    try std.testing.expect(!try a.compare(.equal, b));
+    try std.testing.expect(try b.compare(.equal, c));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try std.testing.expectError(error.ZmplCompareError, b.compare(.less_or_equal, c));
+    try std.testing.expectError(error.ZmplCompareError, c.compare(.greater_than, a));
+    try std.testing.expectError(error.ZmplCompareError, c.compare(.greater_or_equal, a));
+    try std.testing.expectError(error.ZmplCompareError, c.compare(.greater_or_equal, b));
+}
+
+test "Value.compare datetime" {
+    const a = Value{
+        .datetime = .{
+            .allocator = undefined,
+            .value = try jetcommon.types.DateTime.fromUnix(1731834127, .seconds),
+        },
+    };
+    const b = Value{
+        .datetime = .{
+            .allocator = undefined,
+            .value = try jetcommon.types.DateTime.fromUnix(1731834128, .seconds),
+        },
+    };
+    const c = Value{
+        .datetime = .{
+            .allocator = undefined,
+            .value = try jetcommon.types.DateTime.fromUnix(1731834128, .seconds),
+        },
+    };
+    try std.testing.expect(!try a.compare(.equal, b));
+    try std.testing.expect(try b.compare(.equal, c));
+    try std.testing.expect(try a.compare(.less_than, b));
+    try std.testing.expect(try a.compare(.less_or_equal, b));
+    try std.testing.expect(try b.compare(.less_or_equal, c));
+    try std.testing.expect(try c.compare(.greater_than, a));
+    try std.testing.expect(try c.compare(.greater_or_equal, a));
+    try std.testing.expect(try c.compare(.greater_or_equal, b));
+}
+
+test "Value.compare object" {
+    const a = Value{ .object = undefined };
+    const b = Value{ .object = undefined };
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.equal, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_than, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
+}
+
+test "Value.compare array" {
+    const a = Value{ .array = undefined };
+    const b = Value{ .array = undefined };
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.equal, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_than, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
+}
+
+test "Value.compare different types" {
+    const a = Value{ .integer = undefined };
+    const b = Value{ .float = undefined };
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.equal, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_than, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
+    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
+}
+
+test "Value.compareT string" {
+    const a = Value{ .string = .{ .allocator = undefined, .value = "foo" } };
+    try std.testing.expect(try a.compareT(.equal, []const u8, "foo"));
+    try std.testing.expect(try a.compareT(.equal, [:0]const u8, @as([:0]const u8, "foo")));
+    try std.testing.expectError(error.ZmplCompareError, a.compareT(.less_than, []const u8, "foo"));
+    try std.testing.expectError(error.ZmplCoerceError, a.compareT(.equal, usize, 123));
+}
+
+test "Value.compareT integer" {
+    const a = Value{ .integer = .{ .allocator = undefined, .value = 1 } };
+    try std.testing.expect(try a.compareT(.equal, usize, 1));
+    try std.testing.expect(try a.compareT(.equal, u16, 1));
+    try std.testing.expect(try a.compareT(.equal, u8, 1));
+    try std.testing.expect(!try a.compareT(.equal, u8, 2));
+    try std.testing.expect(try a.compareT(.less_than, usize, 2));
+    try std.testing.expect(try a.compareT(.less_or_equal, usize, 2));
+    try std.testing.expect(try a.compareT(.less_or_equal, usize, 1));
+    try std.testing.expect(try a.compareT(.greater_than, usize, 0));
+    try std.testing.expect(try a.compareT(.greater_or_equal, usize, 0));
+    try std.testing.expect(try a.compareT(.greater_or_equal, usize, 1));
+    try std.testing.expectError(
+        error.ZmplIncompatibleTypeError,
+        a.compareT(.equal, []const u8, "1"),
+    );
+}
+
+test "Value.compareT float" {
+    const a = Value{ .float = .{ .allocator = undefined, .value = 1.0 } };
+    try std.testing.expect(try a.compareT(.equal, f128, 1.0));
+    try std.testing.expect(try a.compareT(.equal, f64, 1.0));
+    try std.testing.expect(try a.compareT(.equal, f32, 1.0));
+    try std.testing.expect(!try a.compareT(.equal, f64, 1.1));
+    try std.testing.expect(try a.compareT(.less_than, f64, 1.1));
+    try std.testing.expect(try a.compareT(.less_or_equal, f64, 1.1));
+    try std.testing.expect(try a.compareT(.less_or_equal, f64, 1.0));
+    try std.testing.expect(try a.compareT(.greater_than, f64, 0.9));
+    try std.testing.expect(try a.compareT(.greater_or_equal, f64, 0.9));
+    try std.testing.expect(try a.compareT(.greater_or_equal, f64, 1.0));
+    try std.testing.expectError(
+        error.ZmplIncompatibleTypeError,
+        a.compareT(.equal, []const u8, "1.0"),
+    );
+}
+
+test "Value.compareT datetime" {
+    const a = Value{
+        .datetime = .{
+            .allocator = undefined,
+            .value = try jetcommon.types.DateTime.fromUnix(1731834128, .seconds),
+        },
+    };
+    try std.testing.expect(try a.compareT(.equal, u64, 1731834128 * 1_000_000));
+    try std.testing.expect(try a.compareT(.equal, u128, 1731834128 * 1_000_000));
+    try std.testing.expect(!try a.compareT(.equal, u64, 1731834127 * 1_000_000));
+    try std.testing.expect(!try a.compareT(.equal, i64, 1731834127 * 1_000_000));
+    try std.testing.expect(!try a.compareT(.equal, i128, 1731834127 * 1_000_000));
+    try std.testing.expect(try a.compareT(.less_than, u64, 1731834129 * 1_000_000));
+    try std.testing.expect(try a.compareT(.less_or_equal, u64, 1731834129 * 1_000_000));
+    try std.testing.expect(try a.compareT(.less_or_equal, u64, 1731834128 * 1_000_000));
+    try std.testing.expect(try a.compareT(.greater_than, u64, 1731834127 * 1_000_000));
+    try std.testing.expect(try a.compareT(.greater_or_equal, u64, 1731834127 * 1_000_000));
+    try std.testing.expect(try a.compareT(.greater_or_equal, u64, 1731834128 * 1_000_000));
+    try std.testing.expectError(
+        error.ZmplIncompatibleTypeError,
+        a.compareT(.equal, []const u8, "1731834128"),
+    );
+}
+
+test "Value.compareT object" {
+    const a = Value{ .object = undefined };
+    try std.testing.expectError(
+        error.ZmplIncompatibleTypeError,
+        a.compareT(.equal, []const u8, "foo"),
+    );
+}
+
+test "Value.compareT array" {
+    const a = Value{ .array = undefined };
+    try std.testing.expectError(
+        error.ZmplIncompatibleTypeError,
+        a.compareT(.equal, []const u8, "foo"),
+    );
 }

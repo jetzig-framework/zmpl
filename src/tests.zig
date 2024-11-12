@@ -684,7 +684,11 @@ test "for with partial" {
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\foo1: bar1
+            \\<div>foo1</div>
+            \\<div>bar1</div>
             \\foo2: bar2
+            \\<div>foo2</div>
+            \\<div>bar2</div>
             \\
         , output);
     } else {
@@ -715,6 +719,80 @@ test "xss sanitization/raw formatter" {
         try std.testing.expectEqualStrings(
             \\&lt;script&gt;alert(&#039;:)&#039;);&lt;/script&gt;
             \\<script>alert(':)');</script>
+            \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
+
+test "if/else" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+
+    var foo = try root.put("foo", .object);
+    try foo.put("bar", 1);
+    try foo.put("baz", 3);
+
+    var qux = try foo.put("qux", .object);
+    try qux.put("quux", 4);
+
+    try foo.put("corge", "I am corge");
+
+    if (zmpl.find("if_else")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\
+            \\    expected here
+            \\        nested expected here
+            \\        foo.bar is 1
+            \\            double nested expected here
+            \\            foo.qux.quux is 4
+            \\       
+            \\   
+            \\
+            \\
+            \\  bar is 1
+            \\
+            \\  expected: `missing` is not here
+            \\
+            \\  corge says "I am corge"
+            \\
+            \\  corge confirms "I am corge"
+            \\
+            \\  expected: else
+            \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
+
+test "for with zmpl value" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+
+    var foo = try root.put("foo", .array);
+    try foo.append("bar");
+    try foo.append("baz");
+    try foo.append("qux");
+
+    if (zmpl.find("for_with_zmpl_value_main")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\
+            \\    bar
+            \\    baz
+            \\    qux
+            \\    bar
+            \\    baz
+            \\    qux
             \\
         , output);
     } else {

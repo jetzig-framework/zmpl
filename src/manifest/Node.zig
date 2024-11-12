@@ -5,6 +5,7 @@ const ZmdNode = @import("zmd").Node;
 
 const Token = @import("Template.zig").Token;
 const util = @import("util.zig");
+const IfStatement = @import("IfStatement.zig");
 
 token: Token,
 children: std.ArrayList(*Node),
@@ -12,6 +13,8 @@ generated_template_name: []const u8,
 allocator: std.mem.Allocator,
 template_map: std.StringHashMap([]const u8),
 templates_path: []const u8,
+
+const else_token = "@else";
 
 const Node = @This();
 
@@ -29,11 +32,10 @@ pub fn compile(self: Node, input: []const u8, writer: anytype, options: type) !v
     // Write chunks for current token between child token boundaries, rendering child token
     // immediately after.
     var start: usize = self.token.startOfContent();
-    var count: usize = 0;
     for (self.children.items) |child_node| {
         if (start < child_node.token.start) {
             const content = input[start .. child_node.token.start - 1];
-            try writer.writeAll(try self.render(&count, content, options));
+            try writer.writeAll(try self.render(.initial, content, options));
         }
 
         start = child_node.token.end + 1;
@@ -42,19 +44,23 @@ pub fn compile(self: Node, input: []const u8, writer: anytype, options: type) !v
 
     if (self.children.items.len == 0) {
         const content = input[self.token.startOfContent()..self.token.endOfContent()];
-        try writer.writeAll(try self.render(&count, content, options));
+        try writer.writeAll(try self.render(.initial, content, options));
     } else {
         const last_child = self.children.items[self.children.items.len - 1];
         if (last_child.token.end + 1 < self.token.endOfContent()) {
             const content = input[last_child.token.end + 1 .. self.token.endOfContent()];
-            try writer.writeAll(try self.render(&count, content, options));
+            if (false and self.token.mode == .@"if") {
+                try writer.writeAll(try self.renderElse(content));
+            } else {
+                try writer.writeAll(try self.render(.secondary, content, options));
+            }
         }
     }
     try writer.writeAll(self.renderClose());
 }
 
-fn render(self: Node, count: *usize, content: []const u8, options: type) ![]const u8 {
-    count.* += 1;
+const Context = enum { initial, secondary };
+fn render(self: Node, context: Context, content: []const u8, options: type) ![]const u8 {
     const markdown_fragments = if (@hasDecl(options, "markdown_fragments"))
         options.markdown_fragments
     else
@@ -69,14 +75,15 @@ fn render(self: Node, count: *usize, content: []const u8, options: type) ![]cons
         .partial => try self.renderPartial(content),
         .args => try self.renderArgs(),
         .extend => try self.renderExtend(),
-        .@"for" => try self.renderFor(count.*, content),
+        .@"for" => try self.renderFor(context, content),
+        .@"if" => try self.renderIf(context, content),
     };
 }
 
 fn renderClose(self: Node) []const u8 {
     return switch (self.token.mode) {
         .zig, .html, .markdown, .partial, .args, .extend => "",
-        .@"for" => "}",
+        .@"for", .@"if" => "\n}\n",
     };
 }
 fn renderZig(self: Node, content: []const u8) ![]const u8 {
@@ -342,7 +349,7 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
     defer args_buf.deinit();
 
     for (reordered_args.items, expected_partial_args, 0..) |arg, expected_arg, index| {
-        if (std.mem.startsWith(u8, arg.value, ".")) {
+        if (std.mem.startsWith(u8, arg.value, ".") or std.mem.startsWith(u8, arg.value, "$.")) {
             // Pass a *Zmpl.Value to partial using regular data lookup syntax.
             const value = try std.fmt.allocPrint(
                 self.allocator,
@@ -355,10 +362,10 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
             var it = std.mem.tokenizeScalar(u8, arg.value, '.');
             const maybe_root = it.next();
             if (maybe_root) |root| {
-                if (isIdentifier(root)) {
+                if (isIdentifier(root) and it.rest().len > 0) {
                     const chain = try std.fmt.allocPrint(
                         self.allocator,
-                        \\if (comptime @TypeOf({0s}) == *ZmplValue)
+                        \\if (comptime __zmpl.isZmplValue(@TypeOf({0s})))
                         \\    try {0s}.chainRefT(std.meta.fields(std.meta.ArgsTuple(@TypeOf({2s}_renderPartial)))[{3}].type, "{1s}",)
                         \\else
                         \\    {0s}{4s}{5s}
@@ -374,6 +381,23 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
                         },
                     );
                     try args_buf.append(chain);
+                } else if (isIdentifier(root)) {
+                    try args_buf.append(
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            \\if (comptime __zmpl.isZmplValue(@TypeOf({0s})))
+                            \\    try {0s}.coerce(std.meta.fields(std.meta.ArgsTuple(@TypeOf({1s}_renderPartial)))[{2}].type)
+                            \\else
+                            \\   {0s}
+                        ,
+                            .{
+                                root,
+                                generated_partial_name.?,
+                                // index + 2 to offset `data` and `slots` args:
+                                index + 2,
+                            },
+                        ),
+                    );
                 } else try args_buf.append(arg.value);
             } else {
                 try args_buf.append(arg.value);
@@ -452,14 +476,12 @@ fn renderSlots(self: Node, content: []const u8) !Slots {
 }
 
 fn renderArgs(self: Node) ![]const u8 {
-    const fields = self.token.mode_line["@args".len..];
+    // const fields = self.token.mode_line["@args".len..];
     return std.fmt.allocPrint(
         self.allocator,
-        \\const __args_type = struct {{ {s} }};
-        \\zmpl.noop(type, __args_type);
         \\
     ,
-        .{fields},
+        .{},
     );
 }
 
@@ -474,16 +496,16 @@ fn renderExtend(self: Node) ![]const u8 {
     )});
 }
 
-fn renderFor(self: Node, count: usize, content: []const u8) ![]const u8 {
+fn renderFor(self: Node, context: Context, content: []const u8) ![]const u8 {
     // If we have already rendered once, re-rendering the for loop makes no sense so we can just
     // write the remaining content directly. This can happen when a child node of the for loop
     // contains whitespace etc.
-    if (count > 1) return try self.renderHtml(content, .{});
+    if (context != .initial) return try self.renderHtml(content, .{});
 
     const expected_format_message = "Expected format `for (foo) |arg| { in {s}";
     const mode_line = self.token.mode_line["@for".len..];
     const for_args_start = std.mem.indexOfScalar(u8, mode_line, '(');
-    const for_args_end = std.mem.indexOfScalar(u8, mode_line, ')');
+    const for_args_end = std.mem.lastIndexOfScalar(u8, mode_line, ')');
     if (for_args_start == null) {
         std.debug.print("{s}\n", .{expected_format_message});
         return error.ZmplSyntaxError;
@@ -516,13 +538,18 @@ fn renderFor(self: Node, count: usize, content: []const u8) ![]const u8 {
     var for_args_writer = for_args_joined.writer();
     var for_args_it = std.mem.tokenizeScalar(u8, for_args, ',');
     while (for_args_it.next()) |arg| {
-        if (std.mem.startsWith(u8, arg, ".")) {
+        if (std.mem.startsWith(u8, arg, ".") or std.mem.startsWith(u8, arg, "$.")) {
             try for_args_writer.print(
                 "try zmpl.coerceArray({s}), ",
                 .{try util.zigStringEscape(self.allocator, arg[1..])},
             );
+        } else if (std.mem.containsAtLeast(u8, arg, 1, "..")) {
+            try for_args_writer.print("{0s}, ", .{arg});
         } else {
-            try for_args_writer.print("{s}, ", .{arg});
+            try for_args_writer.print(
+                "if (comptime __zmpl.isZmplValue(@TypeOf({0s}))) {0s}.items(.array) else {0s}, ",
+                .{arg},
+            );
         }
     }
 
@@ -535,6 +562,143 @@ fn renderFor(self: Node, count: usize, content: []const u8) ![]const u8 {
     );
 
     return try buf.toOwnedSlice();
+}
+
+fn parseZmpl(self: Node, content: []const u8) ![]const u8 {
+    var buf = std.ArrayList(u8).init(self.allocator);
+    const writer = buf.writer();
+    var single_quoted = false;
+    var double_quoted = false;
+    var zmpl = false;
+    for (content) |char| {
+        switch (char) {
+            '"' => {
+                if (!single_quoted) {
+                    double_quoted = !double_quoted;
+                    try writer.writeByte(char);
+                }
+            },
+            '\'' => {
+                if (!double_quoted) {
+                    single_quoted = !single_quoted;
+                    try writer.writeByte(char);
+                }
+            },
+            '$' => {
+                if (double_quoted or single_quoted) {
+                    try writer.writeByte(char);
+                } else {
+                    zmpl = true;
+                    try writer.writeAll(
+                        \\zmpl.ref("
+                    );
+                }
+            },
+            else => {
+                if (zmpl) {
+                    switch (char) {
+                        ' ', '(', ')' => |chr| {
+                            zmpl = false;
+                            try writer.writeAll(
+                                \\")
+                            );
+                            try writer.writeByte(chr);
+                        },
+                        else => {
+                            try writer.writeByte(char);
+                        },
+                    }
+                } else {
+                    try writer.writeByte(char);
+                }
+            },
+        }
+    }
+    return try buf.toOwnedSlice();
+}
+
+fn renderIf(self: Node, context: Context, content: []const u8) ![]const u8 {
+    var buf = std.ArrayList(u8).init(self.allocator);
+    const writer = buf.writer();
+
+    if (context == .initial) {
+        // When we render nodes, we render child nodes that exist within their bounds as we work
+        // through each node. We only want to render the initial `if` statement defined by this
+        // node's args once. If we are on a `.secondary` render we just render any remaining
+        // `@else if` and `@else` instructions and their contents.
+        const input = self.token.args orelse return error.ZmplSyntaxError;
+        const if_statement = try self.ifStatement(input);
+
+        try if_statement.render(writer);
+        try writer.writeAll(" {\n");
+    }
+
+    const content_end = util.indexOfWord(content, else_token) orelse content.len;
+    // TODO: We should render for the mode scoped above us instead of assuming HTML.
+    try writer.writeAll(try self.renderHtml(content[0..content_end], .{}));
+
+    var it = ElseIterator{ .input = content, .index = 0, .node = self };
+    while (try it.next()) |token| {
+        try writer.writeAll("\n} else ");
+        if (token.if_statement) |if_else_statement| {
+            try if_else_statement.render(writer);
+        }
+        try writer.writeAll(" {\n");
+        try writer.writeAll(try self.renderHtml(token.content, .{}));
+    }
+
+    return try buf.toOwnedSlice();
+}
+
+const ElseIterator = struct {
+    input: []const u8,
+    index: usize,
+    node: Node,
+
+    pub fn next(self: *ElseIterator) !?ElseToken {
+        if (self.index >= self.input.len) return null;
+
+        if (util.indexOfWord(self.input[self.index..], else_token)) |index| {
+            const rest = self.input[self.index + index ..];
+            const eol = std.mem.indexOfScalar(u8, rest, '\n') orelse {
+                std.debug.print("Expected line break after `@else` directive.\n", .{});
+                return error.ZmplSyntaxError;
+            };
+            if (util.indexOfWord(rest[0..eol], "if")) |if_index| {
+                const if_statement = try self.node.ifStatement(rest[if_index + "if".len .. eol]);
+                const end = util.indexOfWord(rest[eol..], else_token) orelse rest.len - eol;
+                const content = rest[eol .. eol + end];
+                self.index += eol + content.len;
+                return .{ .content = content, .if_statement = if_statement };
+            } else {
+                self.index += rest.len + else_token.len;
+                return .{ .content = rest[else_token.len..], .if_statement = null };
+            }
+        } else return null;
+    }
+};
+
+const ElseToken = struct {
+    content: []const u8,
+    if_statement: ?IfStatement,
+};
+
+fn ifStatement(self: Node, input: []const u8) !IfStatement {
+    const end = std.mem.lastIndexOfScalar(u8, input, '|') orelse
+        std.mem.lastIndexOfScalar(u8, input, ')') orelse return error.ZmplSyntaxError;
+    var ast = try IfStatement.parse(self.allocator, try self.parseZmpl(input[0 .. end + 1]));
+    if (ast.errors.len > 0) {
+        for (ast.errors) |err| {
+            var buf: [1024]u8 = undefined;
+            var stream = std.io.fixedBufferStream(&buf);
+            const writer = stream.writer();
+            try ast.renderError(err, writer);
+            std.debug.print("Error parsing `@if` conditions: {s}\n", .{stream.getWritten()});
+        }
+        return error.ZmplSyntaxError;
+    }
+
+    return IfStatement.init(ast);
 }
 
 // Represents a name/value keypair OR a name/type keypair.
@@ -641,7 +805,7 @@ fn renderWrite(self: Node, input: []const u8, writer_options: WriterOptions) ![]
 
 fn renderRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
     const stripped = util.strip(input);
-    if (std.mem.startsWith(u8, stripped, ".")) {
+    if (std.mem.startsWith(u8, stripped, ".") or std.mem.startsWith(u8, stripped, "$.")) {
         return try self.renderDataRef(stripped[1..], writer_options);
     } else if (std.mem.indexOfAny(u8, stripped, " \"+-/*{}!?()")) |_| {
         return try self.renderZigLiteral(stripped, writer_options);
@@ -674,13 +838,12 @@ fn renderValueRef(self: Node, input: []const u8, writer_options: WriterOptions) 
         const start = std.mem.indexOfScalar(u8, input, '.').?;
         break :blk try std.fmt.allocPrint(
             self.allocator,
-            \\_ = switch (@TypeOf({1s})) {{
-            \\    *ZmplValue => try __zmpl.sanitize({0s}, try zmpl.maybeRef({1s}, {2s})),
-            \\    else => if (comptime @TypeOf({3s}) == __zmpl.Data.LayoutContent)
-            \\                try {0s}.write({3s}.data)
-            \\            else
-            \\                try __zmpl.sanitize({0s}, try zmpl.coerceString({3s})),
-            \\}};
+            \\_ = if (comptime __zmpl.isZmplValue(@TypeOf({1s})))
+            \\       try __zmpl.sanitize({0s}, try zmpl.maybeRef({1s}, {2s}))
+            \\    else if (comptime @TypeOf({3s}) == __zmpl.Data.LayoutContent)
+            \\             try {0s}.write({3s}.data)
+            \\         else
+            \\             try __zmpl.sanitize({0s}, try zmpl.coerceString({3s}));
             \\
         ,
             .{

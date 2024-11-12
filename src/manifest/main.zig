@@ -61,3 +61,7 @@ pub fn main() !void {
     try file.writeAll(content);
     file.close();
 }
+
+test {
+    _ = std.testing.refAllDeclsRecursive(@This());
+}

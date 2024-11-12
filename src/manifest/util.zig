@@ -18,6 +18,7 @@ pub fn startsWithIgnoringWhitespace(haystack: []const u8, needle: []const u8) bo
 
 /// Detect if a given input string begins with a given value, ignoring leading whitespace.
 pub fn indexOfIgnoringWhitespace(haystack: []const u8, needle: []const u8) ?usize {
+    // FIXME: This function makes no sense.
     const trimmed = std.mem.trimLeft(u8, haystack, &std.ascii.whitespace);
     if (std.mem.indexOf(u8, trimmed, needle)) |index| {
         return (haystack.len - trimmed.len) + index;
@@ -25,6 +26,71 @@ pub fn indexOfIgnoringWhitespace(haystack: []const u8, needle: []const u8) ?usiz
         return null;
     }
 }
+
+/// Detect index of `needle` in `haystack` where `haystack` must be surrounded by non-word
+/// characters, similar to regexp `\<haystack\>`.
+pub fn indexOfWord(haystack: []const u8, needle: []const u8) ?usize {
+    return if (std.mem.indexOf(u8, haystack, needle)) |index| blk: {
+        const lhs = if (index == 0)
+            true
+        else switch (haystack[index - 1]) {
+            'a'...'z', 'A'...'Z', '0'...'9', '_' => false,
+            else => true,
+        };
+
+        if (!lhs) break :blk null;
+
+        const rhs = if (index + needle.len + 1 >= haystack.len)
+            true
+        else switch (haystack[index + needle.len]) {
+            'a'...'z', 'A'...'Z', '0'...'9', '_' => false,
+            else => true,
+        };
+
+        break :blk if (rhs) index else null;
+    } else null;
+}
+
+/// Tokenize a slice using `indexOfWord` to detect tokens. Return an interator that yields
+/// `Token` which provides index, length, and the token itself.
+pub fn tokenizeWord(haystack: []const u8, needle: []const u8) WordTokenIterator {
+    return .{ .index = 0, .haystack = haystack, .needle = needle };
+}
+
+const WordTokenIterator = struct {
+    haystack: []const u8,
+    needle: []const u8,
+    index: usize,
+
+    const Token = struct {
+        index: usize,
+        len: usize,
+        token: []const u8,
+        span: []const u8,
+    };
+
+    pub fn next(self: *WordTokenIterator) ?Token {
+        if (self.index + 1 >= self.haystack.len) return null;
+
+        if (indexOfWord(self.haystack[self.index..], self.needle)) |index| {
+            self.index = self.index + index + self.needle.len;
+            const maybe_next_index = indexOfWord(
+                self.haystack[index + self.needle.len ..],
+                self.needle,
+            );
+            const end = if (maybe_next_index) |next_index|
+                next_index + index + self.needle.len
+            else
+                self.haystack.len;
+            return .{
+                .index = index,
+                .len = self.needle.len,
+                .token = self.haystack[index .. index + self.needle.len],
+                .span = self.haystack[self.index..end],
+            };
+        } else return null;
+    }
+};
 
 /// Generate a random variable name with enough entropy to be considered unique.
 pub fn generateVariableName(buf: *[32]u8) void {

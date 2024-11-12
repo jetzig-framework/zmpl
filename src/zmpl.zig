@@ -14,6 +14,7 @@ pub const Template = @import("zmpl/Template.zig");
 pub const manifest = Template.manifest;
 pub const colors = @import("zmpl/colors.zig");
 pub const Format = @import("zmpl/Format.zig");
+pub const isZmplValue = Data.isZmplValue;
 
 pub const InitOptions = struct {
     templates_path: []const u8 = "src/templates",
@@ -38,4 +39,8 @@ pub fn sanitize(writer: anytype, input: []const u8) !void {
 
     const fmt = Format{ .writer = if (@TypeOf(writer) == *Data) writer.output_writer else writer };
     _ = try fmt.sanitize(input);
+}
+
+test {
+    std.testing.refAllDecls(@This());
 }

@@ -21,6 +21,8 @@ args: ?[]const u8 = null,
 partial: bool,
 template_map: std.StringHashMap([]const u8),
 
+const end_token = "@end";
+
 /// A mode pragma and its content in the input buffer. Stores args if present.
 /// e.g.:
 /// ```
@@ -92,6 +94,8 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
     try self.parse();
 
     var buf = std.ArrayList(u8).init(self.allocator);
+    defer buf.deinit();
+
     const writer = buf.writer();
 
     try self.renderHeader(writer, options);
@@ -100,15 +104,12 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
 
     self.state = .compiled;
 
-    if (true) return try buf.toOwnedSlice();
-
-    // Switch back to this when the line numbers are consistent and the output has been trimmed -
-    // currently a Zig backtrace is more useful.
-    return try jetcommon.fmt.zig(
-        self.allocator,
-        try buf.toOwnedSlice(),
-        "Syntax error in Zmpl manifest",
-    );
+    const with_sentinel = try std.mem.concatWithSentinel(self.allocator, u8, &.{buf.items}, 0);
+    var ast = try std.zig.Ast.parse(self.allocator, with_sentinel, .zig);
+    return if (ast.errors.len > 0)
+        try buf.toOwnedSlice()
+    else
+        ast.render(self.allocator);
 }
 
 /// Here for compatibility with `Template` only - manifest generates random names for templates
@@ -118,7 +119,7 @@ pub fn identifier(self: *Template) ![]const u8 {
     return "";
 }
 
-const Mode = enum { html, zig, partial, args, markdown, extend, @"for" };
+const Mode = enum { html, zig, partial, args, markdown, extend, @"for", @"if" };
 const Delimiter = union(enum) {
     string: []const u8,
     eof: void,
@@ -380,6 +381,7 @@ fn getDelimitedMode(line: []const u8) ?DelimitedMode {
                 .markdown,
                 .@"for",
                 => getBlockDelimiter(mode, first_word, stripped[end_of_first_word.?..]),
+                .@"if" => .{ .string = end_token },
             };
             if (maybe_delimiter) |delimiter| {
                 return .{ .mode = mode, .delimiter = delimiter };
@@ -433,6 +435,7 @@ fn getBlockDelimiter(mode: Mode, first_word: []const u8, line: []const u8) ?Deli
         return switch (mode) {
             .partial, .args, .extend => .none,
             .html, .zig, .markdown, .@"for" => delimiterFromString(stripped),
+            .@"if" => .{ .string = end_token },
         };
     }
 }
@@ -505,6 +508,10 @@ fn getBraceDepth(mode: Mode, line: []const u8) isize {
             }
             break :blk 0;
         },
+        .@"if" => if (util.indexOfIgnoringWhitespace(line, end_token)) |index|
+            @intCast(index)
+        else
+            0,
     };
 }
 

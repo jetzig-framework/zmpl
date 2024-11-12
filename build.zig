@@ -110,18 +110,49 @@ pub fn build(b: *std.Build) !void {
     if (auto_build) {
         const tests_path = "src/tests.zig";
 
-        const main_tests = b.addTest(.{
+        const template_tests = b.addTest(.{
             .root_source_file = b.path(tests_path),
             .target = target,
             .optimize = optimize,
         });
 
-        main_tests.root_module.addImport("zmpl", zmpl_module);
-        main_tests.root_module.addImport("zmpl.manifest", manifest_module);
-        main_tests.root_module.addImport("jetcommon", jetcommon_module);
-        const run_main_tests = b.addRunArtifact(main_tests);
+        const zmpl_tests = b.addTest(.{
+            .root_source_file = b.path("src/zmpl.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+
+        const manifest_tests = b.addTest(.{
+            .root_source_file = b.path("src/manifest/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+
+        template_tests.root_module.addImport("zmpl", zmpl_module);
+        template_tests.root_module.addImport("zmpl.manifest", manifest_module);
+        template_tests.root_module.addImport("jetcommon", jetcommon_module);
+
+        const dummy_manifest_module = b.createModule(
+            .{ .root_source_file = b.path("src/dummy_manifest.zig") },
+        );
+        zmpl_tests.root_module.addImport("jetcommon", jetcommon_module);
+        zmpl_tests.root_module.addImport("zmpl.manifest", dummy_manifest_module);
+        zmpl_tests.root_module.addImport("zmd", zmd_module);
+
+        const dummy_zmpl_options_module = b.createModule(
+            .{ .root_source_file = b.path("src/manifest/dummy_zmpl_options.zig") },
+        );
+        manifest_tests.root_module.addImport("zmpl_options", dummy_zmpl_options_module);
+        manifest_tests.root_module.addImport("zmd", zmd_module);
+
+        const run_template_tests = b.addRunArtifact(template_tests);
+        const run_zmpl_tests = b.addRunArtifact(zmpl_tests);
+        const run_manifest_tests = b.addRunArtifact(manifest_tests);
+
         const test_step = b.step("test", "Run library tests");
-        test_step.dependOn(&run_main_tests.step);
+        test_step.dependOn(&run_template_tests.step);
+        test_step.dependOn(&run_zmpl_tests.step);
+        test_step.dependOn(&run_manifest_tests.step);
     }
 
     b.installArtifact(lib);
