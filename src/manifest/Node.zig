@@ -478,7 +478,7 @@ fn renderFor(self: Node, count: usize, content: []const u8) ![]const u8 {
     // If we have already rendered once, re-rendering the for loop makes no sense so we can just
     // write the remaining content directly. This can happen when a child node of the for loop
     // contains whitespace etc.
-    if (count > 1) return try self.renderWrite(content, .{});
+    if (count > 1) return try self.renderHtml(content, .{});
 
     const expected_format_message = "Expected format `for (foo) |arg| { in {s}";
     const mode_line = self.token.mode_line["@for".len..];
