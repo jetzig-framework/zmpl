@@ -1151,7 +1151,7 @@ pub const Value = union(ValueType) {
     }
 
     /// Puts a `Value` into an `Object`.
-    pub fn put(self: *Value, key: []const u8, value: anytype) !Put(@TypeOf(value)) {
+    pub fn put(self: *Value, key: []const u8, value: anytype) !PutAppend(@TypeOf(value)) {
         return switch (self.*) {
             .object => |*capture| try capture.put(key, value),
             inline else => unreachable,
@@ -1159,11 +1159,11 @@ pub const Value = union(ValueType) {
     }
 
     /// Appends a `Value` to an `Array`.
-    pub fn append(self: *Value, value: anytype) !void {
-        switch (self.*) {
+    pub fn append(self: *Value, value: anytype) !PutAppend(@TypeOf(value)) {
+        return switch (self.*) {
             .array => |*capture| try capture.append(value),
             inline else => unreachable,
-        }
+        };
     }
 
     /// Convert the value to a JSON string.
@@ -1476,11 +1476,11 @@ pub const Object = struct {
         return true;
     }
 
-    pub fn put(self: *Object, key: []const u8, value: anytype) !Put(@TypeOf(value)) {
+    pub fn put(self: *Object, key: []const u8, value: anytype) !PutAppend(@TypeOf(value)) {
         const zmpl_value = try zmplValue(value, self.allocator);
         const key_dupe = try self.allocator.dupe(u8, key);
         try self.hashmap.put(key_dupe, zmpl_value);
-        if (Put(@TypeOf(value)) != void) return zmpl_value;
+        if (PutAppend(@TypeOf(value)) != void) return zmpl_value;
     }
 
     pub fn get(self: Object, key: []const u8) ?*Value {
@@ -1724,9 +1724,10 @@ pub const Array = struct {
         return if (self.array.items.len > index) self.array.items[index] else null;
     }
 
-    pub fn append(self: *Array, value: anytype) !void {
+    pub fn append(self: *Array, value: anytype) !PutAppend(@TypeOf(value)) {
         const zmpl_value = try zmplValue(value, self.allocator);
         try self.array.append(zmpl_value);
+        if (PutAppend(@TypeOf(value)) != void) return zmpl_value;
     }
 
     pub fn toJson(
@@ -1886,10 +1887,15 @@ fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime c
 }
 
 fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
-    if (comptime @TypeOf(value) == @TypeOf(.enum_literal) and value == .object) {
+    const is_enum_literal = comptime @TypeOf(value) == @TypeOf(.enum_literal);
+    if (comptime is_enum_literal and value == .object) {
         return try createObject(alloc);
-    } else if (comptime @TypeOf(value) == @TypeOf(.enum_literal) and value == .array) {
+    } else if (comptime is_enum_literal and value == .array) {
         return try createArray(alloc);
+    } else if (comptime is_enum_literal) {
+        @compileError(
+            "Enum literal must be `.object` or `.array`, found `" ++ @tagName(value) ++ "`",
+        );
     }
 
     if (@TypeOf(value) == jetcommon.types.DateTime) {
@@ -1984,8 +1990,8 @@ fn resolveSlice(self: *Data, maybe_err_slice: anytype) ![]const u8 {
     };
 }
 
-fn Put(T: type) type {
-    return if (T == @TypeOf(.object) or T == @TypeOf(.array)) *Value else void;
+fn PutAppend(T: type) type {
+    return if (T == @TypeOf(.enum_literal)) *Value else void;
 }
 
 pub const ErrorName = enum { ref, type, syntax, constant, compare };
@@ -2238,5 +2244,30 @@ test "Value.compareT array" {
     try std.testing.expectError(
         error.ZmplIncompatibleTypeError,
         a.compareT(.equal, []const u8, "foo"),
+    );
+}
+
+test "append/put array/object" {
+    var data = Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var array1 = try data.root(.array);
+    var array2 = try array1.append(.array);
+    var array3 = try array2.append(.array);
+    try array3.append("foo");
+    try array2.append("bar");
+    try array1.append("baz");
+    var object1 = try array1.append(.object);
+    try object1.put("qux", "quux");
+    var object2 = try object1.put("corge", .object);
+    var array4 = try object1.put("grault", .array);
+    try object2.put("garply", "waldo");
+    try array4.append("fred");
+
+    try std.testing.expectEqualStrings(
+        \\[[["foo"],"bar"],"baz",{"qux":"quux","corge":{"garply":"waldo"},"grault":["fred"]}]
+        \\
+    ,
+        try data.toJson(),
     );
 }

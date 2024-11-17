@@ -674,10 +674,9 @@ test "for with partial" {
     defer data.deinit();
 
     var root = try data.root(.object);
-    var array = try data.array();
+    var array = try root.put("things", .array);
     try array.append(.{ .foo = "foo1", .bar = "bar1" });
     try array.append(.{ .foo = "foo2", .bar = "bar2" });
-    try root.put("things", array);
 
     if (zmpl.find("for_with_partial")) |template| {
         const output = try template.render(&data);
