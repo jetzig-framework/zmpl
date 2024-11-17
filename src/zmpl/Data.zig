@@ -1158,10 +1158,26 @@ pub const Value = union(ValueType) {
         };
     }
 
+    /// Remove a `Value` at `key` from an `Object`.
+    pub fn remove(self: *Value, key: []const u8) bool {
+        return switch (self.*) {
+            .object => |*capture| try capture.remove(key),
+            inline else => unreachable,
+        };
+    }
+
     /// Appends a `Value` to an `Array`.
     pub fn append(self: *Value, value: anytype) !PutAppend(@TypeOf(value)) {
         return switch (self.*) {
             .array => |*capture| try capture.append(value),
+            inline else => unreachable,
+        };
+    }
+
+    /// Pop a `Value` from the end of an `Array` and return it. Return `null` if array is empty.
+    pub fn pop(self: *Value) ?*Value {
+        return switch (self.*) {
+            .array => |*capture| capture.pop(),
             inline else => unreachable,
         };
     }
@@ -1689,11 +1705,8 @@ pub const Object = struct {
         try highlight(writer, .close_object, .{}, options.color);
     }
 
-    /// removes true if object was removed
-    /// and false otherwise
+    /// Return `true` if value was removed and `false` otherwise.
     pub fn remove(self: *Object, key: []const u8) bool {
-        // I saw it in `deinit()` so
-        // I tried to do the same
         if (self.hashmap.getEntry(key)) |entry| {
             self.allocator.destroy(entry.value_ptr);
             self.allocator.destroy(entry.key_ptr);
@@ -1733,6 +1746,10 @@ pub const Array = struct {
         const zmpl_value = try zmplValue(value, self.allocator);
         try self.array.append(zmpl_value);
         if (PutAppend(@TypeOf(value)) != void) return zmpl_value;
+    }
+
+    pub fn pop(self: *Array) ?*Value {
+        return self.array.popOrNull();
     }
 
     pub fn toJson(
@@ -2284,4 +2301,24 @@ test "coerce enum" {
     const e2: E = .bar;
     try std.testing.expect(e1 == try value.coerce(E));
     try std.testing.expect(e2 != try value.coerce(E));
+}
+
+test "array pop" {
+    var data = Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var array1 = try data.root(.array);
+    try array1.append(1);
+    try array1.append(2);
+    try array1.append(3);
+
+    try std.testing.expect(array1.count() == 3);
+
+    const vals: [3]u8 = .{ 3, 2, 1 };
+    for (vals) |val| {
+        const popped = array1.pop().?;
+        try std.testing.expect(try popped.compareT(.equal, u8, val));
+    }
+
+    try std.testing.expect(array1.count() == 0);
 }
