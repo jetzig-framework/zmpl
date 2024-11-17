@@ -1317,6 +1317,11 @@ pub const Value = union(ValueType) {
                     .string => |capture| capture.value,
                     else => error.ZmplIncompatibleTypeError,
                 },
+                .@"enum" => switch (self) {
+                    .string => |capture| std.meta.stringToEnum(CET, capture.value) orelse
+                        error.ZmplCoerceError,
+                    else => error.ZmplIncompatibleTypeError,
+                },
                 else => @compileError("Cannot corece Zmpl Value to `" ++ @typeName(T) ++ "`"),
             },
         };
@@ -2270,4 +2275,13 @@ test "append/put array/object" {
     ,
         try data.toJson(),
     );
+}
+
+test "coerce enum" {
+    const value = Value{ .string = .{ .allocator = undefined, .value = "foo" } };
+    const E = enum { foo, bar };
+    const e1: E = .foo;
+    const e2: E = .bar;
+    try std.testing.expect(e1 == try value.coerce(E));
+    try std.testing.expect(e2 != try value.coerce(E));
 }
