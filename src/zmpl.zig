@@ -3,6 +3,7 @@ const std = @import("std");
 const build_options = @import("build_options");
 
 pub const zmd = @import("zmd");
+pub const jetcommon = @import("jetcommon");
 
 // XXX: Ensure that `@import("zmpl").zmpl` always works. This is a workaround to allow Zmpl to be
 // imported at build time because `@import("zmpl")` at build time imports `zmpl/build.zig`.
