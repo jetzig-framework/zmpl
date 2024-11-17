@@ -390,7 +390,7 @@ fn resolveValue(value: anytype) Value {
         .optional => return if (value) |capture|
             resolveValue(capture)
         else
-            Value{ .Null = NullType{ .allocator = undefined } },
+            Value{ .null = NullType{ .allocator = undefined } },
         else => {},
     }
 
@@ -638,7 +638,7 @@ pub fn datetime(self: *Data, value: jetcommon.types.DateTime) *Value {
 /// Create a new `Value` representing a `null` value. Public, but for internal use only.
 pub fn _null(arena: std.mem.Allocator) *Value {
     const val = arena.create(Value) catch @panic("Out of memory");
-    val.* = .{ .Null = NullType{ .allocator = arena } };
+    val.* = .{ .null = NullType{ .allocator = arena } };
     return val;
 }
 
@@ -671,7 +671,7 @@ pub fn getT(self: *const Data, comptime T: ValueType, key: []const u8) ?switch (
     .integer => i128,
     .boolean => bool,
     .datetime => jetcommon.types.DateTime,
-    .Null => null,
+    .null => null,
 } {
     if (self.value == null) return null;
 
@@ -781,7 +781,7 @@ pub const ValueType = enum {
     boolean,
     string,
     datetime,
-    Null,
+    null,
 };
 
 /// A generic type representing any supported type. All types are JSON-compatible and can be
@@ -794,7 +794,7 @@ pub const Value = union(ValueType) {
     boolean: Boolean,
     string: String,
     datetime: DateTime,
-    Null: NullType,
+    null: NullType,
 
     /// Compare one `Value` to another `Value` recursively. Order of `Object` keys is ignored.
     pub fn eql(self: *const Value, other: *const Value) bool {
@@ -827,8 +827,8 @@ pub const Value = union(ValueType) {
                 .datetime => |*other_capture| return capture.eql(other_capture),
                 inline else => return false,
             },
-            .Null => |*capture| switch (other.*) {
-                .Null => |*other_capture| return capture.eql(other_capture),
+            .null => |*capture| switch (other.*) {
+                .null => |*other_capture| return capture.eql(other_capture),
                 inline else => return false,
             },
         }
@@ -890,7 +890,7 @@ pub const Value = union(ValueType) {
                 std.enums.nameCast(jetcommon.Operator, operator),
                 other.datetime.value,
             ),
-            .Null => true, // If both sides are `Null` then this can only be true.
+            .null => true, // If both sides are `Null` then this can only be true.
         };
     }
 
@@ -927,7 +927,7 @@ pub const Value = union(ValueType) {
                     "Zmpl `object` does not support `{s}` comparison.",
                     .{@tagName(operator)},
                 ),
-                .Null => switch (@typeInfo(T)) {
+                .null => switch (@typeInfo(T)) {
                     .optional => other == null,
                     else => @TypeOf(T) == @TypeOf(null),
                 },
@@ -965,7 +965,7 @@ pub const Value = union(ValueType) {
                     "Zmpl `object` does not support `{s}` comparison.",
                     .{@tagName(operator)},
                 ),
-                .Null => switch (@typeInfo(T)) {
+                .null => switch (@typeInfo(T)) {
                     .optional => other == null,
                     else => @TypeOf(T) == @TypeOf(null),
                 },
@@ -1000,7 +1000,7 @@ pub const Value = union(ValueType) {
                     "Zmpl `object` does not support `{s}` comparison.",
                     .{@tagName(operator)},
                 ),
-                .Null => switch (@typeInfo(T)) {
+                .null => switch (@typeInfo(T)) {
                     .optional => other == null,
                     else => @TypeOf(T) == @TypeOf(null),
                 },
@@ -1035,7 +1035,7 @@ pub const Value = union(ValueType) {
                     "Zmpl `object` does not support `{s}` comparison.",
                     .{@tagName(operator)},
                 ),
-                .Null => switch (@typeInfo(T)) {
+                .null => switch (@typeInfo(T)) {
                     .optional => other == null,
                     else => @TypeOf(T) == @TypeOf(null),
                 },
@@ -1070,7 +1070,7 @@ pub const Value = union(ValueType) {
                     "Zmpl `object` does not support `{s}` comparison.",
                     .{@tagName(operator)},
                 ),
-                .Null => switch (@typeInfo(T)) {
+                .null => switch (@typeInfo(T)) {
                     .optional => other == null,
                     else => @TypeOf(T) == @TypeOf(null),
                 },
@@ -1097,7 +1097,7 @@ pub const Value = union(ValueType) {
         .integer => i128,
         .boolean => bool,
         .datetime => jetcommon.types.DateTime,
-        .Null => null,
+        .null => null,
     } {
         return switch (self.*) {
             .object => |value| value.getT(T, key),
@@ -1121,7 +1121,7 @@ pub const Value = union(ValueType) {
             .integer => |capture| capture.value > 0,
             .float => |capture| capture.value > 0,
             .datetime => true,
-            .Null => false,
+            .null => false,
         };
     }
 
@@ -1333,7 +1333,7 @@ pub const NullType = struct {
 
     pub fn toJson(self: NullType, writer: Writer, comptime options: ToJsonOptions) !void {
         _ = self;
-        try highlight(writer, .Null, .{}, options.color);
+        try highlight(writer, .null, .{}, options.color);
     }
 
     pub fn eql(self: *const NullType, other: *const NullType) bool {
@@ -1502,7 +1502,7 @@ pub const Object = struct {
         .integer => i128,
         .boolean => bool,
         .datetime => jetcommon.types.DateTime,
-        .Null => null,
+        .null => null,
     } {
         if (self.get(key)) |value| {
             return switch (T) {
@@ -1538,7 +1538,7 @@ pub const Object = struct {
                     .datetime => |capture| capture.value,
                     else => null,
                 },
-                .Null => null,
+                .null => null,
             };
         } else return null;
     }
@@ -1870,7 +1870,7 @@ const Syntax = enum {
     string,
     boolean,
     datetime,
-    Null,
+    null,
 };
 
 fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime color: bool) !void {
@@ -1885,7 +1885,7 @@ fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime c
         .string => if (color) zmpl.colors.green("{s}") else "{s}",
         .datetime => if (color) zmpl.colors.bright(.blue, "{s}") else "{s}",
         .boolean => if (color) zmpl.colors.green("{}") else "{}",
-        .Null => if (color) zmpl.colors.cyan("null") else "null",
+        .null => if (color) zmpl.colors.cyan("null") else "null",
     };
 
     try writer.print(template, args);
@@ -1913,7 +1913,7 @@ pub fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
         .int, .comptime_int => Value{ .integer = .{ .value = value, .allocator = alloc } },
         .float, .comptime_float => Value{ .float = .{ .value = value, .allocator = alloc } },
         .bool => Value{ .boolean = .{ .value = value, .allocator = alloc } },
-        .null => Value{ .Null = NullType{ .allocator = alloc } },
+        .null => Value{ .null = NullType{ .allocator = alloc } },
         .@"enum" => Value{ .string = .{ .value = @tagName(value), .allocator = alloc } },
         .pointer => |info| switch (@typeInfo(info.child)) {
             .@"union" => {
@@ -1943,7 +1943,7 @@ pub fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
             if (value) |is_value| {
                 return zmplValue(is_value, alloc);
             } else {
-                break :blk Value{ .Null = NullType{ .allocator = alloc } };
+                break :blk Value{ .null = NullType{ .allocator = alloc } };
             }
         },
         .error_union => return if (value) |capture|
