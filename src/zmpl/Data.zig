@@ -1891,7 +1891,7 @@ fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime c
     try writer.print(template, args);
 }
 
-fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
+pub fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
     const is_enum_literal = comptime @TypeOf(value) == @TypeOf(.enum_literal);
     if (comptime is_enum_literal and value == .object) {
         return try createObject(alloc);
