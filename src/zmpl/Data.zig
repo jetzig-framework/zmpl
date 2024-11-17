@@ -1204,15 +1204,15 @@ pub const Value = union(ValueType) {
     }
 
     /// Permit usage of `Value` in a Zig format string.
-    pub fn format(self: *Value, actual_fmt: []const u8, options: anytype, writer: anytype) !void {
+    pub fn format(self: Value, actual_fmt: []const u8, options: anytype, writer: anytype) !void {
         _ = options;
         _ = actual_fmt;
         try writer.writeAll(try self.toString());
     }
 
     /// Converts a primitive type (string, integer, float) to a string representation.
-    pub fn toString(self: *Value) ![]const u8 {
-        return switch (self.*) {
+    pub fn toString(self: Value) ![]const u8 {
+        return switch (self) {
             .object => "{}",
             .array => "[]",
             inline else => |*capture| try capture.toString(),
@@ -1220,7 +1220,7 @@ pub const Value = union(ValueType) {
     }
 
     /// Return the number of items in an array or an object.
-    pub fn count(self: *Value) usize {
+    pub fn count(self: *const Value) usize {
         switch (self.*) {
             .array => |capture| return capture.count(),
             .object => |capture| return capture.count(),
