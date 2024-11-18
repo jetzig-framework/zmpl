@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const Zmd = @import("zmd").Zmd;
 const ZmdNode = @import("zmd").Node;
@@ -20,7 +21,54 @@ const Node = @This();
 
 const WriterOptions = struct { zmpl_writer: []const u8 = "zmpl" };
 
-pub fn compile(self: Node, input: []const u8, writer: anytype, options: type) !void {
+/// Debugging writer - writes debug tokens after every print/write instruction. This requires
+/// that all print/write operations are line-based, otherwise the injected Zig comment will
+/// clobber any dangling output.
+/// In non-debug builds, debug tokens are omitted as a stack trace is required for them to be
+/// useful.
+pub const Writer = struct {
+    buf: *std.ArrayList(u8),
+    token: Token,
+
+    pub fn print(self: Writer, comptime input: []const u8, args: anytype) !void {
+        if (builtin.mode == .Debug) {
+            try self.buf.writer().print(input, args);
+            try self.writeDebug();
+        } else {
+            try self.buf.writer().print(input, args);
+        }
+    }
+
+    pub fn writeAll(self: Writer, input: []const u8) !void {
+        if (builtin.mode == .Debug) {
+            var it = std.mem.tokenizeScalar(u8, input, '\n');
+            while (it.next()) |line| {
+                try self.buf.writer().writeAll(line);
+                try self.writeDebug();
+            }
+        } else try self.buf.writer().writeAll(input);
+    }
+
+    pub fn writeByte(self: Writer, byte: u8) !void {
+        try self.buf.writer().writeByte(byte);
+    }
+
+    fn writeDebug(self: Writer) !void {
+        try self.buf.writer().print(
+            \\
+            \\//zmpl:debug:{}:{}:{s}
+            \\
+        , .{
+            self.token.start,
+            self.token.end,
+            self.token.path,
+        });
+    }
+};
+
+pub fn compile(self: Node, input: []const u8, writer: *Writer, options: type) !void {
+    writer.token = self.token;
+
     if (self.token.mode == .partial and self.children.items.len > 0) {
         std.debug.print(
             "Partial slots cannot contain mode blocks:\n{s}\n",
@@ -35,7 +83,7 @@ pub fn compile(self: Node, input: []const u8, writer: anytype, options: type) !v
     for (self.children.items) |child_node| {
         if (start < child_node.token.start) {
             const content = input[start .. child_node.token.start - 1];
-            try writer.writeAll(try self.render(.initial, content, options));
+            try self.render(.initial, content, options, writer);
         }
 
         start = child_node.token.end + 1;
@@ -44,23 +92,29 @@ pub fn compile(self: Node, input: []const u8, writer: anytype, options: type) !v
 
     if (self.children.items.len == 0) {
         const content = input[self.token.startOfContent()..self.token.endOfContent()];
-        try writer.writeAll(try self.render(.initial, content, options));
+        try self.render(.initial, content, options, writer);
     } else {
         const last_child = self.children.items[self.children.items.len - 1];
         if (last_child.token.end + 1 < self.token.endOfContent()) {
             const content = input[last_child.token.end + 1 .. self.token.endOfContent()];
             if (false and self.token.mode == .@"if") {
-                try writer.writeAll(try self.renderElse(content));
+                try self.renderElse(content, writer);
             } else {
-                try writer.writeAll(try self.render(.secondary, content, options));
+                try self.render(.secondary, content, options, writer);
             }
         }
     }
-    try writer.writeAll(self.renderClose());
+    try self.renderClose(writer);
 }
 
 const Context = enum { initial, secondary };
-fn render(self: Node, context: Context, content: []const u8, options: type) ![]const u8 {
+fn render(
+    self: Node,
+    context: Context,
+    content: []const u8,
+    options: type,
+    writer: anytype,
+) !void {
     const markdown_fragments = if (@hasDecl(options, "markdown_fragments"))
         options.markdown_fragments
     else
@@ -69,16 +123,20 @@ fn render(self: Node, context: Context, content: []const u8, options: type) ![]c
         };
 
     const stripped_content = try self.stripComments(content);
-    return switch (self.token.mode) {
-        .zig => try self.renderZig(stripped_content),
-        .html => try self.renderHtml(stripped_content, .{}),
-        .markdown => try self.renderHtml(try self.renderMarkdown(stripped_content, markdown_fragments), .{}),
-        .partial => try self.renderPartial(stripped_content),
-        .args => try self.renderArgs(),
-        .extend => try self.renderExtend(),
-        .@"for" => try self.renderFor(context, stripped_content),
-        .@"if" => try self.renderIf(context, stripped_content),
-    };
+    switch (self.token.mode) {
+        .zig => try self.renderZig(stripped_content, writer),
+        .html => try self.renderHtml(stripped_content, .{}, writer),
+        .markdown => try self.renderHtml(
+            try self.renderMarkdown(stripped_content, markdown_fragments),
+            .{},
+            writer,
+        ),
+        .partial => try self.renderPartial(stripped_content, writer),
+        .args => try self.renderArgs(writer),
+        .extend => try self.renderExtend(writer),
+        .@"for" => try self.renderFor(context, stripped_content, writer),
+        .@"if" => try self.renderIf(context, stripped_content, writer),
+    }
 }
 
 fn stripComments(self: Node, content: []const u8) ![]const u8 {
@@ -93,30 +151,23 @@ fn stripComments(self: Node, content: []const u8) ![]const u8 {
     return try buf.toOwnedSlice();
 }
 
-fn renderClose(self: Node) []const u8 {
-    return switch (self.token.mode) {
-        .zig, .html, .markdown, .partial, .args, .extend => "",
-        .@"for", .@"if" => "\n}\n",
-    };
+fn renderClose(self: Node, writer: anytype) !void {
+    switch (self.token.mode) {
+        .@"for", .@"if" => try writer.writeAll("\n}\n"),
+        .zig, .html, .markdown, .partial, .args, .extend => {},
+    }
 }
 
-fn renderZig(self: Node, content: []const u8) ![]const u8 {
+fn renderZig(self: Node, content: []const u8, writer: anytype) !void {
     var html_it = self.htmlIterator(content);
-    var buf = std.ArrayList(u8).init(self.allocator);
-    defer buf.deinit();
 
     while (html_it.next()) |line| {
         const mode = getHtmlLineMode(line);
         switch (mode) {
-            .html => try buf.appendSlice(try self.renderHtml(line, .{})),
-            .zig => {
-                try buf.appendSlice(line);
-                try buf.append('\n');
-            },
+            .html => try self.renderHtml(line, .{}, writer),
+            .zig => try writer.print("{s}\n", .{line}),
         }
     }
-
-    return try buf.toOwnedSlice();
 }
 
 const HtmlIterator = struct {
@@ -225,10 +276,14 @@ const Syntax = struct {
     pub const tag_close = ">";
 };
 
-fn renderHtml(self: *const Node, content: []const u8, writer_options: WriterOptions) ![]const u8 {
+fn renderHtml(
+    self: *const Node,
+    content: []const u8,
+    writer_options: WriterOptions,
+    writer: anytype,
+) !void {
     var index: usize = 0;
 
-    var buf = std.ArrayList(u8).init(self.allocator);
     var ref_buf = std.ArrayList(u8).init(self.allocator);
     var html_buf = std.ArrayList(u8).init(self.allocator);
     var ref_open = false;
@@ -238,14 +293,14 @@ fn renderHtml(self: *const Node, content: []const u8, writer_options: WriterOpti
         const char = content[index];
 
         if (std.mem.startsWith(u8, content[index..], Syntax.ref_open)) {
-            try buf.appendSlice(try self.renderWrite(html_buf.items, writer_options));
+            try self.renderWrite(html_buf.items, writer_options, writer);
             html_buf.clearAndFree();
             index += Syntax.ref_open.len - 1;
             ref_open = true;
         } else if (ref_open and std.mem.startsWith(u8, content[index..], Syntax.ref_close)) {
             index += Syntax.ref_close.len - 1;
             ref_open = false;
-            try buf.appendSlice(try self.renderRef(ref_buf.items, writer_options));
+            try self.renderRef(ref_buf.items, writer_options, writer);
             ref_buf.clearAndFree();
         } else if (ref_open) {
             try ref_buf.append(char);
@@ -261,16 +316,11 @@ fn renderHtml(self: *const Node, content: []const u8, writer_options: WriterOpti
         if (std.mem.eql(u8, writer_options.zmpl_writer, "zmpl.*.output_writer")) {
             try html_buf.append('\n');
         }
-        try buf.appendSlice(try self.renderWrite(
-            html_buf.items,
-            writer_options,
-        ));
+        try self.renderWrite(html_buf.items, writer_options, writer);
     }
-
-    return try buf.toOwnedSlice();
 }
 
-fn renderPartial(self: Node, content: []const u8) ![]const u8 {
+fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
     if (self.token.args == null) {
         std.debug.print(
             "Expected `@partial` with name, no name was given [{}->{}]: '{s}'\n",
@@ -357,7 +407,7 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
         return error.ZmplSyntaxError;
     }
 
-    const slots = try self.renderSlots(content);
+    const slots = try self.generateSlots(content);
 
     var args_buf = std.ArrayList([]const u8).init(self.allocator);
     defer args_buf.deinit();
@@ -435,7 +485,7 @@ fn renderPartial(self: Node, content: []const u8) ![]const u8 {
         \\}}
         \\
     ;
-    return try std.fmt.allocPrint(self.allocator, template, .{
+    try writer.print(template, .{
         slots.content_generators,
         slots.items,
         generated_partial_name.?,
@@ -448,7 +498,7 @@ const Slots = struct {
     items: []const u8,
 };
 
-fn renderSlots(self: Node, content: []const u8) !Slots {
+fn generateSlots(self: Node, content: []const u8) !Slots {
     var slots_buf = std.ArrayList(u8).init(self.allocator);
     defer slots_buf.deinit();
 
@@ -466,12 +516,15 @@ fn renderSlots(self: Node, content: []const u8) !Slots {
             try std.fmt.allocPrint(self.allocator,
                 \\var {0s}_buf = std.ArrayList(u8).init(allocator);
                 \\const {0s}_writer = {0s}_buf.writer();
-                \\{1s}
                 \\
             , .{
                 slot_name,
-                try self.renderHtml(util.strip(slot), .{ .zmpl_writer = slot_writer }),
             }),
+        );
+        try self.renderHtml(
+            util.strip(slot),
+            .{ .zmpl_writer = slot_writer },
+            slots_content_buf.writer(),
         );
 
         try slots_buf.appendSlice(try std.fmt.allocPrint(
@@ -489,19 +542,18 @@ fn renderSlots(self: Node, content: []const u8) !Slots {
     };
 }
 
-fn renderArgs(self: Node) ![]const u8 {
-    // const fields = self.token.mode_line["@args".len..];
-    return std.fmt.allocPrint(
-        self.allocator,
+fn renderArgs(self: Node, writer: anytype) !void {
+    _ = self;
+    try writer.print(
         \\
     ,
         .{},
     );
 }
 
-fn renderExtend(self: Node) ![]const u8 {
+fn renderExtend(self: Node, writer: anytype) !void {
     const extend = self.token.mode_line["@extend".len..];
-    return std.fmt.allocPrint(self.allocator,
+    try writer.print(
         \\__extend = __zmpl.find({s});
         \\
     , .{try util.zigStringEscape(
@@ -510,11 +562,11 @@ fn renderExtend(self: Node) ![]const u8 {
     )});
 }
 
-fn renderFor(self: Node, context: Context, content: []const u8) ![]const u8 {
+fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype) !void {
     // If we have already rendered once, re-rendering the for loop makes no sense so we can just
     // write the remaining content directly. This can happen when a child node of the for loop
     // contains whitespace etc.
-    if (context != .initial) return try self.renderHtml(content, .{});
+    if (context != .initial) return try self.renderHtml(content, .{}, writer);
 
     const expected_format_message = "Expected format `for (foo) |arg| { in {s}";
     const mode_line = self.token.mode_line["@for".len..];
@@ -545,9 +597,6 @@ fn renderFor(self: Node, context: Context, content: []const u8) ![]const u8 {
 
     const block_args = util.strip(rest[block_args_start.? + 1 .. block_args_end.? + 1]);
 
-    var buf = std.ArrayList(u8).init(self.allocator);
-    const writer = buf.writer();
-
     var for_args_joined = std.ArrayList(u8).init(self.allocator);
     var for_args_writer = for_args_joined.writer();
     var for_args_it = std.mem.tokenizeScalar(u8, for_args, ',');
@@ -569,13 +618,12 @@ fn renderFor(self: Node, context: Context, content: []const u8) ![]const u8 {
 
     try writer.print(
         \\for ({s}) |{s}| {{
-        \\    {s}
         \\
     ,
-        .{ try for_args_joined.toOwnedSlice(), block_args, try self.renderHtml(content, .{}) },
+        .{ try for_args_joined.toOwnedSlice(), block_args },
     );
 
-    return try buf.toOwnedSlice();
+    try self.renderHtml(content, .{}, writer);
 }
 
 fn parseZmpl(self: Node, content: []const u8) ![]const u8 {
@@ -631,10 +679,7 @@ fn parseZmpl(self: Node, content: []const u8) ![]const u8 {
     return try buf.toOwnedSlice();
 }
 
-fn renderIf(self: Node, context: Context, content: []const u8) ![]const u8 {
-    var buf = std.ArrayList(u8).init(self.allocator);
-    const writer = buf.writer();
-
+fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype) !void {
     if (context == .initial) {
         // When we render nodes, we render child nodes that exist within their bounds as we work
         // through each node. We only want to render the initial `if` statement defined by this
@@ -649,7 +694,7 @@ fn renderIf(self: Node, context: Context, content: []const u8) ![]const u8 {
 
     const content_end = util.indexOfWord(content, else_token) orelse content.len;
     // TODO: We should render for the mode scoped above us instead of assuming HTML.
-    try writer.writeAll(try self.renderHtml(content[0..content_end], .{}));
+    try self.renderHtml(content[0..content_end], .{}, writer);
 
     var it = ElseIterator{ .input = content, .index = 0, .node = self };
     while (try it.next()) |token| {
@@ -658,10 +703,8 @@ fn renderIf(self: Node, context: Context, content: []const u8) ![]const u8 {
             try if_else_statement.render(writer);
         }
         try writer.writeAll(" {\n");
-        try writer.writeAll(try self.renderHtml(token.content, .{}));
+        try self.renderHtml(token.content, .{}, writer);
     }
-
-    return try buf.toOwnedSlice();
 }
 
 const ElseIterator = struct {
@@ -802,35 +845,44 @@ pub fn parsePartialArgs(self: Node, input: []const u8) ![]Arg {
     return try args.toOwnedSlice();
 }
 
-fn renderWrite(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
-    var buf = std.ArrayList(u8).init(self.allocator);
-    defer buf.deinit();
-    const writer = buf.writer();
-    try std.zig.stringEscape(input, "", .{}, writer);
-
-    return std.fmt.allocPrint(
-        self.allocator,
-        \\_ = try {s}.write(zmpl.chomp("{s}"));
+fn renderWrite(
+    self: Node,
+    input: []const u8,
+    writer_options: WriterOptions,
+    writer: anytype,
+) !void {
+    return writer.print(
+        \\_ = try {s}.write(zmpl.chomp({s}));
         \\
     ,
-        .{ writer_options.zmpl_writer, buf.items },
+        .{ writer_options.zmpl_writer, try util.zigStringEscape(self.allocator, input) },
     );
 }
 
-fn renderRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
+fn renderRef(
+    self: Node,
+    input: []const u8,
+    writer_options: WriterOptions,
+    writer: anytype,
+) !void {
     const stripped = util.strip(input);
     if (std.mem.startsWith(u8, stripped, ".") or std.mem.startsWith(u8, stripped, "$.")) {
-        return try self.renderDataRef(stripped[1..], writer_options);
+        try self.renderDataRef(stripped[1..], writer_options, writer);
     } else if (std.mem.indexOfAny(u8, stripped, " \"+-/*{}!?()")) |_| {
-        return try self.renderZigLiteral(stripped, writer_options);
+        try self.renderZigLiteral(stripped, writer_options, writer);
     } else {
-        return try self.renderValueRef(stripped, writer_options);
+        try self.renderValueRef(stripped, writer_options, writer);
     }
 }
 
-fn renderDataRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
-    return std.fmt.allocPrint(
-        self.allocator,
+fn renderDataRef(
+    self: Node,
+    input: []const u8,
+    writer_options: WriterOptions,
+    writer: anytype,
+) !void {
+    _ = self;
+    try writer.print(
         \\try __zmpl.sanitize({s}, try zmpl.getValueString("{s}"));
         \\
     ,
@@ -838,7 +890,12 @@ fn renderDataRef(self: Node, input: []const u8, writer_options: WriterOptions) !
     );
 }
 
-fn renderValueRef(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
+fn renderValueRef(
+    self: Node,
+    input: []const u8,
+    writer_options: WriterOptions,
+    writer: anytype,
+) !void {
     var arg_name: [32]u8 = undefined;
     util.generateVariableName(&arg_name);
     var blk_label: [32]u8 = undefined;
@@ -848,10 +905,9 @@ fn renderValueRef(self: Node, input: []const u8, writer_options: WriterOptions) 
     var index_arg: [32]u8 = undefined;
     util.generateVariableName(&index_arg);
 
-    return if (std.mem.containsAtLeast(u8, input, 1, ".")) blk: {
+    if (std.mem.containsAtLeast(u8, input, 1, ".")) {
         const start = std.mem.indexOfScalar(u8, input, '.').?;
-        break :blk try std.fmt.allocPrint(
-            self.allocator,
+        try writer.print(
             \\_ = if (comptime __zmpl.isZmplValue(@TypeOf({1s})))
             \\       try __zmpl.sanitize({0s}, try zmpl.maybeRef({1s}, {2s}))
             \\    else if (comptime @TypeOf({3s}) == __zmpl.Data.LayoutContent)
@@ -867,8 +923,7 @@ fn renderValueRef(self: Node, input: []const u8, writer_options: WriterOptions) 
                 input,
             },
         );
-    } else try std.fmt.allocPrint(
-        self.allocator,
+    } else try writer.print(
         \\const {0s} = {1s};
         \\_ = if (comptime @TypeOf({0s}) == __zmpl.Data.Slot)
         \\        try {2s}.write({0s}.data)
@@ -885,9 +940,14 @@ fn renderValueRef(self: Node, input: []const u8, writer_options: WriterOptions) 
     );
 }
 
-fn renderZigLiteral(self: Node, input: []const u8, writer_options: WriterOptions) ![]const u8 {
-    return std.fmt.allocPrint(
-        self.allocator,
+fn renderZigLiteral(
+    self: Node,
+    input: []const u8,
+    writer_options: WriterOptions,
+    writer: anytype,
+) !void {
+    _ = self;
+    try writer.print(
         \\_ = try {s}.write({s});
         \\
     ,

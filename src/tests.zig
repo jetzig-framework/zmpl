@@ -756,8 +756,6 @@ test "if/else" {
             \\   
             \\
             \\
-            \\  bar is 1
-            \\
             \\  expected: `missing` is not here
             \\
             \\  corge says "I am corge"
@@ -765,6 +763,8 @@ test "if/else" {
             \\  corge confirms "I am corge"
             \\
             \\  expected: else
+            \\
+            \\  bar is 1
             \\
             \\  expected truth
             \\

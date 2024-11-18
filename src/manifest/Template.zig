@@ -45,6 +45,7 @@ pub const Token = struct {
     index: usize,
     depth: usize,
     args: ?[]const u8 = null,
+    path: []const u8,
 
     pub fn startOfContent(self: Token) usize {
         return self.start + self.mode_line.len;
@@ -96,10 +97,10 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
     var buf = std.ArrayList(u8).init(self.allocator);
     defer buf.deinit();
 
-    const writer = buf.writer();
+    var writer = Node.Writer{ .buf = &buf, .token = self.tokens.items[0] };
 
     try self.renderHeader(writer, options);
-    try self.root_node.compile(self.input, writer, options);
+    try self.root_node.compile(self.input, &writer, options);
     try self.renderFooter(writer);
 
     self.state = .compiled;
@@ -243,6 +244,7 @@ fn appendToken(self: *Template, context: Context, end: usize, depth: usize) !voi
             .args = if (args.len > 0) args else null,
             .index = self.tokens.items.len,
             .depth = depth,
+            .path = self.path,
         });
     } else unreachable;
 }
@@ -258,6 +260,7 @@ fn appendRootToken(self: *Template) !void {
         .args = &.{},
         .index = self.tokens.items.len,
         .depth = 0,
+        .path = self.path,
     });
 }
 

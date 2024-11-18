@@ -14,10 +14,6 @@
     unexpected here
 @end
 
-@if ($.foo.bar) |bar|
-  bar is {{bar}}
-@end
-
 @if ($.foo.missing) |missing|
   unexpected: {{missing}}
 @else
@@ -40,6 +36,10 @@
   unexpected
 @else
   expected: else
+@end
+
+@if ($.foo.bar) |bar|
+  bar is {{bar}}
 @end
 
 @if ($.foo.truthy)

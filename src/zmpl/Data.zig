@@ -2058,23 +2058,31 @@ pub const ZmplError = error{
     ZmplCoerceError,
 };
 
-pub fn zmplError(err: ErrorName, comptime message: []const u8, args: anytype) ZmplError {
-    if (log_errors) {
-        std.debug.print(
-            zmpl.colors.cyan("[zmpl]") ++ " " ++
-                zmpl.colors.red("[error]") ++ " " ++
-                message ++ "\n",
-            args,
-        );
-    }
-
-    return switch (err) {
+pub fn zmplError(comptime err_name: ErrorName, comptime message: []const u8, args: anytype) ZmplError {
+    const err = switch (err_name) {
         .ref => error.ZmplUnknownDataReferenceError,
         .type => error.ZmplTypeError,
         .syntax => error.ZmplSyntaxError,
         .constant => error.ZmplConstantError,
         .compare => error.ZmplCompareError,
     };
+
+    if (log_errors) {
+        std.debug.print(
+            std.fmt.comptimePrint(
+                "{s} [{s}:{s}] {s}\n",
+                .{
+                    zmpl.colors.cyan("[zmpl]"),
+                    zmpl.colors.yellow("error"),
+                    zmpl.colors.bright(.red, @errorName(err)),
+                    zmpl.colors.red(message),
+                },
+            ),
+            args,
+        );
+    }
+
+    return err;
 }
 
 pub fn unknownRef(name: []const u8) ZmplError {

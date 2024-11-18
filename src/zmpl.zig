@@ -15,6 +15,8 @@ pub const Template = @import("zmpl/Template.zig");
 pub const manifest = Template.manifest;
 pub const colors = @import("zmpl/colors.zig");
 pub const Format = @import("zmpl/Format.zig");
+pub const debug = @import("zmpl/debug.zig");
+
 pub const isZmplValue = Data.isZmplValue;
 
 pub const InitOptions = struct {

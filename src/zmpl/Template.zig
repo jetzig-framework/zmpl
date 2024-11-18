@@ -5,6 +5,7 @@ pub const zmd = @import("zmd");
 pub const manifest = @import("zmpl.manifest").__Manifest;
 
 const Data = @import("Data.zig");
+const debug = @import("debug.zig");
 
 name: []const u8,
 prefix: []const u8,
@@ -22,13 +23,22 @@ pub const RenderOptions = struct {
 };
 
 pub fn render(self: Template, data: *Data) ![]const u8 {
-    return try self.renderWithOptions(data, .{});
+    return self.renderWithOptions(data, .{});
 }
 
 pub fn renderWithOptions(self: Template, data: *Data, options: RenderOptions) ![]const u8 {
-    if (options.layout) |layout| {
-        return try self._renderWithLayout(layout, data);
-    } else {
-        return try self._render(data);
-    }
+    return if (options.layout) |layout|
+        self._renderWithLayout(layout, data) catch |err| {
+            if (@errorReturnTrace()) |stack_trace| {
+                try debug.printSourceInfo(data.allocator(), err, stack_trace);
+            }
+            return err;
+        }
+    else
+        self._render(data) catch |err| {
+            if (@errorReturnTrace()) |stack_trace| {
+                try debug.printSourceInfo(data.allocator(), err, stack_trace);
+            }
+            return err;
+        };
 }
