@@ -68,16 +68,29 @@ fn render(self: Node, context: Context, content: []const u8, options: type) ![]c
             pub const root = .{ "<div>", "</div>" };
         };
 
+    const stripped_content = try self.stripComments(content);
     return switch (self.token.mode) {
-        .zig => try self.renderZig(content),
-        .html => try self.renderHtml(content, .{}),
-        .markdown => try self.renderHtml(try self.renderMarkdown(content, markdown_fragments), .{}),
-        .partial => try self.renderPartial(content),
+        .zig => try self.renderZig(stripped_content),
+        .html => try self.renderHtml(stripped_content, .{}),
+        .markdown => try self.renderHtml(try self.renderMarkdown(stripped_content, markdown_fragments), .{}),
+        .partial => try self.renderPartial(stripped_content),
         .args => try self.renderArgs(),
         .extend => try self.renderExtend(),
-        .@"for" => try self.renderFor(context, content),
-        .@"if" => try self.renderIf(context, content),
+        .@"for" => try self.renderFor(context, stripped_content),
+        .@"if" => try self.renderIf(context, stripped_content),
     };
+}
+
+fn stripComments(self: Node, content: []const u8) ![]const u8 {
+    const comment_token = "@//";
+
+    var buf = std.ArrayList(u8).init(self.allocator);
+    var it = util.tokenizeRetainToken(content, "\n");
+    while (it.next()) |line| {
+        if (util.startsWithIgnoringWhitespace(line, comment_token)) continue;
+        try buf.appendSlice(line);
+    }
+    return try buf.toOwnedSlice();
 }
 
 fn renderClose(self: Node) []const u8 {
@@ -86,6 +99,7 @@ fn renderClose(self: Node) []const u8 {
         .@"for", .@"if" => "\n}\n",
     };
 }
+
 fn renderZig(self: Node, content: []const u8) ![]const u8 {
     var html_it = self.htmlIterator(content);
     var buf = std.ArrayList(u8).init(self.allocator);

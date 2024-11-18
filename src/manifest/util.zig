@@ -92,6 +92,27 @@ const WordTokenIterator = struct {
     }
 };
 
+const RetainTokenIterator = struct {
+    index: usize,
+    input: []const u8,
+    token: []const u8,
+
+    pub fn next(self: *RetainTokenIterator) ?[]const u8 {
+        if (self.index >= self.input.len) return null;
+
+        const window = self.input[self.index..];
+        const match_index = std.mem.indexOf(u8, window, self.token) orelse window.len - 1;
+        const result = window[0 .. match_index + 1];
+        self.index += result.len;
+        return result;
+    }
+};
+
+/// Tokenize an input string with the token included in each slice.
+pub fn tokenizeRetainToken(input: []const u8, token: []const u8) RetainTokenIterator {
+    return .{ .index = 0, .input = input, .token = token };
+}
+
 /// Generate a random variable name with enough entropy to be considered unique.
 pub fn generateVariableName(buf: *[32]u8) void {
     const first_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";

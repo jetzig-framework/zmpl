@@ -804,3 +804,21 @@ test "for with zmpl value" {
         try std.testing.expect(false);
     }
 }
+
+test "comments" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    if (zmpl.find("comments")) |template| {
+        const output = try template.render(&data);
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\
+            \\
+            \\<div>uncommented</div>
+            \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
