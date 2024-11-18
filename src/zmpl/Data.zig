@@ -1292,7 +1292,11 @@ pub const Value = union(ValueType) {
         return switch (CET) {
             []const u8 => switch (self) {
                 .string => |capture| capture.value,
-                else => error.ZmplIncompatibleTypeError,
+                else => zmplError(
+                    .compare,
+                    "Cannot compare Zmpl `{s}` with `{s}`",
+                    .{ @tagName(self), @typeName(T) },
+                ),
             },
             f128, f64, f32 => switch (self) {
                 .float => |capture| @floatCast(capture.value),
@@ -1300,7 +1304,11 @@ pub const Value = union(ValueType) {
                     switch (err) {
                     error.InvalidCharacter => error.ZmplCoerceError,
                 },
-                else => error.ZmplIncompatibleTypeError,
+                else => zmplError(
+                    .compare,
+                    "Cannot compare Zmpl `{s}` with `{s}`",
+                    .{ @tagName(self), @typeName(T) },
+                ),
             },
             usize, u8, u16, u32, u64, u128, isize, i8, i16, i32, i64, i128 => switch (self) {
                 .integer => |capture| @intCast(capture.value),
@@ -1310,18 +1318,34 @@ pub const Value = union(ValueType) {
                 },
                 .datetime => |capture| switch (CET) {
                     u128, u64, i64, i128 => @intCast(capture.value.microseconds()),
-                    else => error.ZmplIncompatibleTypeError,
+                    else => zmplError(
+                        .compare,
+                        "Cannot compare Zmpl `{s}` with `{s}`",
+                        .{ @tagName(self), @typeName(T) },
+                    ),
                 },
-                else => error.ZmplIncompatibleTypeError,
+                else => zmplError(
+                    .compare,
+                    "Cannot compare Zmpl `{s}` with `{s}`",
+                    .{ @tagName(self), @typeName(T) },
+                ),
             },
             bool => switch (self) {
                 .boolean => |capture| capture.value,
                 .string => |capture| std.mem.eql(u8, capture.value, "1"),
-                else => error.ZmplIncompatibleTypeError,
+                else => |tag| zmplError(
+                    .compare,
+                    "Cannot compare Zmpl `{s}` with `{s}`",
+                    .{ @tagName(tag), @typeName(T) },
+                ),
             },
             jetcommon.types.DateTime => switch (self) {
                 .datetime => |capture| capture.value,
-                else => error.ZmplIncompatibleTypeError,
+                else => zmplError(
+                    .compare,
+                    "Cannot compare Zmpl `{s}` with `{s}`",
+                    .{ @tagName(self), @typeName(T) },
+                ),
             },
             // FIXME: This can be made redundant by using appropriate types for `self` in a few
             // places:
@@ -1331,12 +1355,20 @@ pub const Value = union(ValueType) {
             else => switch (@typeInfo(CET)) {
                 .pointer => if (isString(CET)) switch (self) {
                     .string => |capture| capture.value,
-                    else => error.ZmplIncompatibleTypeError,
+                    else => zmplError(
+                        .compare,
+                        "Cannot compare Zmpl `{s}` with `{s}`",
+                        .{ @tagName(self), @typeName(T) },
+                    ),
                 },
                 .@"enum" => switch (self) {
                     .string => |capture| std.meta.stringToEnum(CET, capture.value) orelse
                         error.ZmplCoerceError,
-                    else => error.ZmplIncompatibleTypeError,
+                    else => zmplError(
+                        .compare,
+                        "Cannot compare Zmpl `{s}` with `{s}`",
+                        .{ @tagName(self), @typeName(T) },
+                    ),
                 },
                 else => @compileError("Cannot corece Zmpl Value to `" ++ @typeName(T) ++ "`"),
             },
@@ -2023,7 +2055,6 @@ pub const ZmplError = error{
     ZmplSyntaxError,
     ZmplConstantError,
     ZmplCompareError,
-    ZmplIncompatibleTypeError,
     ZmplCoerceError,
 };
 
@@ -2206,7 +2237,7 @@ test "Value.compareT integer" {
     try std.testing.expect(try a.compareT(.greater_or_equal, usize, 0));
     try std.testing.expect(try a.compareT(.greater_or_equal, usize, 1));
     try std.testing.expectError(
-        error.ZmplIncompatibleTypeError,
+        error.ZmplCompareError,
         a.compareT(.equal, []const u8, "1"),
     );
 }
@@ -2224,7 +2255,7 @@ test "Value.compareT float" {
     try std.testing.expect(try a.compareT(.greater_or_equal, f64, 0.9));
     try std.testing.expect(try a.compareT(.greater_or_equal, f64, 1.0));
     try std.testing.expectError(
-        error.ZmplIncompatibleTypeError,
+        error.ZmplCompareError,
         a.compareT(.equal, []const u8, "1.0"),
     );
 }
@@ -2248,7 +2279,7 @@ test "Value.compareT datetime" {
     try std.testing.expect(try a.compareT(.greater_or_equal, u64, 1731834127 * 1_000_000));
     try std.testing.expect(try a.compareT(.greater_or_equal, u64, 1731834128 * 1_000_000));
     try std.testing.expectError(
-        error.ZmplIncompatibleTypeError,
+        error.ZmplCompareError,
         a.compareT(.equal, []const u8, "1731834128"),
     );
 }
@@ -2256,7 +2287,7 @@ test "Value.compareT datetime" {
 test "Value.compareT object" {
     const a = Value{ .object = undefined };
     try std.testing.expectError(
-        error.ZmplIncompatibleTypeError,
+        error.ZmplCompareError,
         a.compareT(.equal, []const u8, "foo"),
     );
 }
@@ -2264,7 +2295,7 @@ test "Value.compareT object" {
 test "Value.compareT array" {
     const a = Value{ .array = undefined };
     try std.testing.expectError(
-        error.ZmplIncompatibleTypeError,
+        error.ZmplCompareError,
         a.compareT(.equal, []const u8, "foo"),
     );
 }

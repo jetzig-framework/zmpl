@@ -5,6 +5,10 @@ if_ast: std.zig.Ast.full.If,
 
 const IfStatement = @This();
 
+const wrap_eql_open = "try zmpl.compare(.equal, ";
+const wrap_eql_close_true = ", true)";
+const wrap_eql_close_false = ", false)";
+
 pub fn parse(allocator: std.mem.Allocator, input: []const u8) !std.zig.Ast {
     const source = try std.mem.concatWithSentinel(
         allocator,
@@ -36,9 +40,14 @@ pub fn render(self: IfStatement, writer: anytype) !void {
         const node: std.zig.Ast.Node.Index = @intCast(index);
         if (tag == .if_simple) {
             try writer.writeAll("if (");
-            try self.writeNode(data[node].lhs, writer);
-            try writer.writeAll(")");
             const components = self.ast.ifSimple(node);
+
+            const wrap_true = self.isWrapTrue(components.payload_token != null, node);
+            if (wrap_true) try writer.writeAll(wrap_eql_open);
+            try self.writeNode(data[node].lhs, writer);
+            if (wrap_true) try writer.writeAll(wrap_eql_close_true);
+
+            try writer.writeAll(")");
             if (components.payload_token) |payload_token| {
                 try writer.print(" |{s}|", .{self.ast.tokenSlice(payload_token)});
             }
@@ -54,9 +63,36 @@ fn writeNode(self: IfStatement, node: std.zig.Ast.Node.Index, writer: anytype) !
     const data = self.ast.nodes.items(.data);
     switch (tags[node]) {
         .bool_and, .bool_or => {
+            {
+                const wrap_true = self.isWrapTrue(false, data[node].lhs);
+                if (wrap_true) try writer.writeAll(wrap_eql_open);
+            }
+
             try self.writeNode(data[node].lhs, writer);
+
+            {
+                const wrap_true = self.isWrapTrue(false, data[node].lhs);
+                if (wrap_true) try writer.writeAll(wrap_eql_close_true);
+            }
+
             try writer.print(" {s} ", .{self.ast.tokenSlice(main_tokens[node])});
+
+            {
+                const wrap_true = self.isWrapTrue(false, data[node].rhs);
+                if (wrap_true) try writer.writeAll(wrap_eql_open);
+            }
+
             try self.writeNode(data[node].rhs, writer);
+
+            {
+                const wrap_true = self.isWrapTrue(false, data[node].rhs);
+                if (wrap_true) try writer.writeAll(wrap_eql_close_true);
+            }
+        },
+        .bool_not => {
+            try writer.writeAll(wrap_eql_open);
+            try self.writeNode(data[node].lhs, writer);
+            try writer.writeAll(wrap_eql_close_false);
         },
         .equal_equal,
         .bang_equal,
@@ -85,12 +121,23 @@ fn writeNode(self: IfStatement, node: std.zig.Ast.Node.Index, writer: anytype) !
         },
         .grouped_expression => {
             try writer.writeByte('(');
+
+            const wrap_true = self.isWrapTrue(false, node);
+            if (wrap_true) try writer.writeAll(wrap_eql_open);
             try self.writeNode(data[node].lhs, writer);
+            if (wrap_true) try writer.writeAll(wrap_eql_close_true);
+
             try writer.writeByte(')');
         },
         .@"if" => {
+            const components = self.ast.ifFull(node);
             try writer.writeAll("if (");
+
+            const wrap_true = self.isWrapTrue(components.payload_token == null, node);
+            if (wrap_true) try writer.writeAll(wrap_eql_open);
             try self.writeNode(data[node].lhs, writer);
+            if (wrap_true) try writer.writeAll(wrap_eql_close_true);
+
             try writer.writeByte(')');
             const extra = self.ast.extraData(data[node].rhs, std.zig.Ast.Node.If);
             try writer.writeByte(' ');
@@ -99,22 +146,43 @@ fn writeNode(self: IfStatement, node: std.zig.Ast.Node.Index, writer: anytype) !
             try self.writeNode(extra.else_expr, writer);
             try writer.writeByte(')');
 
-            const components = self.ast.ifFull(node);
             if (components.payload_token) |payload_token| {
                 try writer.print(" |{s}| ", .{self.ast.tokenSlice(payload_token)});
             }
         },
         else => |tag| {
-            if (false) std.debug.print("tag: {s}\n", .{@tagName(tag)});
+            if (comptime false) std.debug.print("tag: {s}\n", .{@tagName(tag)});
             const span = self.ast.nodeToSpan(node);
             try writer.writeAll(self.ast.source[span.start..span.end]);
         },
     }
 }
 
+inline fn isOperator(tag: std.zig.Ast.Node.Tag) bool {
+    return switch (tag) {
+        .equal_equal,
+        .bang_equal,
+        .less_than,
+        .less_or_equal,
+        .greater_than,
+        .greater_or_equal,
+        => true,
+        else => false,
+    };
+}
+
+fn isWrapTrue(self: IfStatement, has_payload: bool, node: std.zig.Ast.Node.Index) bool {
+    const tags = self.ast.nodes.items(.tag);
+    const data = self.ast.nodes.items(.data);
+
+    if (has_payload or isOperator(tags[data[node].lhs])) return false;
+
+    return true;
+}
+
 test "simple" {
     try expectIfStatement(
-        "if (foo and bar)",
+        "if (try zmpl.compare(.equal, try zmpl.compare(.equal, foo, true) and try zmpl.compare(.equal, bar, true), true))",
         "_ = if (foo and bar) {}",
     );
 }
@@ -163,21 +231,21 @@ test "less than or equal" {
 
 test "and with equal" {
     try expectIfStatement(
-        "if (try zmpl.compare(.equal, foo, 1) and try zmpl.compare(.equal, bar, 2))",
+        "if (try zmpl.compare(.equal, try zmpl.compare(.equal, try zmpl.compare(.equal, foo, 1), true) and try zmpl.compare(.equal, try zmpl.compare(.equal, bar, 2), true), true))",
         "_ = if (foo == 1 and bar == 2) {}",
     );
 }
 
 test "or with equal" {
     try expectIfStatement(
-        "if (try zmpl.compare(.equal, foo, 1) or try zmpl.compare(.equal, bar, 2))",
+        "if (try zmpl.compare(.equal, try zmpl.compare(.equal, try zmpl.compare(.equal, foo, 1), true) or try zmpl.compare(.equal, try zmpl.compare(.equal, bar, 2), true), true))",
         "_ = if (foo == 1 or bar == 2) {}",
     );
 }
 
 test "nested if" {
     try expectIfStatement(
-        "if ((try zmpl.compare(.equal, foo, if (true) 1 else 0))) or try zmpl.compare(.equal, bar, 2))",
+        "if (try zmpl.compare(.equal, (try zmpl.compare(.equal, foo, if (true) 1 else 0))) or try zmpl.compare(.equal, try zmpl.compare(.equal, bar, 2), true), true))",
         "_ = if ((foo == if (true) 1 else 0) or bar == 2) {}",
     );
 }
@@ -186,6 +254,13 @@ test "if with capture" {
     try expectIfStatement(
         "if (foo) |capture|",
         "_ = if (foo) |capture| {}",
+    );
+}
+
+test "simple if without capture" {
+    try expectIfStatement(
+        "if (try zmpl.compare(.equal, foo, true))",
+        "_ = if (foo) {}",
     );
 }
 

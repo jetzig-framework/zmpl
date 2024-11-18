@@ -739,6 +739,8 @@ test "if/else" {
     try qux.put("quux", 4);
 
     try foo.put("corge", "I am corge");
+    try foo.put("truthy", true);
+    try foo.put("falsey", false);
 
     if (zmpl.find("if_else")) |template| {
         const output = try template.render(&data);
@@ -763,6 +765,10 @@ test "if/else" {
             \\  corge confirms "I am corge"
             \\
             \\  expected: else
+            \\
+            \\  expected truth
+            \\
+            \\  another expected truth
             \\
         , output);
     } else {

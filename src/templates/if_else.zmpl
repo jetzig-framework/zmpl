@@ -41,3 +41,19 @@
 @else
   expected: else
 @end
+
+@if ($.foo.truthy)
+  expected truth
+@end
+
+@if ($.foo.truthy and !$.foo.falsey)
+  another expected truth
+@end
+
+@if ($.foo.falsey)
+  unexpected falsehood
+@end
+
+@if ($.foo.nonexistent) |_|
+  unexpected nonexistent
+@end
