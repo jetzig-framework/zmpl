@@ -114,8 +114,6 @@ pub fn compile(
 
         try writer.writeAll(try std.fmt.allocPrint(self.allocator,
             \\const {0s} = __Manifest.Template{{
-            \\  ._render = {0s}_render,
-            \\  ._renderWithLayout = {0s}_renderWithLayout,
             \\  .key = "{2s}",
             \\  .name = "{0s}",
             \\  .prefix = "{1s}",

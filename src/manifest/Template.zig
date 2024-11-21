@@ -571,10 +571,11 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
     );
     const header = try std.fmt.allocPrint(
         self.allocator,
-        \\pub fn {0s}_render{1s}(zmpl: *__zmpl.Data, {2s}) anyerror![]const u8 {{
+        \\pub fn {0s}_render{1s}(zmpl: *__zmpl.Data, Context: type, context: Context, {2s}) anyerror![]const u8 {{
         \\{3s}
         \\    var data = zmpl;
         \\    zmpl.noop(**__zmpl.Data, &data);
+        \\    zmpl.noop(Context, context);
         \\    const allocator = zmpl.allocator();
         \\    var __extend: ?__Manifest.Template = null;
         \\    if (__extend) |*__capture| zmpl.noop(*__Manifest.Template, __capture);
@@ -603,7 +604,7 @@ fn renderFooter(self: Template, writer: anytype) !void {
         \\        const __inner_content = try allocator.dupe(u8, zmpl.output_buf.items);
         \\        zmpl.content = .{ .data = zmpl.strip(__inner_content) };
         \\        zmpl.output_buf.clearAndFree();
-        \\        const __content = try __capture._render(zmpl);
+        \\        const __content = try __capture.render(zmpl, Context, context, .{});
         \\        return __content;
         \\    } else {
         \\        return try zmpl.parent_allocator.dupe(u8, zmpl.chomp(zmpl.output_buf.items));
@@ -615,11 +616,14 @@ fn renderFooter(self: Template, writer: anytype) !void {
         try writer.writeAll(try std.fmt.allocPrint(
             self.allocator,
             \\pub fn {0s}_renderWithLayout(
-            \\    layout: __zmpl.manifest.Template,
+            \\    layout: __zmpl.Manifest.Template,
             \\    zmpl: *__zmpl.Data,
+            \\    Context: type,
+            \\    context: Context,
             \\) anyerror![]const u8 {{
             \\    _ = layout;
             \\    _ = zmpl;
+            \\    _ = context;
             \\    std.debug.print("Rendering a partial with a layout is not supported.\n", .{{}});
             \\    return error.ZmplError;
             \\}}
@@ -631,14 +635,16 @@ fn renderFooter(self: Template, writer: anytype) !void {
         try writer.writeAll(try std.fmt.allocPrint(
             self.allocator,
             \\pub fn {0s}_renderWithLayout(
-            \\    layout: __zmpl.manifest.Template,
+            \\    layout: __zmpl.Manifest.Template,
             \\    zmpl: *__zmpl.Data,
+            \\    Context: type,
+            \\    context: Context,
             \\) anyerror![]const u8 {{
-            \\    const inner_content = try {0s}_render(zmpl);
+            \\    const inner_content = try {0s}_render(zmpl, Context, context);
             \\    defer zmpl.parent_allocator.free(inner_content);
             \\    zmpl.output_buf.clearAndFree();
             \\    zmpl.content = .{{ .data = zmpl.strip(inner_content) }};
-            \\    const content = try layout._render(zmpl);
+            \\    const content = try layout.render(zmpl, Context, context, .{{}});
             \\    zmpl.output_buf.clearAndFree();
             \\    return content;
             \\}}

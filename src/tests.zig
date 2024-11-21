@@ -2,6 +2,8 @@ const std = @import("std");
 const zmpl = @import("zmpl");
 const jetcommon = @import("jetcommon");
 
+const Context = struct { foo: []const u8 = "default" };
+
 test "readme example" {
     var data = zmpl.Data.init(std.testing.allocator);
     defer data.deinit();
@@ -17,7 +19,7 @@ test "readme example" {
     try body.put("auth", auth);
 
     if (zmpl.find("example")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
 
         try std.testing.expectEqualStrings(
@@ -62,7 +64,7 @@ test "complex example" {
     try body.put("auth", auth);
 
     if (zmpl.find("complex_example")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
 
         try std.testing.expectEqualStrings(
@@ -126,7 +128,7 @@ test "direct rendering of slots (render [][]const u8 as line-separated string)" 
     defer data.deinit();
 
     if (zmpl.find("slots")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\<div>
@@ -147,7 +149,7 @@ test "javascript" {
     defer data.deinit();
 
     if (zmpl.find("javascript")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\
@@ -169,7 +171,7 @@ test "partials without blocks" {
     defer data.deinit();
 
     if (zmpl.find("partials_without_blocks")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\    <span>Blah partial content</span>
@@ -186,7 +188,7 @@ test "custom delimiters" {
     defer data.deinit();
 
     if (zmpl.find("custom_delimiters")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\<div><h1>Built-in markdown support</h1>
@@ -209,7 +211,7 @@ test ".md.zmpl extension" {
     defer data.deinit();
 
     if (zmpl.find("markdown_extension")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\<div><h1>Hello</h1>
@@ -225,7 +227,7 @@ test "default partial arguments" {
     defer data.deinit();
 
     if (zmpl.find("default_partial_arguments")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\bar, default value
@@ -241,7 +243,7 @@ test "escaping (HTML and backslash escaping" {
     defer data.deinit();
 
     if (zmpl.find("escaping")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\<div><pre class="language-html" style="font-family: Monospace;"><code>&lt;div&gt;
@@ -263,7 +265,7 @@ test "references combined with markdown" {
     try object.put("title", data.string("jetzig.dev"));
 
     if (zmpl.find("references_markdown")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\<div><h1>Test</h1>
@@ -287,7 +289,7 @@ test "partial arg type coercion" {
     try object.put("baz", data.string("qux"));
 
     if (zmpl.find("partial_arg_type_coercion")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\100
@@ -305,8 +307,10 @@ test "inheritance" {
     defer data.deinit();
 
     if (zmpl.find("inheritance_child")) |template| {
-        const output = try template.renderWithOptions(
+        const output = try template.render(
             &data,
+            Context,
+            .{},
             .{ .layout = zmpl.find("inheritance_parent3") },
         );
         defer std.testing.allocator.free(output);
@@ -343,7 +347,7 @@ test "root init" {
     try root.put("auth", auth);
 
     if (zmpl.find("example")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
 
         try std.testing.expectEqualStrings(
@@ -380,7 +384,7 @@ test "reference stripping" {
     try root.put("message", data.string("hello"));
 
     if (zmpl.find("reference_with_spaces")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
 
         try std.testing.expectEqualStrings(
@@ -424,7 +428,7 @@ test "inferred type in put/append" {
     try root.put("optional", optional);
 
     if (zmpl.find("basic")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
 
         try std.testing.expectEqualStrings(
@@ -598,7 +602,7 @@ test "iteration" {
     try root.put("objects", objects);
 
     if (zmpl.find("iteration")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\
@@ -644,7 +648,7 @@ test "datetime format" {
     try root.put("bar", bar);
 
     if (zmpl.find("datetime_format")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\<div>Tue Sep 24 19:30:35 2024</div>
@@ -679,7 +683,7 @@ test "for with partial" {
     try array.append(.{ .foo = "foo2", .bar = "bar2" });
 
     if (zmpl.find("for_with_partial")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\foo1: bar1
@@ -713,7 +717,7 @@ test "xss sanitization/raw formatter" {
     try root.put("foo", "<script>alert(':)');</script>");
 
     if (zmpl.find("xss")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\&lt;script&gt;alert(&#039;:)&#039;);&lt;/script&gt;
@@ -743,7 +747,7 @@ test "if/else" {
     try foo.put("falsey", false);
 
     if (zmpl.find("if_else")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\
@@ -788,7 +792,7 @@ test "for with zmpl value" {
     try foo.append("qux");
 
     if (zmpl.find("for_with_zmpl_value_main")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\
@@ -810,12 +814,30 @@ test "comments" {
     defer data.deinit();
 
     if (zmpl.find("comments")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
             \\
             \\
             \\<div>uncommented</div>
+            \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
+
+test "context" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    const context = Context{ .foo = "context here" };
+
+    if (zmpl.find("context")) |template| {
+        const output = try template.render(&data, Context, context, .{});
+        defer std.testing.allocator.free(output);
+        try std.testing.expectEqualStrings(
+            \\context here
             \\
         , output);
     } else {
