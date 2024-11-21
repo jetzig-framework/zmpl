@@ -103,9 +103,27 @@ See [src/templates](src/templates) for more examples.
 
 Default template path is `src/templates`. Use `-Dzmpl_templates_path=...` to set an alternative (relative or absolute) path.
 
+`render` receives four arguments:
+
+* `data`: A pointer to a `zmpl.Data`, used by references to look up template data.
+* `Context`: A type defining some predefined data that is passed to every template. `Context` **must** be the same type passed to every template, but its structure is arbitrary.
+* `context`: A value of type `Context` containing specific values. Available as `context` within every template.
+* `options`: Template render options:
+
+```zig
+pub const RenderOptions = struct {
+    /// Specify a layout to wrap the rendered content within. In the template layout, use
+    /// `{{zmpl.content}}` to render the inner content.
+    layout: ?Manifest.Template = null,
+};
+```
+
 ```zig
 const std = @import("std");
 const zmpl = @import("zmpl");
+
+const Context = struct { foo: []const u8 = "default" };
+const context = Context{ .foo = "bar" };
 
 test "readme example" {
     var data = zmpl.Data.init(std.testing.allocator);
@@ -122,7 +140,7 @@ test "readme example" {
     try body.put("auth", auth);
 
     if (zmpl.find("example")) |template| {
-        const output = try template.render(&data);
+        const output = try template.render(&data, Context, context, .{});
         defer std.testing.allocator.free(output);
 
         try std.testing.expectEqualStrings(

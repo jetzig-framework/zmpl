@@ -14,7 +14,10 @@ key: []const u8,
 
 const Template = @This();
 
+/// Options to control specific render behaviour.
 pub const RenderOptions = struct {
+    /// Specify a layout to wrap the rendered content within. In the template layout, use
+    /// `{{zmpl.content}}` to render the inner content.
     layout: ?Manifest.Template = null,
 };
 
