@@ -430,7 +430,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
                     const chain = try std.fmt.allocPrint(
                         self.allocator,
                         \\if (comptime __zmpl.isZmplValue(@TypeOf({0s})))
-                        \\    try {0s}.chainRefT(std.meta.fields(std.meta.ArgsTuple(@TypeOf({2s}_renderPartial)))[{3}].type, "{1s}",)
+                        \\    try {0s}.chainRefT(@typeInfo(@TypeOf({2s}_renderPartial)).@"fn".params[{3}].type.?, "{1s}",)
                         \\else
                         \\    {0s}{4s}{5s}
                     ,
@@ -438,8 +438,8 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
                             root,
                             it.rest(),
                             generated_partial_name.?,
-                            // index + 2 to offset `data` and `slots` args:
-                            index + 2,
+                            // index + 4 to offset `data`, `Context`, `context`, and `slots` args:
+                            index + 4,
                             if (it.rest().len == 0) "" else ".",
                             it.rest(),
                         },
@@ -450,15 +450,15 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
                         try std.fmt.allocPrint(
                             self.allocator,
                             \\if (comptime __zmpl.isZmplValue(@TypeOf({0s})))
-                            \\    try {0s}.coerce(std.meta.fields(std.meta.ArgsTuple(@TypeOf({1s}_renderPartial)))[{2}].type)
+                            \\    try {0s}.coerce(@typeInfo(@TypeOf({1s}_renderPartial)).@"fn".params[{2}].type.?)
                             \\else
                             \\   {0s}
                         ,
                             .{
                                 root,
                                 generated_partial_name.?,
-                                // index + 2 to offset `data` and `slots` args:
-                                index + 2,
+                                // index + 4 to offset `data`, `Context`, `context`, and `slots` args:
+                                index + 4,
                             },
                         ),
                     );
@@ -479,7 +479,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
         \\        __partial_data.template_decls = zmpl.template_decls;
         \\        defer __partial_data.deinit();
         \\
-        \\    const __partial_output = try {2s}_renderPartial(&__partial_data, &__slots, {3s});
+        \\    const __partial_output = try {2s}_renderPartial(&__partial_data, Context, context, &__slots, {3s});
         \\    defer allocator.free(__partial_output);
         \\    try zmpl.write(__partial_output);
         \\}}
