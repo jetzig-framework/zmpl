@@ -115,7 +115,8 @@ fn findDebugLine(
     var position: usize = 0;
 
     while (cursor < size) outer: {
-        _ = try file.read(buf[0..]);
+        const bytes_read = try file.readAll(buf[0..]);
+        if (bytes_read == 0) return null;
         for (buf) |char| {
             if (char == '\n') line += 1;
             if (line == source_location.line) {
@@ -133,7 +134,8 @@ fn findDebugLine(
 
     outer: {
         while (cursor < size) {
-            const bytes_read = try file.read(buf[0..]);
+            const bytes_read = try file.readAll(buf[0..]);
+            if (bytes_read == 0) return null;
             cursor += bytes_read;
             if (std.mem.indexOf(u8, buf[0..bytes_read], "//zmpl:debug")) |index| {
                 if (std.mem.indexOf(u8, buf[index..], "\n")) |line_index| {

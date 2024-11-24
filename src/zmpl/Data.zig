@@ -1082,7 +1082,7 @@ pub const Value = union(ValueType) {
     pub fn get(self: *const Value, key: []const u8) ?*Value {
         switch (self.*) {
             .object => |*capture| return capture.get(key),
-            inline else => unreachable,
+            inline else => return null,
         }
     }
 
@@ -2086,7 +2086,7 @@ pub fn zmplError(comptime err_name: ErrorName, comptime message: []const u8, arg
 }
 
 pub fn unknownRef(name: []const u8) ZmplError {
-    return zmplError(.ref, "Unknown data reference: `" ++ zmpl.colors.red("{s}") ++ "`", .{name});
+    return zmplError(.ref, "Unknown data reference: `{s}`", .{name});
 }
 
 fn ComptimeErasedType(T: type) type {

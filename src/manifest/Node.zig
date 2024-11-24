@@ -80,10 +80,12 @@ pub fn compile(self: Node, input: []const u8, writer: *Writer, options: type) !v
     // Write chunks for current token between child token boundaries, rendering child token
     // immediately after.
     var start: usize = self.token.startOfContent();
+    var initial = true;
     for (self.children.items) |child_node| {
         if (start < child_node.token.start) {
             const content = input[start .. child_node.token.start - 1];
-            try self.render(.initial, content, options, writer);
+            try self.render(if (initial) .initial else .secondary, content, options, writer);
+            initial = false;
         }
 
         start = child_node.token.end + 1;
@@ -97,11 +99,7 @@ pub fn compile(self: Node, input: []const u8, writer: *Writer, options: type) !v
         const last_child = self.children.items[self.children.items.len - 1];
         if (last_child.token.end + 1 < self.token.endOfContent()) {
             const content = input[last_child.token.end + 1 .. self.token.endOfContent()];
-            if (false and self.token.mode == .@"if") {
-                try self.renderElse(content, writer);
-            } else {
-                try self.render(.secondary, content, options, writer);
-            }
+            try self.render(.secondary, content, options, writer);
         }
     }
     try self.renderClose(writer);

@@ -827,17 +827,44 @@ test "comments" {
     }
 }
 
-test "context" {
+test "for with if" {
     var data = zmpl.Data.init(std.testing.allocator);
     defer data.deinit();
 
-    const context = Context{ .foo = "context here" };
+    var root = try data.object();
+    try root.put("foo", true);
+    var things = try root.put("things", .array);
+    try things.append(.{ .foo = "baz", .bar = "qux", .time = "2024-11-24T18:50:23Z" });
+    try things.append(.{ .foo = "quux", .bar = "corge", .time = "2024-11-24T18:51:23Z" });
 
-    if (zmpl.find("context")) |template| {
-        const output = try template.render(&data, Context, context, .{});
+    if (zmpl.find("for_with_if")) |template| {
+        const output = try template.render(&data, Context, .{}, .{});
         defer std.testing.allocator.free(output);
         try std.testing.expectEqualStrings(
-            \\context here
+            \\<div>foo: bar
+            \\   
+            \\    <hr/>
+            \\    <table class="table-auto">
+            \\        <tbody>
+            \\            <tr>
+            \\                <td>baz: qux
+            \\                </td>
+            \\                <td>qux: baz
+            \\                   
+            \\                </td>
+            \\            </tr>
+            \\       
+            \\            <tr>
+            \\                <td>quux: corge
+            \\                </td>
+            \\                <td>corge: quux
+            \\                   
+            \\                </td>
+            \\            </tr>
+            \\       
+            \\        </tbody>
+            \\    </table>
+            \\</div>
             \\
         , output);
     } else {
