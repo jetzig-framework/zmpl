@@ -797,38 +797,38 @@ pub const Value = union(ValueType) {
     null: NullType,
 
     /// Compare one `Value` to another `Value` recursively. Order of `Object` keys is ignored.
-    pub fn eql(self: *const Value, other: *const Value) bool {
-        switch (self.*) {
-            .object => |*capture| switch (other.*) {
-                .object => |*other_capture| return capture.eql(other_capture),
+    pub fn eql(self: Value, other: Value) bool {
+        switch (self) {
+            .object => |capture| switch (other) {
+                .object => |other_capture| return capture.eql(other_capture),
                 inline else => return false,
             },
-            .array => |*capture| switch (other.*) {
-                .array => |*other_capture| return capture.eql(other_capture),
+            .array => |capture| switch (other) {
+                .array => |other_capture| return capture.eql(other_capture),
                 inline else => return false,
             },
-            .string => |*capture| switch (other.*) {
-                .string => |*other_capture| return capture.eql(other_capture),
+            .string => |capture| switch (other) {
+                .string => |other_capture| return capture.eql(other_capture),
                 inline else => return false,
             },
-            .integer => |*capture| switch (other.*) {
-                .integer => |*other_capture| return capture.eql(other_capture),
+            .integer => |capture| switch (other) {
+                .integer => |other_capture| return capture.eql(other_capture),
                 inline else => return false,
             },
-            .float => |*capture| switch (other.*) {
-                .float => |*other_capture| return capture.eql(other_capture),
+            .float => |capture| switch (other) {
+                .float => |other_capture| return capture.eql(other_capture),
                 inline else => return false,
             },
-            .boolean => |*capture| switch (other.*) {
-                .boolean => |*other_capture| return capture.eql(other_capture),
+            .boolean => |capture| switch (other) {
+                .boolean => |other_capture| return capture.eql(other_capture),
                 inline else => return false,
             },
-            .datetime => |*capture| switch (other.*) {
-                .datetime => |*other_capture| return capture.eql(other_capture),
+            .datetime => |capture| switch (other) {
+                .datetime => |other_capture| return capture.eql(other_capture),
                 inline else => return false,
             },
-            .null => |*capture| switch (other.*) {
-                .null => |*other_capture| return capture.eql(other_capture),
+            .null => |capture| switch (other) {
+                .null => |other_capture| return capture.eql(other_capture),
                 inline else => return false,
             },
         }
@@ -1384,7 +1384,7 @@ pub const NullType = struct {
         try highlight(writer, .null, .{}, options.color);
     }
 
-    pub fn eql(self: *const NullType, other: *const NullType) bool {
+    pub fn eql(self: NullType, other: NullType) bool {
         _ = other;
         _ = self;
         return true;
@@ -1400,7 +1400,7 @@ pub const Float = struct {
     value: f128,
     allocator: std.mem.Allocator,
 
-    pub fn eql(self: *const Float, other: *const Float) bool {
+    pub fn eql(self: Float, other: Float) bool {
         return self.value == other.value;
     }
 
@@ -1417,7 +1417,7 @@ pub const Integer = struct {
     value: i128,
     allocator: std.mem.Allocator,
 
-    pub fn eql(self: *const Integer, other: *const Integer) bool {
+    pub fn eql(self: Integer, other: Integer) bool {
         return self.value == other.value;
     }
 
@@ -1434,7 +1434,7 @@ pub const Boolean = struct {
     value: bool,
     allocator: std.mem.Allocator,
 
-    pub fn eql(self: *const Boolean, other: *const Boolean) bool {
+    pub fn eql(self: Boolean, other: Boolean) bool {
         return self.value == other.value;
     }
 
@@ -1451,7 +1451,7 @@ pub const String = struct {
     value: []const u8,
     allocator: std.mem.Allocator,
 
-    pub fn eql(self: *const String, other: *const String) bool {
+    pub fn eql(self: String, other: String) bool {
         return std.mem.eql(u8, self.value, other.value);
     }
 
@@ -1475,8 +1475,8 @@ pub const DateTime = struct {
     value: jetcommon.types.DateTime,
     allocator: std.mem.Allocator,
 
-    pub fn eql(self: *const DateTime, other: *const DateTime) bool {
-        return self.*.value.eql(other.*.value);
+    pub fn eql(self: DateTime, other: DateTime) bool {
+        return self.value.eql(other.value);
     }
 
     pub fn toJson(self: DateTime, writer: Writer, comptime options: ToJsonOptions) !void {
@@ -1516,13 +1516,13 @@ pub const Object = struct {
     }
 
     /// Recursively compares equality of keypairs with another `Object`.
-    pub fn eql(self: *const Object, other: *const Object) bool {
+    pub fn eql(self: Object, other: Object) bool {
         if (self.count() != other.count()) return false;
         var it = self.hashmap.iterator();
         while (it.next()) |item| {
             const other_value = other.get(item.key_ptr.*);
             if (other_value) |capture| {
-                if (!item.value_ptr.*.eql(capture)) return false;
+                if (!item.value_ptr.*.eql(capture.*)) return false;
             }
         }
 
@@ -1762,10 +1762,10 @@ pub const Array = struct {
     }
 
     // Compares equality of all items in an array. Order must be identical.
-    pub fn eql(self: *const Array, other: *const Array) bool {
+    pub fn eql(self: Array, other: Array) bool {
         if (self.count() != other.count()) return false;
         for (self.array.items, other.array.items) |lhs, rhs| {
-            if (!lhs.eql(rhs)) return false;
+            if (!lhs.eql(rhs.*)) return false;
         }
         return true;
     }
