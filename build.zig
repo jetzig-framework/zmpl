@@ -16,8 +16,19 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
+    const exe = b.addExecutable(.{
+        .name = "zmpl",
+        .root_source_file = b.path("src/main.zig"),
+        .optimize = optimize,
+        .target = target,
+    });
+    const run_artifact = b.addRunArtifact(exe);
+    const run_step = b.step("run", "Run benchmarking");
+    run_step.dependOn(&run_artifact.step);
+
     const zmpl_module = b.addModule("zmpl", .{ .root_source_file = b.path("src/zmpl.zig") });
     lib.root_module.addImport("zmpl", zmpl_module);
+    exe.root_module.addImport("zmpl", zmpl_module);
 
     const build_options = b.addOptions();
     build_options.addOption(

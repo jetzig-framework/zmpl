@@ -2,3 +2,4 @@
 /zig-out/
 /src/templates/.*.compiled.zig
 .zig-cache/
+large-file.json

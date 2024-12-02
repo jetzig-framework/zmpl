@@ -736,41 +736,163 @@ pub fn toJsonOptions(self: *Data, comptime options: ToJsonOptions) ![]const u8 {
 /// Parses a JSON string and returns a `!*Data.Value`
 /// Inverse of `toJson`
 pub fn parseJsonSlice(self: *Data, json: []const u8) !*Value {
-    const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator(), json, .{});
-    return self.parseJsonValue(parsed.value);
+    const alloc = self.allocator();
+    var json_stream = std.io.fixedBufferStream(json);
+    var reader = std.json.reader(alloc, json_stream.reader());
+    var container_stack = std.ArrayList(*Value).init(alloc);
+    var current_container: ?*Value = null;
+    var current_key: ?[]const u8 = null;
+
+    while (true) {
+        const token = try reader.nextAlloc(alloc, .alloc_always);
+        switch (token) {
+            .object_begin => {
+                const obj = try createObject(alloc);
+                if (current_container) |container| {
+                    switch (container.*) {
+                        .object => |*capture| {
+                            try capture.put(current_key.?, obj);
+                            current_key = null;
+                        },
+                        .array => |*capture| try capture.append(obj),
+                        else => return error.ZmplJsonParseError,
+                    }
+                }
+                current_container = obj;
+                try container_stack.append(obj);
+            },
+            .array_begin => {
+                const arr = try createArray(alloc);
+                if (current_container) |container| {
+                    switch (container.*) {
+                        .object => |*capture| {
+                            try capture.put(current_key.?, arr);
+                            current_key = null;
+                        },
+                        .array => |*capture| try capture.append(arr),
+                        else => return error.ZmplJsonParseError,
+                    }
+                }
+                current_container = arr;
+                try container_stack.append(arr);
+            },
+            .object_end, .array_end => {
+                _ = container_stack.pop();
+                if (container_stack.items.len > 0) {
+                    current_container = container_stack.items[container_stack.items.len - 1];
+                } else if (try reader.peekNextTokenType() == .end_of_document)
+                    continue
+                else
+                    return error.ZmplJsonParseError;
+            },
+            .number, .allocated_number => |slice| {
+                if (current_container == null) {
+                    if (std.json.isNumberFormattedLikeAnInteger(slice)) {
+                        if (std.fmt.parseInt(i128, slice, 10)) |number| {
+                            return self.integer(number);
+                        } else |_| {
+                            return self.string(slice);
+                        }
+                    } else {
+                        if (std.fmt.parseFloat(f128, slice)) |number| {
+                            return self.float(number);
+                        } else |_| {
+                            return self.string(slice);
+                        }
+                    }
+                }
+
+                switch (current_container.?.*) {
+                    .object => |*capture| {
+                        if (std.json.isNumberFormattedLikeAnInteger(slice)) {
+                            if (std.fmt.parseInt(i128, slice, 10)) |number| {
+                                try capture.put(current_key.?, number);
+                            } else |_| try capture.put(current_key.?, slice);
+                        } else {
+                            if (std.fmt.parseFloat(f128, slice)) |number| {
+                                try capture.put(current_key.?, number);
+                            } else |_| try capture.put(current_key.?, slice);
+                        }
+                        current_key = null;
+                    },
+                    .array => |*capture| {
+                        if (std.json.isNumberFormattedLikeAnInteger(slice)) {
+                            if (std.fmt.parseInt(i128, slice, 10)) |number| {
+                                try capture.append(number);
+                            } else |_| try capture.append(slice);
+                        } else {
+                            if (std.fmt.parseFloat(f128, slice)) |number| {
+                                try capture.append(number);
+                            } else |_| try capture.append(slice);
+                        }
+                    },
+                    else => return error.ZmplJsonParseError,
+                }
+            },
+            .string, .allocated_string => |slice| {
+                if (current_container == null) return self.string(slice);
+
+                if (current_key == null and current_container.?.* == .object) {
+                    current_key = slice;
+                } else {
+                    switch (current_container.?.*) {
+                        .object => |*capture| {
+                            try capture.put(current_key.?, slice);
+                            current_key = null;
+                        },
+                        .array => |*capture| {
+                            try capture.append(slice);
+                        },
+                        else => return error.ZmplJsonParseError,
+                    }
+                    current_key = null;
+                }
+            },
+            .true, .false => {
+                const value = switch (token) {
+                    .true => true,
+                    .false => false,
+                    else => return error.ZmplJsonParseError,
+                };
+
+                if (current_container == null) {
+                    return self.boolean(value);
+                }
+
+                switch (current_container.?.*) {
+                    .array => |*capture| try capture.append(value),
+                    .object => |*capture| {
+                        try capture.put(current_key.?, value);
+                        current_key = null;
+                    },
+                    else => return error.ZmplJsonParseError,
+                }
+            },
+            .null => {
+                if (current_container == null) {
+                    return _null(self.allocator());
+                }
+
+                switch (current_container.?.*) {
+                    .array => |*capture| try capture.append(null),
+                    .object => |*capture| {
+                        try capture.put(current_key.?, null);
+                        current_key = null;
+                    },
+                    else => return error.ZmplJsonParseError,
+                }
+            },
+            .end_of_document => break,
+            else => return error.ZmplJsonParseError,
+        }
+    }
+    return current_container orelse error.ZmplJsonParseError;
 }
 
 /// Parses a JSON string and updates the current `Data` object with the parsed data. Inverse of
 /// `toJson`.
 pub fn fromJson(self: *Data, json: []const u8) !void {
     self.value = try self.parseJsonSlice(json);
-}
-
-pub fn parseJsonValue(self: *Data, value: std.json.Value) !*Value {
-    return switch (value) {
-        .object => |*val| blk: {
-            var it = val.iterator();
-            const obj = try createObject(self.allocator());
-            while (it.next()) |item| {
-                try obj.put(item.key_ptr.*, try self.parseJsonValue(item.value_ptr.*));
-            }
-            break :blk obj;
-        },
-        .array => |*val| blk: {
-            var arr = try self.array();
-            for (val.items) |item| try arr.append(try self.parseJsonValue(item));
-            break :blk arr;
-        },
-        .string => |val| self.string(val), // TODO: maybe try to parse datetimes ?
-        .number_string => |val| if (std.mem.containsAtLeast(u8, val, 1, "."))
-            self.float(try std.fmt.parseFloat(f128, val))
-        else
-            self.integer(try std.fmt.parseInt(i128, val, 10)),
-        .integer => |val| self.integer(val),
-        .float => |val| self.float(val),
-        .bool => |val| self.boolean(val),
-        .null => _null(self.allocator()),
-    };
 }
 
 pub const ValueType = enum {
@@ -2360,4 +2482,39 @@ test "array pop" {
     }
 
     try std.testing.expect(array1.count() == 0);
+}
+
+test "parseJsonSlice" {
+    var data = Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    const string_value = try data.parseJsonSlice(
+        \\"foo"
+    );
+    try std.testing.expectEqualStrings("foo", string_value.*.string.value);
+
+    const boolean_value = try data.parseJsonSlice(
+        \\true
+    );
+    try std.testing.expectEqual(true, boolean_value.*.boolean.value);
+
+    const integer_value = try data.parseJsonSlice(
+        \\100
+    );
+    try std.testing.expectEqual(100, integer_value.*.integer.value);
+
+    const float_value = try data.parseJsonSlice(
+        \\100.1
+    );
+    try std.testing.expectEqual(100.1, float_value.*.float.value);
+
+    const object_value = try data.parseJsonSlice(
+        \\{"foo": "bar"}
+    );
+    try std.testing.expectEqualStrings("bar", object_value.get("foo").?.string.value);
+
+    const array_value = try data.parseJsonSlice(
+        \\["foo", "bar"]
+    );
+    try std.testing.expectEqualStrings("bar", array_value.items(.array)[1].string.value);
 }
