@@ -603,11 +603,11 @@ fn renderFooter(self: Template, writer: anytype) !void {
         \\    if (__extend) |__capture| {
         \\        const __inner_content = try allocator.dupe(u8, zmpl.output_buf.items);
         \\        zmpl.content = .{ .data = zmpl.strip(__inner_content) };
-        \\        zmpl.output_buf.clearAndFree();
+        \\        zmpl.output_buf.clearRetainingCapacity();
         \\        const __content = try __capture.render(zmpl, Context, context, .{});
         \\        return __content;
         \\    } else {
-        \\        return try zmpl.parent_allocator.dupe(u8, zmpl.chomp(zmpl.output_buf.items));
+        \\        return zmpl.chomp(zmpl.output_buf.items);
         \\    }
         \\}
         \\
@@ -640,13 +640,13 @@ fn renderFooter(self: Template, writer: anytype) !void {
             \\    Context: type,
             \\    context: Context,
             \\) anyerror![]const u8 {{
-            \\    const inner_content = try {0s}_render(zmpl, Context, context);
-            \\    defer zmpl.parent_allocator.free(inner_content);
-            \\    zmpl.output_buf.clearAndFree();
-            \\    zmpl.content = .{{ .data = zmpl.strip(inner_content) }};
-            \\    const content = try layout.render(zmpl, Context, context, .{{}});
-            \\    zmpl.output_buf.clearAndFree();
-            \\    return content;
+            \\    const __inner_content = try zmpl.allocator().dupe(
+            \\        u8, try {0s}_render(zmpl, Context, context)
+            \\    );
+            \\    zmpl.content = .{{ .data = zmpl.strip(__inner_content) }};
+            \\    zmpl.output_buf.clearRetainingCapacity();
+            \\    const __content = try layout.render(zmpl, Context, context, .{{}});
+            \\    return zmpl.strip(__content);
             \\}}
             \\
         ,
