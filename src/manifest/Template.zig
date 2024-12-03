@@ -576,7 +576,7 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
         \\    var data = zmpl;
         \\    zmpl.noop(**__zmpl.Data, &data);
         \\    zmpl.noop(Context, context);
-        \\    const allocator = zmpl.allocator();
+        \\    const allocator = zmpl.allocator;
         \\    var __extend: ?__Manifest.Template = null;
         \\    if (__extend) |*__capture| zmpl.noop(*__Manifest.Template, __capture);
         \\    zmpl.noop(std.mem.Allocator, allocator);
@@ -640,7 +640,7 @@ fn renderFooter(self: Template, writer: anytype) !void {
             \\    Context: type,
             \\    context: Context,
             \\) anyerror![]const u8 {{
-            \\    const __inner_content = try zmpl.allocator().dupe(
+            \\    const __inner_content = try zmpl.allocator.dupe(
             \\        u8, try {0s}_render(zmpl, Context, context)
             \\    );
             \\    zmpl.content = .{{ .data = zmpl.strip(__inner_content) }};

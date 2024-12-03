@@ -38,7 +38,7 @@ pub fn render(
                 const renderFn = @field(manifest, template.name ++ "_renderWithLayout");
                 break :blk renderFn(layout, data, C, c) catch |err| {
                     if (@errorReturnTrace()) |stack_trace| {
-                        try debug.printSourceInfo(data.allocator(), err, stack_trace);
+                        try debug.printSourceInfo(data.allocator, err, stack_trace);
                     }
                     break :blk err;
                 };
@@ -51,7 +51,7 @@ pub fn render(
                 const renderFn = @field(manifest, template.name ++ "_render");
                 break :blk renderFn(data, C, c) catch |err| {
                     if (@errorReturnTrace()) |stack_trace| {
-                        try debug.printSourceInfo(data.allocator(), err, stack_trace);
+                        try debug.printSourceInfo(data.allocator, err, stack_trace);
                     }
                     break :blk err;
                 };
