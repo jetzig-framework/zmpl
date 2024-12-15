@@ -4,12 +4,12 @@ const builtin = @import("builtin");
 const util = @import("util.zig");
 
 allocator: std.mem.Allocator,
-templates_paths: []const TemplatesPath,
-template_paths: [][]const u8,
+template_paths: []const TemplatePath,
+templates_paths: []const TemplatePath,
 
 const Manifest = @This();
 
-pub const TemplatesPath = struct {
+pub const TemplatePath = struct {
     prefix: []const u8,
     path: []const u8,
 };
@@ -24,8 +24,8 @@ const TemplateDef = struct {
 
 pub fn init(
     allocator: std.mem.Allocator,
-    templates_paths: []const TemplatesPath,
-    template_paths: [][]const u8,
+    templates_paths: []const TemplatePath,
+    template_paths: []const TemplatePath,
 ) Manifest {
     return .{
         .allocator = allocator,
@@ -41,8 +41,19 @@ pub fn compile(
 ) ![]const u8 {
     var template_defs = std.ArrayList(TemplateDef).init(self.allocator);
 
+    var templates_paths_map = std.StringHashMap([]const u8).init(self.allocator);
     for (self.templates_paths) |templates_path| {
-        try self.compileTemplates(&template_defs, templates_path, TemplateType, options);
+        try templates_paths_map.put(templates_path.prefix, templates_path.path);
+    }
+
+    for (self.templates_paths) |templates_path| {
+        try self.compileTemplates(
+            &template_defs,
+            templates_path,
+            templates_paths_map,
+            TemplateType,
+            options,
+        );
     }
     std.debug.print("[zmpl] Compiled {} template(s)\n", .{self.template_paths.len});
 
@@ -148,37 +159,49 @@ pub fn compile(
 fn compileTemplates(
     self: *Manifest,
     array: *std.ArrayList(TemplateDef),
-    templates_path: TemplatesPath,
+    templates_path: TemplatePath,
+    templates_paths_map: std.StringHashMap([]const u8),
     comptime TemplateType: type,
     comptime options: type,
 ) !void {
-    var template_map = std.StringHashMap([]const u8).init(self.allocator);
+    var template_map = std.StringHashMap(TemplateType.TemplateMap).init(self.allocator);
 
     for (self.template_paths) |path| {
-        if (!std.mem.startsWith(u8, path, templates_path.path)) continue;
+        const result = try template_map.getOrPut(path.prefix);
+        var map = if (result.found_existing)
+            result.value_ptr
+        else blk: {
+            result.value_ptr.* = TemplateType.TemplateMap.init(self.allocator);
+            break :blk result.value_ptr;
+        };
+
         const generated_name = try util.generateVariableNameAlloc(self.allocator);
-        const key = try util.templatePathStore(self.allocator, templates_path.path, path);
-        if (template_map.get(key)) |_| {
-            std.debug.print("[zmpl] Found duplicate template: {s}\n", .{path});
+        const key = try util.templatePathStore(self.allocator, templates_path.path, path.path);
+        if (map.get(key)) |_| {
+            std.debug.print("[zmpl] Found duplicate template: {s}\n", .{path.path});
             std.debug.print("[zmpl] Template names must be uniquely identifiable. Exiting.\n", .{});
             std.process.exit(1);
         }
-        try template_map.put(key, generated_name);
+        std.debug.print("prefix: {s}, key: {s}\n", .{ path.prefix, key });
+        try map.put(key, generated_name);
     }
 
-    for (self.template_paths) |path| {
-        if (!std.mem.startsWith(u8, path, templates_path.path)) continue;
-        const key = try util.templatePathStore(self.allocator, templates_path.path, path);
-        const generated_name = template_map.get(key).?;
+    for (self.template_paths) |template_path| {
+        if (!std.mem.startsWith(u8, template_path.path, templates_path.path)) continue;
 
-        var file = try std.fs.openFileAbsolute(path, .{});
+        const key = try util.templatePathStore(self.allocator, templates_path.path, template_path.path);
+        const generated_name = template_map.get(templates_path.prefix).?.get(key).?;
+
+        var file = try std.fs.openFileAbsolute(template_path.path, .{});
         const size = (try file.stat()).size;
         const content = try file.readToEndAlloc(self.allocator, @intCast(size));
         var template = TemplateType.init(
             self.allocator,
             generated_name,
             templates_path.path,
-            path,
+            templates_path.prefix,
+            template_path.path,
+            templates_paths_map,
             content,
             template_map,
         );

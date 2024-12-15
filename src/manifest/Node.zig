@@ -5,6 +5,7 @@ const Zmd = @import("zmd").Zmd;
 const ZmdNode = @import("zmd").Node;
 
 const Token = @import("Template.zig").Token;
+const TemplateMap = @import("Template.zig").TemplateMap;
 const util = @import("util.zig");
 const IfStatement = @import("IfStatement.zig");
 
@@ -12,8 +13,10 @@ token: Token,
 children: std.ArrayList(*Node),
 generated_template_name: []const u8,
 allocator: std.mem.Allocator,
-template_map: std.StringHashMap([]const u8),
+template_map: std.StringHashMap(TemplateMap),
+templates_paths_map: std.StringHashMap([]const u8),
 templates_path: []const u8,
+template_prefix: []const u8,
 
 const else_token = "@else";
 
@@ -333,8 +336,18 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
 
     const args = self.token.args.?;
     const partial_name_end = std.mem.indexOfAny(u8, args, "({ ") orelse args.len;
-    const partial_name = std.mem.trim(u8, args[0..partial_name_end], &std.ascii.whitespace);
+    const prefixed_partial_name = std.mem.trim(u8, args[0..partial_name_end], &std.ascii.whitespace);
     const partial_args = try self.parsePartialArgs(args[partial_name_end..]);
+
+    const prefix_end_index = std.mem.indexOfScalar(u8, prefixed_partial_name, ':');
+    const partial_name = if (prefix_end_index) |index|
+        prefixed_partial_name[index + 1 ..]
+    else
+        prefixed_partial_name;
+    const prefix = if (prefix_end_index) |index|
+        prefixed_partial_name[0..index]
+    else
+        self.template_prefix;
 
     var some_keyword = false;
     var some_positional = false;
@@ -351,7 +364,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
         return error.ZmplSyntaxError;
     }
 
-    const expected_partial_args = try self.getPartialArgsSignature(partial_name);
+    const expected_partial_args = try self.getPartialArgsSignature(prefix, partial_name);
 
     var reordered_args = std.ArrayList(Arg).init(self.allocator);
     defer reordered_args.deinit();
@@ -396,7 +409,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
         return error.ZmplSyntaxError;
     }
 
-    const generated_partial_name = self.template_map.get(
+    const generated_partial_name = self.template_map.get(prefix).?.get(
         try util.templatePathFetch(self.allocator, partial_name, true),
     );
 
@@ -956,12 +969,13 @@ fn renderZigLiteral(
 // Parse a target partial's `@args` pragma in order to re-order keyword args if needed.
 // We need to read direct from the file here because we can't guarantee that the target partial
 // has been parsed yet.
-fn getPartialArgsSignature(self: Node, partial_name: []const u8) ![]Arg {
+fn getPartialArgsSignature(self: Node, prefix: []const u8, partial_name: []const u8) ![]Arg {
     const fetch_name = try util.templatePathFetch(self.allocator, partial_name, true);
     std.mem.replaceScalar(u8, fetch_name, '/', std.fs.path.sep);
     const with_extension = try std.mem.concat(self.allocator, u8, &[_][]const u8{ fetch_name, ".zmpl" });
     defer self.allocator.free(with_extension);
-    const path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.templates_path, with_extension });
+    const templates_path = self.templates_paths_map.get(prefix).?;
+    const path = try std.fs.path.join(self.allocator, &[_][]const u8{ templates_path, with_extension });
     defer self.allocator.free(path);
     const content = try util.readFile(self.allocator, std.fs.cwd(), path);
     defer self.allocator.free(content);

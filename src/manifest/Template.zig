@@ -7,9 +7,12 @@ const util = @import("util.zig");
 
 const Template = @This();
 
+pub const TemplateMap = std.StringHashMap([]const u8);
+
 allocator: std.mem.Allocator,
 templates_path: []const u8,
 name: []const u8,
+prefix: []const u8,
 path: []const u8,
 input: []const u8,
 template_type: TemplateType,
@@ -19,7 +22,8 @@ root_node: *Node = undefined,
 index: usize = 0,
 args: ?[]const u8 = null,
 partial: bool,
-template_map: std.StringHashMap([]const u8),
+template_map: std.StringHashMap(TemplateMap),
+templates_paths_map: std.StringHashMap([]const u8),
 
 const end_token = "@end";
 
@@ -65,13 +69,16 @@ pub fn init(
     allocator: std.mem.Allocator,
     name: []const u8,
     templates_path: []const u8,
+    prefix: []const u8,
     path: []const u8,
+    templates_paths_map: std.StringHashMap([]const u8),
     input: []const u8,
-    template_map: std.StringHashMap([]const u8),
+    template_map: std.StringHashMap(TemplateMap),
 ) Template {
     return .{
         .allocator = allocator,
         .templates_path = templates_path,
+        .prefix = prefix,
         .name = name,
         .path = path,
         .template_type = templateType(path),
@@ -79,6 +86,7 @@ pub fn init(
         .tokens = std.ArrayList(Token).init(allocator),
         .partial = std.mem.startsWith(u8, std.fs.path.basename(path), "_"),
         .template_map = template_map,
+        .templates_paths_map = templates_paths_map,
     };
 }
 
@@ -298,6 +306,8 @@ fn createNode(self: Template, token: Token) !*Node {
         .generated_template_name = self.name,
         .template_map = self.template_map,
         .templates_path = self.templates_path,
+        .template_prefix = self.prefix,
+        .templates_paths_map = self.templates_paths_map,
     };
     return node;
 }
