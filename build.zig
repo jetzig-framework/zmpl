@@ -8,12 +8,14 @@ const zmd = @import("zmd");
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const use_llvm = b.option(bool, "use_llvm", "Use LLVM") orelse false;
 
     const lib = b.addStaticLibrary(.{
         .name = "zmpl",
         .root_source_file = b.path("src/zmpl.zig"),
         .target = target,
         .optimize = optimize,
+        .use_llvm = use_llvm,
     });
 
     const exe = b.addExecutable(.{
@@ -21,6 +23,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/main.zig"),
         .optimize = optimize,
         .target = target,
+        .use_llvm = use_llvm,
     });
     const run_artifact = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run benchmarking");
@@ -92,6 +95,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/manifest/main.zig"),
         .target = target,
         .optimize = optimize,
+        .use_llvm = use_llvm,
     });
 
     const options_files = b.addWriteFiles();
@@ -105,13 +109,18 @@ pub fn build(b: *std.Build) !void {
     manifest_exe.root_module.addImport("zmd", zmd_module);
     manifest_exe.root_module.addImport("jetcommon", jetcommon_module);
     const manifest_exe_run = b.addRunArtifact(manifest_exe);
+    manifest_exe_run.has_side_effects = true;
+    b.getInstallStep().dependOn(&manifest_exe_run.step);
     const manifest_lazy_path = manifest_exe_run.addOutputFileArg("zmpl.manifest.zig");
 
     manifest_exe_run.setCwd(.{ .cwd_relative = try std.fs.cwd().realpathAlloc(b.allocator, ".") });
     manifest_exe_run.expectExitCode(0);
     manifest_exe_run.addArg(try std.mem.join(b.allocator, ";", templates_paths));
 
+    lib.step.dependOn(&manifest_exe_run.step);
     for (try findTemplates(b, templates_paths)) |path| manifest_exe_run.addFileArg(.{ .cwd_relative = path });
+    const compile_step = b.step("compile", "Compile Zmpl templates");
+    compile_step.dependOn(&manifest_exe_run.step);
 
     const manifest_module = b.addModule("zmpl.manifest", .{ .root_source_file = manifest_lazy_path });
     manifest_module.addImport("zmpl", zmpl_module);
