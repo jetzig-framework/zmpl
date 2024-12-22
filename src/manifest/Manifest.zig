@@ -46,12 +46,34 @@ pub fn compile(
         try templates_paths_map.put(templates_path.prefix, templates_path.path);
     }
 
+    var template_map = std.StringHashMap(TemplateType.TemplateMap).init(self.allocator);
+
+    for (self.template_paths) |template_path| {
+        const result = try template_map.getOrPut(template_path.prefix);
+        var map = if (result.found_existing)
+            result.value_ptr
+        else blk: {
+            result.value_ptr.* = TemplateType.TemplateMap.init(self.allocator);
+            break :blk result.value_ptr;
+        };
+
+        const generated_name = try util.generateVariableNameAlloc(self.allocator);
+        const key = try util.templatePathStore(self.allocator, templates_paths_map.get(template_path.prefix).?, template_path.path);
+        if (map.get(key)) |_| {
+            std.debug.print("[zmpl] Found duplicate template: {s}\n", .{template_path.path});
+            std.debug.print("[zmpl] Template names must be uniquely identifiable. Exiting.\n", .{});
+            std.process.exit(1);
+        }
+        try map.put(key, generated_name);
+    }
+
     for (self.templates_paths) |templates_path| {
         try self.compileTemplates(
             &template_defs,
             templates_path,
             templates_paths_map,
             TemplateType,
+            &template_map,
             options,
         );
     }
@@ -162,35 +184,14 @@ fn compileTemplates(
     templates_path: TemplatePath,
     templates_paths_map: std.StringHashMap([]const u8),
     comptime TemplateType: type,
+    template_map: *std.StringHashMap(TemplateType.TemplateMap),
     comptime options: type,
 ) !void {
-    var template_map = std.StringHashMap(TemplateType.TemplateMap).init(self.allocator);
-
-    for (self.template_paths) |path| {
-        const result = try template_map.getOrPut(path.prefix);
-        var map = if (result.found_existing)
-            result.value_ptr
-        else blk: {
-            result.value_ptr.* = TemplateType.TemplateMap.init(self.allocator);
-            break :blk result.value_ptr;
-        };
-
-        const generated_name = try util.generateVariableNameAlloc(self.allocator);
-        const key = try util.templatePathStore(self.allocator, templates_path.path, path.path);
-        if (map.get(key)) |_| {
-            std.debug.print("[zmpl] Found duplicate template: {s}\n", .{path.path});
-            std.debug.print("[zmpl] Template names must be uniquely identifiable. Exiting.\n", .{});
-            std.process.exit(1);
-        }
-        std.debug.print("prefix: {s}, key: {s}\n", .{ path.prefix, key });
-        try map.put(key, generated_name);
-    }
-
     for (self.template_paths) |template_path| {
-        if (!std.mem.startsWith(u8, template_path.path, templates_path.path)) continue;
+        if (!std.mem.eql(u8, template_path.prefix, templates_path.prefix)) continue;
 
-        const key = try util.templatePathStore(self.allocator, templates_path.path, template_path.path);
-        const generated_name = template_map.get(templates_path.prefix).?.get(key).?;
+        const key = try util.templatePathStore(self.allocator, templates_paths_map.get(template_path.prefix).?, template_path.path);
+        const generated_name = template_map.get(template_path.prefix).?.get(key).?;
 
         var file = try std.fs.openFileAbsolute(template_path.path, .{});
         const size = (try file.stat()).size;
@@ -203,7 +204,7 @@ fn compileTemplates(
             template_path.path,
             templates_paths_map,
             content,
-            template_map,
+            template_map.*,
         );
         const partial = template.partial;
         const output = try template.compile(options);
