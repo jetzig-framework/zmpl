@@ -48,6 +48,7 @@ pub fn compile(
 
     var template_map = std.StringHashMap(TemplateType.TemplateMap).init(self.allocator);
 
+    // First pass - generate names for all templates and store in prefix->name nested hashmap.
     for (self.template_paths) |template_path| {
         const result = try template_map.getOrPut(template_path.prefix);
         var map = if (result.found_existing)
@@ -58,15 +59,21 @@ pub fn compile(
         };
 
         const generated_name = try util.generateVariableNameAlloc(self.allocator);
-        const key = try util.templatePathStore(self.allocator, templates_paths_map.get(template_path.prefix).?, template_path.path);
+        const key = try util.templatePathStore(
+            self.allocator,
+            templates_paths_map.get(template_path.prefix).?,
+            template_path.path,
+        );
         if (map.get(key)) |_| {
             std.debug.print("[zmpl] Found duplicate template: {s}\n", .{template_path.path});
             std.debug.print("[zmpl] Template names must be uniquely identifiable. Exiting.\n", .{});
             std.process.exit(1);
         }
-        try map.put(key, generated_name);
+
+        try map.putNoClobber(key, generated_name);
     }
 
+    // Second pass - compile all templates, some of which may reference templates in other prefix scopes
     for (self.templates_paths) |templates_path| {
         try self.compileTemplates(
             &template_defs,
