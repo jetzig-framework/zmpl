@@ -5,7 +5,7 @@ const util = @import("util.zig");
 
 allocator: std.mem.Allocator,
 templates_paths: []const TemplatesPath,
-template_paths: [][]const u8,
+template_paths: []const []const u8,
 
 const Manifest = @This();
 
@@ -25,7 +25,7 @@ const TemplateDef = struct {
 pub fn init(
     allocator: std.mem.Allocator,
     templates_paths: []const TemplatesPath,
-    template_paths: [][]const u8,
+    template_paths: []const []const u8,
 ) Manifest {
     return .{
         .allocator = allocator,
