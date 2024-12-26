@@ -14,6 +14,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/zmpl.zig"),
         .target = target,
         .optimize = optimize,
+        .use_llvm = false,
     });
 
     const exe = b.addExecutable(.{
@@ -21,6 +22,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/main.zig"),
         .optimize = optimize,
         .target = target,
+        .use_llvm = false,
     });
     const run_artifact = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run benchmarking");
@@ -92,6 +94,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/manifest/main.zig"),
         .target = target,
         .optimize = optimize,
+        .use_llvm = false,
     });
 
     const options_files = b.addWriteFiles();
@@ -105,13 +108,22 @@ pub fn build(b: *std.Build) !void {
     manifest_exe.root_module.addImport("zmd", zmd_module);
     manifest_exe.root_module.addImport("jetcommon", jetcommon_module);
     const manifest_exe_run = b.addRunArtifact(manifest_exe);
+    manifest_exe_run.has_side_effects = true;
+    b.getInstallStep().dependOn(&manifest_exe_run.step);
     const manifest_lazy_path = manifest_exe_run.addOutputFileArg("zmpl.manifest.zig");
 
     manifest_exe_run.setCwd(.{ .cwd_relative = try std.fs.cwd().realpathAlloc(b.allocator, ".") });
     manifest_exe_run.expectExitCode(0);
     manifest_exe_run.addArg(try std.mem.join(b.allocator, ";", templates_paths));
 
+    lib.step.dependOn(&manifest_exe_run.step);
     for (try findTemplates(b, templates_paths)) |path| manifest_exe_run.addFileArg(.{ .cwd_relative = path });
+    const compile_step = b.step("compile", "Compile Zmpl templates");
+    compile_step.dependOn(&manifest_exe_run.step);
+
+    const source_files = b.addUpdateSourceFiles();
+    source_files.addCopyFileToSource(manifest_lazy_path, "src/zmpl.manifest.zig");
+    b.getInstallStep().dependOn(&source_files.step);
 
     const manifest_module = b.addModule("zmpl.manifest", .{ .root_source_file = manifest_lazy_path });
     manifest_module.addImport("zmpl", zmpl_module);
@@ -227,7 +239,7 @@ pub fn addTemplateConstants(b: *std.Build, comptime constants: type) ![]const u8
     return try std.mem.join(b.allocator, "|", &array);
 }
 
-fn findTemplates(b: *std.Build, templates_paths: []const []const u8) ![][]const u8 {
+pub fn findTemplates(b: *std.Build, templates_paths: []const []const u8) ![][]const u8 {
     var templates = std.ArrayList([]const u8).init(b.allocator);
 
     var templates_paths_buf = std.ArrayList([]const u8).init(b.allocator);
