@@ -123,7 +123,7 @@ pub fn build(b: *std.Build) !void {
 
     const source_files = b.addUpdateSourceFiles();
     source_files.addCopyFileToSource(manifest_lazy_path, "src/zmpl.manifest.zig");
-    b.getInstallStep().dependOn(&source_files.step);
+    compile_step.dependOn(&source_files.step);
 
     const manifest_module = b.addModule("zmpl.manifest", .{ .root_source_file = manifest_lazy_path });
     manifest_module.addImport("zmpl", zmpl_module);
