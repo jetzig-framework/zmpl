@@ -1756,7 +1756,7 @@ pub const Object = struct {
                             ) = obj.getStruct(field.type) orelse return null;
                         },
                         .pointer => |info| switch (info.size) {
-                            .Slice => {
+                            .slice => {
                                 switch (info.child) {
                                     u8 => @field(return_struct, field.name) = self.getT(
                                         .string,
@@ -2014,9 +2014,9 @@ fn isStringCoercablePointer(pointer: std.builtin.Type.Pointer, child: type) bool
     // Logic borrowed from old implementation of std.meta.isZigString
     if (!pointer.is_volatile and
         !pointer.is_allowzero and
-        pointer.size == .Slice) return true;
+        pointer.size == .slice) return true;
     if (!pointer.is_volatile and
-        !pointer.is_allowzero and pointer.size == .One and
+        !pointer.is_allowzero and pointer.size == .one and
         child_info == .array and
         child_info.array.child == u8) return true;
     return false;
@@ -2092,7 +2092,7 @@ pub fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
                     else => @compileError("Unsupported pointer/union: " ++ @typeName(@TypeOf(value))),
                 }
             },
-            .@"struct" => if (info.size == .Slice) blk: {
+            .@"struct" => if (info.size == .slice) blk: {
                 var inner_array = Array.init(alloc);
                 for (value) |item| try inner_array.append(item);
                 break :blk Value{ .array = inner_array };
