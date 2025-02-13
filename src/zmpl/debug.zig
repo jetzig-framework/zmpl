@@ -70,7 +70,7 @@ fn debugSourceLocation(
     _ = try source_file.readAll(content);
 
     var cursor: usize = 0;
-    var buf: [std.mem.page_size]u8 = undefined;
+    var buf: [std.heap.pageSize()]u8 = undefined;
     try source_file.seekTo(0);
     const source_line_number = outer: {
         while (cursor < from_position) {
@@ -111,7 +111,7 @@ fn findDebugLine(
 
     var cursor: usize = 0;
     var line: usize = 0;
-    var buf: [std.mem.page_size]u8 = undefined;
+    var buf: [std.heap.pageSize()]u8 = undefined;
     var position: usize = 0;
 
     while (cursor < size) outer: {

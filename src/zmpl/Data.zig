@@ -1912,7 +1912,7 @@ pub const Array = struct {
     }
 
     pub fn pop(self: *Array) ?*Value {
-        return self.array.popOrNull();
+        return self.array.pop();
     }
 
     pub fn toJson(

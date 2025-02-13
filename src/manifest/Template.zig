@@ -196,7 +196,7 @@ fn tokenize(self: *Template) !void {
         resolveNesting(line, stack); // Modifies the `depth` field of the last value in the stack.
 
         if (stack.items.len > 0 and stack.items[stack.items.len - 1].depth == 0) {
-            const context = stack.pop();
+            const context = stack.pop().?;
             const end = switch (context.delimiter) {
                 .none => unreachable, // Handled above - we don't push a context for .none
                 .eof => cursor + line.len,
