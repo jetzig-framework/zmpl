@@ -109,7 +109,6 @@ pub fn build(b: *std.Build) !void {
     manifest_exe.root_module.addImport("zmd", zmd_module);
     manifest_exe.root_module.addImport("jetcommon", jetcommon_module);
     const manifest_exe_run = b.addRunArtifact(manifest_exe);
-    manifest_exe_run.has_side_effects = true;
     b.getInstallStep().dependOn(&manifest_exe_run.step);
     const manifest_lazy_path = manifest_exe_run.addOutputFileArg("zmpl.manifest.zig");
 
