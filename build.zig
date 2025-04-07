@@ -129,22 +129,26 @@ pub fn build(b: *std.Build) !void {
     if (auto_build) {
         const tests_path = "src/tests.zig";
 
+        const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match any filter") orelse &.{};
         const template_tests = b.addTest(.{
             .root_source_file = b.path(tests_path),
             .target = target,
             .optimize = optimize,
+            .filters = test_filters,
         });
 
         const zmpl_tests = b.addTest(.{
             .root_source_file = b.path("src/zmpl.zig"),
             .target = target,
             .optimize = optimize,
+            .filters = test_filters,
         });
 
         const manifest_tests = b.addTest(.{
             .root_source_file = b.path("src/manifest/main.zig"),
             .target = target,
             .optimize = optimize,
+            .filters = test_filters,
         });
 
         template_tests.root_module.addImport("zmpl", zmpl_module);

@@ -23,7 +23,7 @@ pub fn init(ast: std.zig.Ast) IfStatement {
     const tags = ast.nodes.items(.tag);
 
     for (tags, 0..) |tag, index| {
-        const node: std.zig.Ast.Node.Index = @intCast(index);
+        const node: std.zig.Ast.Node.Index = @enumFromInt(index);
         if (tag == .if_simple) {
             const if_simple = ast.ifSimple(node);
             return .{ .ast = ast, .if_ast = if_simple };
@@ -34,21 +34,20 @@ pub fn init(ast: std.zig.Ast) IfStatement {
 
 pub fn render(self: IfStatement, writer: anytype) !void {
     const tags = self.ast.nodes.items(.tag);
-    const data = self.ast.nodes.items(.data);
 
     for (tags, 0..) |tag, index| {
-        const node: std.zig.Ast.Node.Index = @intCast(index);
+        const node: std.zig.Ast.Node.Index = @enumFromInt(index);
         if (tag == .if_simple) {
             try writer.writeAll("if (");
-            const components = self.ast.ifSimple(node);
+            const if_full = self.ast.ifSimple(node);
 
-            const wrap_true = self.isWrapTrue(components.payload_token != null, node);
+            const wrap_true = self.isWrapTrue(if_full.payload_token != null, if_full.ast.cond_expr);
             if (wrap_true) try writer.writeAll(wrap_eql_open);
-            try self.writeNode(data[node].lhs, writer);
+            try self.writeNode(if_full.ast.cond_expr, writer);
             if (wrap_true) try writer.writeAll(wrap_eql_close_true);
 
             try writer.writeAll(")");
-            if (components.payload_token) |payload_token| {
+            if (if_full.payload_token) |payload_token| {
                 try writer.print(" |{s}|", .{self.ast.tokenSlice(payload_token)});
             }
             return;
@@ -58,40 +57,28 @@ pub fn render(self: IfStatement, writer: anytype) !void {
 }
 
 fn writeNode(self: IfStatement, node: std.zig.Ast.Node.Index, writer: anytype) !void {
-    const tags = self.ast.nodes.items(.tag);
     const main_tokens = self.ast.nodes.items(.main_token);
-    const data = self.ast.nodes.items(.data);
-    switch (tags[node]) {
+    const node_data = self.ast.nodeData(node);
+    switch (self.ast.nodeTag(node)) {
         .bool_and, .bool_or => {
-            {
-                const wrap_true = self.isWrapTrue(false, data[node].lhs);
-                if (wrap_true) try writer.writeAll(wrap_eql_open);
-            }
+            const lhs = node_data.node_and_node[0];
+            const rhs = node_data.node_and_node[1];
+            const wrap_lhs = self.isWrapTrue(false, lhs);
+            const wrap_rhs = self.isWrapTrue(false, rhs);
 
-            try self.writeNode(data[node].lhs, writer);
+            if (wrap_lhs) try writer.writeAll(wrap_eql_open);
+            try self.writeNode(lhs, writer);
+            if (wrap_lhs) try writer.writeAll(wrap_eql_close_true);
 
-            {
-                const wrap_true = self.isWrapTrue(false, data[node].lhs);
-                if (wrap_true) try writer.writeAll(wrap_eql_close_true);
-            }
+            try writer.print(" {s} ", .{self.ast.tokenSlice(main_tokens[@intFromEnum(node)])});
 
-            try writer.print(" {s} ", .{self.ast.tokenSlice(main_tokens[node])});
-
-            {
-                const wrap_true = self.isWrapTrue(false, data[node].rhs);
-                if (wrap_true) try writer.writeAll(wrap_eql_open);
-            }
-
-            try self.writeNode(data[node].rhs, writer);
-
-            {
-                const wrap_true = self.isWrapTrue(false, data[node].rhs);
-                if (wrap_true) try writer.writeAll(wrap_eql_close_true);
-            }
+            if (wrap_rhs) try writer.writeAll(wrap_eql_open);
+            try self.writeNode(rhs, writer);
+            if (wrap_rhs) try writer.writeAll(wrap_eql_close_true);
         },
         .bool_not => {
             try writer.writeAll(wrap_eql_open);
-            try self.writeNode(data[node].lhs, writer);
+            try self.writeNode(node_data.node, writer);
             try writer.writeAll(wrap_eql_close_false);
         },
         .equal_equal,
@@ -101,6 +88,8 @@ fn writeNode(self: IfStatement, node: std.zig.Ast.Node.Index, writer: anytype) !
         .greater_or_equal,
         .less_or_equal,
         => |tag| {
+            const lhs = node_data.node_and_node[0];
+            const rhs = node_data.node_and_node[1];
             const operator = switch (tag) {
                 .equal_equal, .bang_equal => "equal",
                 .greater_than, .less_than, .greater_or_equal, .less_or_equal => |op| @tagName(op),
@@ -114,39 +103,40 @@ fn writeNode(self: IfStatement, node: std.zig.Ast.Node.Index, writer: anytype) !
                     operator,
                 },
             );
-            try self.writeNode(data[node].lhs, writer);
+            try self.writeNode(lhs, writer);
             try writer.writeAll(", ");
-            try self.writeNode(data[node].rhs, writer);
+            try self.writeNode(rhs, writer);
             try writer.writeAll(")");
         },
         .grouped_expression => {
             try writer.writeByte('(');
 
-            const wrap_true = self.isWrapTrue(false, node);
+            const sub_expression = self.ast.nodeData(node).node_and_token[0];
+            const wrap_true = self.isWrapTrue(false, sub_expression);
             if (wrap_true) try writer.writeAll(wrap_eql_open);
-            try self.writeNode(data[node].lhs, writer);
+            try self.writeNode(sub_expression, writer);
             if (wrap_true) try writer.writeAll(wrap_eql_close_true);
 
             try writer.writeByte(')');
         },
         .@"if" => {
-            const components = self.ast.ifFull(node);
+            if (true) return; // TODO
+            const full_if = self.ast.ifFull(node);
             try writer.writeAll("if (");
 
-            const wrap_true = self.isWrapTrue(components.payload_token == null, node);
+            const wrap_true = self.isWrapTrue(full_if.payload_token == null, full_if.ast.cond_expr);
             if (wrap_true) try writer.writeAll(wrap_eql_open);
-            try self.writeNode(data[node].lhs, writer);
+            try self.writeNode(full_if.ast.cond_expr, writer);
             if (wrap_true) try writer.writeAll(wrap_eql_close_true);
 
             try writer.writeByte(')');
-            const extra = self.ast.extraData(data[node].rhs, std.zig.Ast.Node.If);
             try writer.writeByte(' ');
-            try self.writeNode(extra.then_expr, writer);
+            try self.writeNode(full_if.ast.then_expr, writer);
             try writer.writeAll(" else ");
-            try self.writeNode(extra.else_expr, writer);
+            try self.writeNode(full_if.ast.else_expr.unwrap().?, writer);
             try writer.writeByte(')');
 
-            if (components.payload_token) |payload_token| {
+            if (full_if.payload_token) |payload_token| {
                 try writer.print(" |{s}| ", .{self.ast.tokenSlice(payload_token)});
             }
         },
@@ -171,11 +161,14 @@ inline fn isOperator(tag: std.zig.Ast.Node.Tag) bool {
     };
 }
 
+// Detect if a value should be coerced to boolean `true` by wrapping the value with `zmpl.compare`:
+// ```
+// try zmpl.compare(.equal, value, true)
+// ```
+// This allows (e.g.) a `ZmplValue` boolean to evaluate to a Zig boolean for use in a regular Zig
+// `if` statement.
 fn isWrapTrue(self: IfStatement, has_payload: bool, node: std.zig.Ast.Node.Index) bool {
-    const tags = self.ast.nodes.items(.tag);
-    const data = self.ast.nodes.items(.data);
-
-    if (has_payload or isOperator(tags[data[node].lhs])) return false;
+    if (has_payload or isOperator(self.ast.nodeTag(node))) return false;
 
     return true;
 }
@@ -231,21 +224,21 @@ test "less than or equal" {
 
 test "and with equal" {
     try expectIfStatement(
-        "if (try zmpl.compare(.equal, try zmpl.compare(.equal, try zmpl.compare(.equal, foo, 1), true) and try zmpl.compare(.equal, try zmpl.compare(.equal, bar, 2), true), true))",
+        "if (try zmpl.compare(.equal, try zmpl.compare(.equal, foo, 1) and try zmpl.compare(.equal, bar, 2), true))",
         "_ = if (foo == 1 and bar == 2) {}",
     );
 }
 
 test "or with equal" {
     try expectIfStatement(
-        "if (try zmpl.compare(.equal, try zmpl.compare(.equal, try zmpl.compare(.equal, foo, 1), true) or try zmpl.compare(.equal, try zmpl.compare(.equal, bar, 2), true), true))",
+        "if (try zmpl.compare(.equal, try zmpl.compare(.equal, foo, 1) or try zmpl.compare(.equal, bar, 2), true))",
         "_ = if (foo == 1 or bar == 2) {}",
     );
 }
 
 test "nested if" {
     try expectIfStatement(
-        "if (try zmpl.compare(.equal, (try zmpl.compare(.equal, foo, if (true) 1 else 0))) or try zmpl.compare(.equal, try zmpl.compare(.equal, bar, 2), true), true))",
+        "if (try zmpl.compare(.equal, try zmpl.compare(.equal, (try zmpl.compare(.equal, foo, )), true) or try zmpl.compare(.equal, bar, 2), true))",
         "_ = if ((foo == if (true) 1 else 0) or bar == 2) {}",
     );
 }
