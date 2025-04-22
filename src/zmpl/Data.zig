@@ -928,7 +928,9 @@ pub const Value = union(ValueType) {
     null: NullType,
 
     /// Compare one `Value` to another `Value` recursively. Order of `Object` keys is ignored.
-    pub fn eql(self: Value, other: Value) bool {
+    pub fn eql(self: Value, other: anytype) bool {
+        if (comptime !isZmplValue(@TypeOf(other))) return self.compareT(.equal, @TypeOf(other), other) catch false;
+
         switch (self) {
             .object => |capture| switch (other) {
                 .object => |other_capture| return capture.eql(other_capture),
@@ -1220,19 +1222,22 @@ pub const Value = union(ValueType) {
     /// Get a typed value from the data tree using an exact key. Returns `null` if key not found or
     /// if root object is not `Object`. Use this function to resolve the underlying value in a Value.
     /// (e.g. `.string` returns `[]const u8`).
-    pub fn getT(self: *const Value, comptime T: ValueType, key: []const u8) ?switch (T) {
-        .object => *Object,
-        .array => *Array,
-        .string => []const u8,
-        .float => f128,
-        .integer => i128,
-        .boolean => bool,
-        .datetime => jetcommon.types.DateTime,
-        .null => null,
+    pub fn getT(self: *const Value, comptime T: ValueType, key: []const u8) switch (T) {
+        .object => ?*Object,
+        .array => ?*Array,
+        .string => ?[]const u8,
+        .float => ?f128,
+        .integer => ?i128,
+        .boolean => ?bool,
+        .datetime => ?jetcommon.types.DateTime,
+        .null => bool,
     } {
         return switch (self.*) {
             .object => |value| value.getT(T, key),
-            else => null,
+            else => switch (T) {
+                .null => false,
+                else => null,
+            },
         };
     }
 
@@ -1433,8 +1438,8 @@ pub const Value = union(ValueType) {
                 .float => |capture| @floatCast(capture.value),
                 .string => |capture| std.fmt.parseFloat(CET, capture.value) catch |err|
                     switch (err) {
-                    error.InvalidCharacter => error.ZmplCoerceError,
-                },
+                        error.InvalidCharacter => error.ZmplCoerceError,
+                    },
                 else => zmplError(
                     .compare,
                     "Cannot compare Zmpl `{s}` with `{s}`",
@@ -1445,8 +1450,8 @@ pub const Value = union(ValueType) {
                 .integer => |capture| @intCast(capture.value),
                 .string => |capture| std.fmt.parseInt(CET, capture.value, 10) catch |err|
                     switch (err) {
-                    error.InvalidCharacter, error.Overflow => error.ZmplCoerceError,
-                },
+                        error.InvalidCharacter, error.Overflow => error.ZmplCoerceError,
+                    },
                 .datetime => |capture| switch (CET) {
                     u128, u64, i64, i128 => @intCast(capture.value.microseconds()),
                     else => zmplError(
@@ -1673,15 +1678,15 @@ pub const Object = struct {
         } else return null;
     }
 
-    pub fn getT(self: Object, comptime T: ValueType, key: []const u8) ?switch (T) {
-        .object => *Object,
-        .array => *Array,
-        .string => []const u8,
-        .float => f128,
-        .integer => i128,
-        .boolean => bool,
-        .datetime => jetcommon.types.DateTime,
-        .null => null,
+    pub fn getT(self: Object, comptime T: ValueType, key: []const u8) switch (T) {
+        .object => ?*Object,
+        .array => ?*Array,
+        .string => ?[]const u8,
+        .float => ?f128,
+        .integer => ?i128,
+        .boolean => ?bool,
+        .datetime => ?jetcommon.types.DateTime,
+        .null => bool,
     } {
         if (self.get(key)) |value| {
             return switch (T) {
@@ -1717,9 +1722,12 @@ pub const Object = struct {
                     .datetime => |capture| capture.value,
                     else => null,
                 },
-                .null => null,
+                .null => true,
             };
-        } else return null;
+        } else return switch (T) {
+            .null => false,
+            else => null,
+        };
     }
 
     ///returns null if struct does not match object
@@ -2481,6 +2489,17 @@ test "array pop" {
     }
 
     try std.testing.expect(array1.count() == 0);
+}
+
+test "getT(.null, ...)" {
+    var data = Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var obj = try data.root(.object);
+    try obj.put("foo", null);
+
+    try std.testing.expectEqual(obj.getT(.null, "foo"), true);
+    try std.testing.expectEqual(obj.getT(.null, "bar"), false);
 }
 
 test "parseJsonSlice" {
