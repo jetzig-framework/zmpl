@@ -1297,7 +1297,7 @@ pub const Value = union(ValueType) {
     /// Remove a `Value` at `key` from an `Object`.
     pub fn remove(self: *Value, key: []const u8) bool {
         return switch (self.*) {
-            .object => |*capture| try capture.remove(key),
+            .object => |*capture| capture.remove(key),
             inline else => unreachable,
         };
     }
