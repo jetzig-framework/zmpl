@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const util = @import("util.zig");
+const Node = @import("Node.zig");
 
 allocator: std.mem.Allocator,
 template_paths: []const TemplatePath,
@@ -20,6 +21,23 @@ const TemplateDef = struct {
     prefix: []const u8,
     content: []const u8,
     partial: bool,
+    blocks: std.StringHashMap(std.ArrayList(Node.Block)),
+
+    pub fn renderBlocks(template_def: TemplateDef, allocator: std.mem.Allocator) ![]const u8 {
+        var buf = std.ArrayList(u8).init(allocator);
+        const writer = buf.writer();
+        var it = template_def.blocks.valueIterator();
+        while (it.next()) |blocks| {
+            for (blocks.items) |block| {
+                try writer.print(
+                    \\.{{ .name = "{s}", .func = "{s}" }},
+                ,
+                    .{ block.name, block.func },
+                );
+            }
+        }
+        return try buf.toOwnedSlice();
+    }
 };
 
 pub fn init(
@@ -108,6 +126,12 @@ pub fn compile(
         try writer.writeAll(decodedHeader);
     }
 
+    try writer.writeAll(
+        \\
+        \\pub const ZmplValue = __zmpl.Data.Value;
+        \\pub const __Manifest = struct {
+    );
+
     for (template_defs.items) |template_def| {
         try writer.writeAll(try std.fmt.allocPrint(self.allocator,
             \\
@@ -115,13 +139,46 @@ pub fn compile(
             \\
         , .{template_def.content}));
     }
+    for (template_defs.items) |template_def| {
+        if (template_def.partial) continue;
+
+        try writer.writeAll(try std.fmt.allocPrint(self.allocator,
+            \\const {0s} = __Manifest.Template{{
+            \\  .key = "{2s}",
+            \\  .name = "{0s}",
+            \\  .prefix = "{1s}",
+            \\  .blocks = &.{{{3s}}},
+            \\}};
+            \\
+        , .{
+            template_def.name,
+            template_def.prefix,
+            template_def.key,
+            try template_def.renderBlocks(self.allocator),
+        }));
+    }
 
     try writer.writeAll(
-        \\
-        \\pub const ZmplValue = __zmpl.Data.Value;
-        \\pub const __Manifest = struct {
         \\    const TemplateType = enum { zmpl, markdown };
         \\    pub const Template = __zmpl.Template;
+        \\    pub const templates = [_]Template{
+        \\
+    );
+
+    for (template_defs.items) |template_def| {
+        if (template_def.partial) continue;
+
+        try writer.print(
+            \\{s},
+            \\
+        ,
+            .{template_def.name},
+        );
+    }
+
+    try writer.writeAll(
+        \\};
+        \\
         \\
         \\    /// Find any template matching a given name. Uses all template paths in order.
         \\    pub fn find(name: []const u8) ?Template {
@@ -146,42 +203,9 @@ pub fn compile(
         \\
         \\        return null;
         \\    }
-        \\
-    );
-
-    for (template_defs.items) |template_def| {
-        if (template_def.partial) continue;
-
-        try writer.writeAll(try std.fmt.allocPrint(self.allocator,
-            \\const {0s} = __Manifest.Template{{
-            \\  .key = "{2s}",
-            \\  .name = "{0s}",
-            \\  .prefix = "{1s}",
-            \\}};
-            \\
-        , .{ template_def.name, template_def.prefix, template_def.key }));
-    }
-
-    try writer.writeAll(
-        \\    pub const templates = [_]Template{
-        \\
-    );
-
-    for (template_defs.items) |template_def| {
-        if (template_def.partial) continue;
-
-        try writer.print(
-            \\{s},
-            \\
-        ,
-            .{template_def.name},
-        );
-    }
-
-    try writer.writeAll(
-        \\    };
         \\};
     );
+
     return self.allocator.dupe(u8, buf.items);
 }
 
@@ -222,6 +246,7 @@ fn compileTemplates(
             .prefix = templates_path.prefix,
             .content = output,
             .partial = partial,
+            .blocks = try template.block_map.clone(),
         };
 
         try array.append(template_def);

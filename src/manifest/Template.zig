@@ -24,6 +24,8 @@ args: ?[]const u8 = null,
 partial: bool,
 template_map: std.StringHashMap(TemplateMap),
 templates_paths_map: std.StringHashMap([]const u8),
+block_buf: std.ArrayList(u8),
+block_map: std.StringHashMap(std.ArrayList(Node.Block)),
 
 const end_token = "@end";
 
@@ -87,6 +89,8 @@ pub fn init(
         .partial = std.mem.startsWith(u8, std.fs.path.basename(path), "_"),
         .template_map = template_map,
         .templates_paths_map = templates_paths_map,
+        .block_buf = std.ArrayList(u8).init(allocator),
+        .block_map = std.StringHashMap(std.ArrayList(Node.Block)).init(allocator),
     };
 }
 
@@ -128,12 +132,23 @@ pub fn identifier(self: *Template) ![]const u8 {
     return "";
 }
 
-const Mode = enum { html, zig, partial, args, markdown, extend, @"for", @"if" };
+pub const Mode = enum { html, zig, partial, args, markdown, extend, @"for", @"if", block, blocks };
 const Delimiter = union(enum) {
     string: []const u8,
     eof: void,
     none: void,
     brace: void,
+
+    pub inline fn toString(delimiter: Delimiter, role: enum { open, close }) []const u8 {
+        return switch (delimiter) {
+            .string => |string| string,
+            .eof, .none => "",
+            .brace => switch (role) {
+                .open => "{",
+                .close => "}",
+            },
+        };
+    }
 };
 
 const DelimitedMode = struct {
@@ -297,7 +312,7 @@ fn parseChildren(self: *Template, node: *Node) !void {
 }
 
 // Create an AST node.
-fn createNode(self: Template, token: Token, parent: ?*const Node) !*Node {
+fn createNode(self: *Template, token: Token, parent: ?*const Node) !*Node {
     const node = try self.allocator.create(Node);
     node.* = .{
         .allocator = self.allocator,
@@ -305,10 +320,13 @@ fn createNode(self: Template, token: Token, parent: ?*const Node) !*Node {
         .parent = parent,
         .children = std.ArrayList(*Node).init(self.allocator),
         .generated_template_name = self.name,
+        .template_func_name = self.name,
         .template_map = self.template_map,
         .templates_path = self.templates_path,
         .template_prefix = self.prefix,
         .templates_paths_map = self.templates_paths_map,
+        .block_writer = self.block_buf.writer(),
+        .block_map = &self.block_map,
     };
     return node;
 }
@@ -388,12 +406,13 @@ fn getDelimitedMode(line: []const u8) ?DelimitedMode {
         if (std.mem.eql(u8, field.name, first_word)) {
             const mode: Mode = @enumFromInt(field.value);
             const maybe_delimiter: ?Delimiter = switch (mode) {
-                .args, .extend => .none,
+                .args, .extend, .blocks => .none,
                 .html,
                 .zig,
                 .partial,
                 .markdown,
                 .@"for",
+                .block,
                 => getBlockDelimiter(mode, first_word, stripped[end_of_first_word.?..]),
                 .@"if" => .{ .string = end_token },
             };
@@ -447,8 +466,8 @@ fn getBlockDelimiter(mode: Mode, first_word: []const u8, line: []const u8) ?Deli
         return if (std.mem.eql(u8, first_word, last_word)) null else delimiterFromString(last_word);
     } else {
         return switch (mode) {
-            .partial, .args, .extend => .none,
-            .html, .zig, .markdown, .@"for" => delimiterFromString(stripped),
+            .partial, .args, .extend, .blocks => .none,
+            .html, .zig, .markdown, .@"for", .block => delimiterFromString(stripped),
             .@"if" => .{ .string = end_token },
         };
     }
@@ -516,7 +535,7 @@ fn getBraceDepth(mode: Mode, line: []const u8) isize {
             }
             break :blk depth;
         },
-        .html, .partial, .markdown, .args, .extend, .@"for" => blk: {
+        .html, .partial, .markdown, .args, .extend, .@"for", .block, .blocks => blk: {
             if (util.firstMeaningfulChar(line)) |char| {
                 if (char == '}') break :blk -1;
             }
@@ -575,18 +594,21 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
         self.args = try args_buf.toOwnedSlice();
     }
 
-    const args = try std.mem.concat(
-        self.allocator,
-        u8,
-        &[_][]const u8{ "slots: []const __zmpl.Data.Slot, ", self.args orelse "" },
-    );
     const header = try std.fmt.allocPrint(
         self.allocator,
-        \\pub fn {0s}_render{1s}(zmpl: *__zmpl.Data, Context: type, context: Context, {2s}) anyerror![]const u8 {{
+        \\pub fn {0s}_render{1s}(
+        \\    zmpl: *__zmpl.Data,
+        \\    Context: type,
+        \\    context: Context,
+        \\    {5s}
+        \\    comptime __blocks: []const __zmpl.Template.Block,
+        \\    {2s}
+        \\) anyerror![]const u8 {{
         \\{3s}
         \\    var data = zmpl;
         \\    zmpl.noop(**__zmpl.Data, &data);
         \\    zmpl.noop(Context, context);
+        \\    zmpl.noop([]const __zmpl.Template.Block, __blocks);
         \\    const allocator = zmpl.allocator;
         \\    var __extend: ?__Manifest.Template = null;
         \\    if (__extend) |*__capture| zmpl.noop(*__Manifest.Template, __capture);
@@ -597,9 +619,10 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
         .{
             self.name,
             if (self.partial) "Partial" else "",
-            if (self.partial) args else "",
+            if (self.partial) (self.args orelse "") else "",
             decls_buf.items,
             if (self.partial) "zmpl.noop([]const __zmpl.Data.Slot, slots);" else "",
+            if (self.partial) "slots: []const __zmpl.Data.Slot," else "",
         },
     );
     defer self.allocator.free(header);
@@ -609,19 +632,24 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
 
 // Render the final component of the template function.
 fn renderFooter(self: Template, writer: anytype) !void {
-    try writer.writeAll(
+    try writer.print(
         \\
-        \\    if (__extend) |__capture| {
+        \\    if (__extend) |__capture| {{
         \\        const __inner_content = try allocator.dupe(u8, zmpl.output_buf.items);
-        \\        zmpl.content = .{ .data = zmpl.strip(__inner_content) };
+        \\        zmpl.content = .{{ .data = zmpl.strip(__inner_content) }};
         \\        zmpl.output_buf.clearRetainingCapacity();
-        \\        const __content = try __capture.render(zmpl, Context, context, .{});
+        \\        const __content = try __capture.render(zmpl, Context, context, {s}{s}, .{{}});
         \\        return __content;
-        \\    } else {
+        \\    }} else {{
         \\        return zmpl.chomp(zmpl.output_buf.items);
-        \\    }
-        \\}
+        \\    }}
+        \\}}
         \\
+    ,
+        .{
+            if (self.partial) "" else self.name,
+            if (self.partial) "&.{}" else ".blocks",
+        },
     );
     if (self.partial) {
         try writer.writeAll(try std.fmt.allocPrint(
@@ -631,10 +659,12 @@ fn renderFooter(self: Template, writer: anytype) !void {
             \\    zmpl: *__zmpl.Data,
             \\    Context: type,
             \\    context: Context,
+            \\    comptime blocks: []const __zmpl.Template.Block,
             \\) anyerror![]const u8 {{
             \\    _ = layout;
             \\    _ = zmpl;
             \\    _ = context;
+            \\    _ = blocks;
             \\    std.debug.print("Rendering a partial with a layout is not supported.\n", .{{}});
             \\    return error.ZmplError;
             \\}}
@@ -650,20 +680,23 @@ fn renderFooter(self: Template, writer: anytype) !void {
             \\    zmpl: *__zmpl.Data,
             \\    Context: type,
             \\    context: Context,
+            \\    comptime blocks: []const __zmpl.Template.Block,
             \\) anyerror![]const u8 {{
-            \\    const __inner_content = try zmpl.allocator.dupe(
-            \\        u8, try {0s}_render(zmpl, Context, context)
+            \\    const inner_content = try zmpl.allocator.dupe(
+            \\        u8, try {0s}_render(zmpl, Context, context, blocks)
             \\    );
-            \\    zmpl.content = .{{ .data = zmpl.strip(__inner_content) }};
+            \\    zmpl.content = .{{ .data = zmpl.strip(inner_content) }};
             \\    zmpl.output_buf.clearRetainingCapacity();
-            \\    const __content = try layout.render(zmpl, Context, context, .{{}});
-            \\    return zmpl.strip(__content);
+            \\    const content = try layout.render(zmpl, Context, context, blocks, .{{}});
+            \\    return zmpl.strip(content);
             \\}}
             \\
         ,
             .{self.name},
         ));
     }
+
+    try writer.writeAll(self.block_buf.items);
 }
 
 // Identify the token with the widest span. This token should start at zero and end at

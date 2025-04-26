@@ -19,7 +19,7 @@ test "readme example" {
     try body.put("auth", auth);
 
     if (zmpl.find("example")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
 
         try std.testing.expectEqualStrings(
             \\<!-- Zig mode for template logic -->
@@ -63,7 +63,7 @@ test "complex example" {
     try body.put("auth", auth);
 
     if (zmpl.find("complex_example")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
 
         try std.testing.expectEqualStrings(
             \\    <div>hello</div>    <span class="foo
@@ -126,7 +126,7 @@ test "direct rendering of slots (render [][]const u8 as line-separated string)" 
     defer data.deinit();
 
     if (zmpl.find("slots")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\<div>
             \\<h2>Slots:</h2>
@@ -146,7 +146,7 @@ test "javascript" {
     defer data.deinit();
 
     if (zmpl.find("javascript")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\
             \\  <span>{ is my favorite character</span>
@@ -167,7 +167,7 @@ test "partials without blocks" {
     defer data.deinit();
 
     if (zmpl.find("partials_without_blocks")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\    <span>Blah partial content</span>
             \\      <div>bar</div>    <span>Blah partial content</span>
@@ -183,7 +183,7 @@ test "custom delimiters" {
     defer data.deinit();
 
     if (zmpl.find("custom_delimiters")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\<div><h1>Built-in markdown support</h1>
             \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
@@ -205,7 +205,7 @@ test ".md.zmpl extension" {
     defer data.deinit();
 
     if (zmpl.find("markdown_extension")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\<div><h1>Hello</h1>
             \\</div>
@@ -220,7 +220,7 @@ test "default partial arguments" {
     defer data.deinit();
 
     if (zmpl.find("default_partial_arguments")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\bar, default value
             \\
@@ -235,7 +235,7 @@ test "escaping (HTML and backslash escaping" {
     defer data.deinit();
 
     if (zmpl.find("escaping")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\<div><pre class="language-html" style="font-family: Monospace;"><code>&lt;div&gt;
             \\  @partial foo("bar")
@@ -256,7 +256,7 @@ test "references combined with markdown" {
     try object.put("title", data.string("jetzig.dev"));
 
     if (zmpl.find("references_markdown")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\<div><h1>Test</h1>
             \\
@@ -279,7 +279,7 @@ test "partial arg type coercion" {
     try object.put("baz", data.string("qux"));
 
     if (zmpl.find("partial_arg_type_coercion")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\100
             \\123.456
@@ -300,6 +300,7 @@ test "inheritance" {
             &data,
             Context,
             .{},
+            &.{},
             .{ .layout = zmpl.find("inheritance_parent3") },
         );
         try std.testing.expectEqualStrings(
@@ -334,7 +335,7 @@ test "root init" {
     try root.put("auth", auth);
 
     if (zmpl.find("example")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
 
         try std.testing.expectEqualStrings(
             \\<!-- Zig mode for template logic -->
@@ -370,7 +371,7 @@ test "reference stripping" {
     try root.put("message", data.string("hello"));
 
     if (zmpl.find("reference_with_spaces")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
 
         try std.testing.expectEqualStrings(
             \\<div>hello</div>
@@ -413,7 +414,7 @@ test "inferred type in put/append" {
     try root.put("optional", optional);
 
     if (zmpl.find("basic")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
 
         try std.testing.expectEqualStrings(
             \\hello
@@ -586,7 +587,7 @@ test "iteration" {
     try root.put("objects", objects);
 
     if (zmpl.find("iteration")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\
             \\  <div>baz</div>
@@ -631,7 +632,7 @@ test "datetime format" {
     try root.put("bar", bar);
 
     if (zmpl.find("datetime_format")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\<div>Tue Sep 24 19:30:35 2024</div>
             \\<div>2024-09-24</div>
@@ -665,7 +666,7 @@ test "for with partial" {
     try array.append(.{ .foo = "foo2", .bar = "bar2" });
 
     if (zmpl.find("for_with_partial")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\foo1: bar1
             \\<div>foo1</div>
@@ -698,7 +699,7 @@ test "xss sanitization/raw formatter" {
     try root.put("foo", "<script>alert(':)');</script>");
 
     if (zmpl.find("xss")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\&lt;script&gt;alert(&#039;:)&#039;);&lt;/script&gt;
             \\<script>alert(':)');</script>
@@ -727,7 +728,7 @@ test "if/else" {
     try foo.put("falsey", false);
 
     if (zmpl.find("if_else")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\
             \\    expected here
@@ -771,7 +772,7 @@ test "for with zmpl value" {
     try foo.append("qux");
 
     if (zmpl.find("for_with_zmpl_value_main")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\
             \\    bar
@@ -792,7 +793,7 @@ test "comments" {
     defer data.deinit();
 
     if (zmpl.find("comments")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\
             \\
@@ -815,7 +816,7 @@ test "for with if" {
     try things.append(.{ .foo = "quux", .bar = "corge", .time = "2024-11-24T18:51:23Z" });
 
     if (zmpl.find("for_with_if")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\<div>foo: bar
             \\   
@@ -862,11 +863,34 @@ test "mix mardown and zig" {
     // markdown (i.e. the parent's mode) but the list gets broken into three parts intsead of a
     // single list.
     if (zmpl.find("mix_markdown_and_zig")) |template| {
-        const output = try template.render(&data, Context, .{}, .{});
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
             \\<div><h1>Header</h1>
             \\<ul><li>list item 1</li><li>list item 2</li></ul></div><div><ul><li>qux</li><li>   </li></ul></div><div><ul><li>corge</li><li>   </li></ul></div><div><ul><li>last item</li><li>qux</li></ul></div>
             \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
+
+test "blocks" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    if (zmpl.find("blocks")) |template| {
+        const output = try template.render(
+            &data,
+            Context,
+            .{},
+            &.{},
+            .{ .layout = zmpl.find("blocks_layout") },
+        );
+        try std.testing.expectEqualStrings(
+            \\<html>
+            \\    <head>
+            \\    <link rel="stylesheet" href="https://www.example.com/styles.css" />    </head>
+            \\<html>
         , output);
     } else {
         try std.testing.expect(false);

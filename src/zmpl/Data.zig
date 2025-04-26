@@ -1488,6 +1488,7 @@ pub const Value = union(ValueType) {
             *Value => @constCast(&self),
             *const Value => &self,
             Value => self,
+            []const zmpl.Template.Block => self,
             else => switch (@typeInfo(CET)) {
                 .pointer => if (isString(CET)) switch (self) {
                     .string => |capture| capture.value,
@@ -2022,7 +2023,7 @@ fn isStringCoercablePointer(pointer: std.builtin.Type.Pointer, child: type) bool
     // Logic borrowed from old implementation of std.meta.isZigString
     if (!pointer.is_volatile and
         !pointer.is_allowzero and
-        pointer.size == .slice) return true;
+        pointer.size == .slice and pointer.child == u8) return true;
     if (!pointer.is_volatile and
         !pointer.is_allowzero and pointer.size == .one and
         child_info == .array and

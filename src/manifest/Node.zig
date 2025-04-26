@@ -5,6 +5,7 @@ const Zmd = @import("zmd").Zmd;
 const ZmdNode = @import("zmd").Node;
 
 const Token = @import("Template.zig").Token;
+const Mode = @import("Template.zig").Mode;
 const TemplateMap = @import("Template.zig").TemplateMap;
 const util = @import("util.zig");
 const IfStatement = @import("IfStatement.zig");
@@ -18,12 +19,20 @@ template_map: std.StringHashMap(TemplateMap),
 templates_paths_map: std.StringHashMap([]const u8),
 templates_path: []const u8,
 template_prefix: []const u8,
+template_func_name: []const u8,
+block_writer: std.ArrayList(u8).Writer,
+block_map: *std.StringHashMap(std.ArrayList(Block)),
 
 const else_token = "@else";
 
 const Node = @This();
 
 const WriterOptions = struct { zmpl_writer: []const u8 = "zmpl" };
+
+pub const Block = struct {
+    name: []const u8,
+    func: []const u8,
+};
 
 /// Debugging writer - writes debug tokens after every print/write instruction. This requires
 /// that all print/write operations are line-based, otherwise the injected Zig comment will
@@ -74,8 +83,8 @@ pub fn compile(self: Node, input: []const u8, writer: *Writer, options: type) !v
     writer.token = self.token;
 
     if (self.token.mode == .partial and self.children.items.len > 0) {
-        std.debug.print(
-            "Partial slots cannot contain mode blocks:\n{s}\n",
+        std.log.err(
+            "Partial slots cannot contain mode blocks:\n{s}",
             .{input[self.token.start - self.token.mode_line.len .. self.token.end]},
         );
         return error.ZmplSyntaxError;
@@ -125,19 +134,25 @@ fn render(
         };
 
     const stripped_content = try self.stripComments(content);
-    switch (self.token.mode) {
-        .zig => try self.renderZig(stripped_content, writer),
-        .html => try self.renderHtml(stripped_content, .{}, writer),
+    try self.renderMode(self.token.mode, context, stripped_content, markdown_fragments, writer);
+}
+
+fn renderMode(self: Node, mode: Mode, context: Context, content: []const u8, markdown_fragments: type, writer: anytype) !void {
+    switch (mode) {
+        .zig => try self.renderZig(content, writer),
+        .html => try self.renderHtml(content, .{}, writer),
         .markdown => try self.renderHtml(
-            try self.renderMarkdown(stripped_content, markdown_fragments),
+            try self.renderMarkdown(content, markdown_fragments),
             .{},
             writer,
         ),
-        .partial => try self.renderPartial(stripped_content, writer),
+        .partial => try self.renderPartial(content, writer),
         .args => try self.renderArgs(writer),
         .extend => try self.renderExtend(writer),
-        .@"for" => try self.renderFor(context, stripped_content, writer, markdown_fragments),
-        .@"if" => try self.renderIf(context, stripped_content, writer),
+        .@"for" => try self.renderFor(context, content, writer, markdown_fragments),
+        .@"if" => try self.renderIf(context, content, writer),
+        .block => try self.writeBlock(context, content, markdown_fragments),
+        .blocks => try self.writeBlocks(writer),
     }
 }
 
@@ -156,7 +171,7 @@ fn stripComments(self: Node, content: []const u8) ![]const u8 {
 fn renderClose(self: Node, writer: anytype) !void {
     switch (self.token.mode) {
         .@"for", .@"if" => try writer.writeAll("\n}\n"),
-        .zig, .html, .markdown, .partial, .args, .extend => {},
+        .zig, .html, .markdown, .partial, .args, .extend, .block, .blocks => {},
     }
 }
 
@@ -324,8 +339,8 @@ fn renderHtml(
 
 fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
     if (self.token.args == null) {
-        std.debug.print(
-            "Expected `@partial` with name, no name was given [{}->{}]: '{s}'\n",
+        std.log.err(
+            "Expected `@partial` with name, no name was given [{}->{}]: '{s}'",
             .{
                 self.token.start,
                 self.token.end,
@@ -358,8 +373,8 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
     }
 
     if (some_positional and some_keyword) {
-        std.debug.print(
-            "Partial args must be either all keyword or all positional, found: {s}\n",
+        std.log.err(
+            "Partial args must be either all keyword or all positional, found: {s}",
             .{args},
         );
         return error.ZmplSyntaxError;
@@ -379,7 +394,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
                 } else continue;
             }
             if (expected_arg.name == null) {
-                std.debug.print("Error parsing @args pragma for partial `{s}`", .{partial_name});
+                std.log.err("Error parsing @args pragma for partial `{s}`", .{partial_name});
                 return error.ZmplSyntaxError;
             }
             if (std.mem.eql(u8, actual_arg.name.?, expected_arg.name.?)) {
@@ -397,13 +412,13 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
     }
 
     if (reordered_args.items.len != expected_partial_args.len) {
-        std.debug.print("Expected args for partial `{s}`: ", .{partial_name});
-        for (expected_partial_args, 0..) |arg, index| std.debug.print(
+        std.log.err("Expected args for partial `{s}`: ", .{partial_name});
+        for (expected_partial_args, 0..) |arg, index| std.log.err(
             "{s}{s}",
             .{ arg.name.?, if (index + 1 < expected_partial_args.len) ", " else "\n" },
         );
-        std.debug.print("Found: ", .{});
-        for (partial_args, 0..) |arg, index| std.debug.print(
+        std.log.err("Found: ", .{});
+        for (partial_args, 0..) |arg, index| std.log.err(
             "{s}{s}",
             .{ arg.name orelse "[]", if (index + 1 < partial_args.len) ", " else "\n" },
         );
@@ -415,7 +430,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
     );
 
     if (generated_partial_name == null) {
-        std.debug.print("Partial not found: {s}\n", .{partial_name});
+        std.log.err("Partial not found: {s}", .{partial_name});
         return error.ZmplSyntaxError;
     }
 
@@ -450,8 +465,9 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
                             root,
                             it.rest(),
                             generated_partial_name.?,
-                            // index + 4 to offset `data`, `Context`, `context`, and `slots` args:
-                            index + 4,
+                            // index + 4 to offset `data`, `Context`, `context`, `slots`, and
+                            // `blocks` args:
+                            index + 5,
                             if (it.rest().len == 0) "" else ".",
                             it.rest(),
                         },
@@ -469,8 +485,8 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
                             .{
                                 root,
                                 generated_partial_name.?,
-                                // index + 4 to offset `data`, `Context`, `context`, and `slots` args:
-                                index + 4,
+                                // index + 5 to offset `data`, `Context`, `context`, and `slots` args:
+                                index + 5,
                             },
                         ),
                     );
@@ -491,7 +507,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
         \\        __partial_data.template_decls = zmpl.template_decls;
         \\        defer __partial_data.deinit();
         \\
-        \\    const __partial_output = try {2s}_renderPartial(&__partial_data, Context, context, &__slots, {3s});
+        \\    const __partial_output = try {2s}_renderPartial(&__partial_data, Context, context, &__slots, &.{{}}, {3s});
         \\    defer allocator.free(__partial_output);
         \\    try zmpl.write(__partial_output);
         \\}}
@@ -593,6 +609,9 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
                 .extend => try self.renderExtend(writer),
                 .@"for" => try self.renderFor(context, content, writer, markdown_fragments),
                 .@"if" => try self.renderIf(context, content, writer),
+                // TODO
+                .block => {},
+                .blocks => {},
             }
         }
         return;
@@ -603,11 +622,11 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
     const for_args_start = std.mem.indexOfScalar(u8, mode_line, '(');
     const for_args_end = std.mem.lastIndexOfScalar(u8, mode_line, ')');
     if (for_args_start == null) {
-        std.debug.print("{s}\n", .{expected_format_message});
+        std.log.err("{s}", .{expected_format_message});
         return error.ZmplSyntaxError;
     }
     if (for_args_end == null) {
-        std.debug.print("{s}\n", .{expected_format_message});
+        std.log.err("{s}", .{expected_format_message});
         return error.ZmplSyntaxError;
     }
     const for_args = util.strip(mode_line[for_args_start.? + 1 .. for_args_end.?]);
@@ -615,13 +634,13 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
     const rest = mode_line[for_args_end.? + 2 ..];
     const block_args_start = std.mem.indexOfScalar(u8, rest, '|');
     if (block_args_start == null) {
-        std.debug.print("{s}\n", .{expected_format_message});
+        std.log.err("{s}", .{expected_format_message});
         return error.ZmplSyntaxError;
     }
 
     const block_args_end = std.mem.indexOfScalar(u8, rest[block_args_start.? + 1 ..], '|');
     if (block_args_end == null) {
-        std.debug.print("{s}\n", .{expected_format_message});
+        std.log.err("{s}", .{expected_format_message});
         return error.ZmplSyntaxError;
     }
 
@@ -667,6 +686,9 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
             .extend => try self.renderExtend(writer),
             .@"for" => try self.renderFor(context, content, writer, markdown_fragments),
             .@"if" => try self.renderIf(context, content, writer),
+            // TODO
+            .block => {},
+            .blocks => {},
         }
     }
 }
@@ -763,7 +785,7 @@ const ElseIterator = struct {
         if (util.indexOfWord(self.input[self.index..], else_token)) |index| {
             const rest = self.input[self.index + index ..];
             const eol = std.mem.indexOfScalar(u8, rest, '\n') orelse {
-                std.debug.print("Expected line break after `@else` directive.\n", .{});
+                std.log.err("Expected line break after `@else` directive.", .{});
                 return error.ZmplSyntaxError;
             };
             if (util.indexOfWord(rest[0..eol], "if")) |if_index| {
@@ -795,12 +817,78 @@ fn ifStatement(self: Node, input: []const u8) !IfStatement {
             var stream = std.io.fixedBufferStream(&buf);
             const writer = stream.writer();
             try ast.renderError(err, writer);
-            std.debug.print("Error parsing `@if` conditions: {s}\n", .{stream.getWritten()});
+            std.log.err("Error parsing `@if` conditions: {s}", .{stream.getWritten()});
         }
         return error.ZmplSyntaxError;
     }
 
     return IfStatement.init(ast);
+}
+
+fn writeBlock(self: Node, context: Context, content: []const u8, markdown_fragments: type) !void {
+    const args = self.token.args orelse {
+        std.log.err("Missing argument to `@block` mode: `{s}`", .{self.token.mode_line});
+        return error.ZmplSyntaxError;
+    };
+    const name_end = std.mem.indexOf(u8, args, self.token.delimiter.toString(.open)) orelse {
+        std.log.err("Missing delimiter `@block` mode: `{s}`", .{self.token.mode_line});
+        return error.ZmplSyntaxError;
+    };
+    const block_name = std.mem.trim(
+        u8,
+        args[0..name_end],
+        &std.ascii.whitespace,
+    );
+
+    const function_name = try util.generateVariableNameAlloc(self.allocator);
+    const writer = self.block_writer;
+    try self.block_writer.print(
+        \\pub fn {s}(zmpl: *__zmpl.Data, Context: type, context: Context) !void {{
+        \\  _ = zmpl.noop(Context, context);
+        \\
+    , .{function_name});
+
+    const result = try self.block_map.getOrPut(block_name);
+    if (!result.found_existing) result.value_ptr.* = std.ArrayList(Block).init(self.allocator);
+    try result.value_ptr.append(.{ .func = function_name, .name = block_name });
+
+    if (self.parent) |parent| {
+        switch (parent.token.mode) {
+            .zig => try self.renderZig(content, writer),
+            .html => try self.renderHtml(content, .{}, writer),
+            .markdown => try self.renderHtml(
+                try self.renderMarkdown(content, markdown_fragments),
+                .{},
+                writer,
+            ),
+            .partial => try self.renderPartial(content, writer),
+            .args => try self.renderArgs(writer),
+            .extend => try self.renderExtend(writer),
+            .@"for" => try self.renderFor(context, content, writer, markdown_fragments),
+            .@"if" => try self.renderIf(context, content, writer),
+            .block => try self.writeBlock(context, content, markdown_fragments),
+            .blocks => try self.writeBlocks(writer),
+        }
+    } else {
+        try self.renderHtml(content, .{}, writer);
+    }
+    try writer.writeAll("}\n");
+}
+
+fn writeBlocks(self: Node, writer: anytype) !void {
+    const args = self.token.args orelse {
+        std.log.err("Missing argument to `@blocks` mode: `{s}`", .{self.token.mode_line});
+        return error.ZmplSyntaxError;
+    };
+    try writer.print(
+        \\inline for (__blocks) |__block| {{
+        \\  if (std.mem.eql(u8, __block.name, {s})) {{
+        \\      try @field(__zmpl.Manifest, __block.func)(zmpl, Context, context);
+        \\  }}
+        \\}}
+    ,
+        .{try util.zigStringEscape(self.allocator, std.mem.trim(u8, args, &std.ascii.whitespace))},
+    );
 }
 
 // Represents a name/value keypair OR a name/type keypair.
