@@ -11,6 +11,7 @@ const IfStatement = @import("IfStatement.zig");
 
 token: Token,
 children: std.ArrayList(*Node),
+parent: ?*const Node,
 generated_template_name: []const u8,
 allocator: std.mem.Allocator,
 template_map: std.StringHashMap(TemplateMap),
@@ -135,7 +136,7 @@ fn render(
         .partial => try self.renderPartial(stripped_content, writer),
         .args => try self.renderArgs(writer),
         .extend => try self.renderExtend(writer),
-        .@"for" => try self.renderFor(context, stripped_content, writer),
+        .@"for" => try self.renderFor(context, stripped_content, writer, markdown_fragments),
         .@"if" => try self.renderIf(context, stripped_content, writer),
     }
 }
@@ -573,11 +574,29 @@ fn renderExtend(self: Node, writer: anytype) !void {
     )});
 }
 
-fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype) !void {
+fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype, markdown_fragments: type) !void {
     // If we have already rendered once, re-rendering the for loop makes no sense so we can just
     // write the remaining content directly. This can happen when a child node of the for loop
     // contains whitespace etc.
-    if (context != .initial) return try self.renderHtml(content, .{}, writer);
+    if (context != .initial) {
+        if (self.parent) |parent| {
+            switch (parent.token.mode) {
+                .zig => try self.renderZig(content, writer),
+                .html => try self.renderHtml(content, .{}, writer),
+                .markdown => try self.renderHtml(
+                    try self.renderMarkdown(content, markdown_fragments),
+                    .{},
+                    writer,
+                ),
+                .partial => try self.renderPartial(content, writer),
+                .args => try self.renderArgs(writer),
+                .extend => try self.renderExtend(writer),
+                .@"for" => try self.renderFor(context, content, writer, markdown_fragments),
+                .@"if" => try self.renderIf(context, content, writer),
+            }
+        }
+        return;
+    }
 
     const expected_format_message = "Expected format `for (foo) |arg| { in {s}";
     const mode_line = self.token.mode_line["@for".len..];
@@ -634,7 +653,22 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype)
         .{ try for_args_joined.toOwnedSlice(), block_args },
     );
 
-    try self.renderHtml(content, .{}, writer);
+    if (self.parent) |parent| {
+        switch (parent.token.mode) {
+            .zig => try self.renderZig(content, writer),
+            .html => try self.renderHtml(content, .{}, writer),
+            .markdown => try self.renderHtml(
+                try self.renderMarkdown(content, markdown_fragments),
+                .{},
+                writer,
+            ),
+            .partial => try self.renderPartial(content, writer),
+            .args => try self.renderArgs(writer),
+            .extend => try self.renderExtend(writer),
+            .@"for" => try self.renderFor(context, content, writer, markdown_fragments),
+            .@"if" => try self.renderIf(context, content, writer),
+        }
+    }
 }
 
 fn parseZmpl(self: Node, content: []const u8) ![]const u8 {

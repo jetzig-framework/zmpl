@@ -847,3 +847,28 @@ test "for with if" {
         try std.testing.expect(false);
     }
 }
+
+test "mix mardown and zig" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.object();
+    try root.put("foo", true);
+    var things = try root.put("things", .array);
+    try things.append(.{ .foo = "baz", .bar = "qux", .time = "2024-11-24T18:50:23Z" });
+    try things.append(.{ .foo = "quux", .bar = "corge", .time = "2024-11-24T18:51:23Z" });
+
+    // FIXME: This doesn't work exactly how we want - the for loop now correctly reverts back to
+    // markdown (i.e. the parent's mode) but the list gets broken into three parts intsead of a
+    // single list.
+    if (zmpl.find("mix_markdown_and_zig")) |template| {
+        const output = try template.render(&data, Context, .{}, .{});
+        try std.testing.expectEqualStrings(
+            \\<div><h1>Header</h1>
+            \\<ul><li>list item 1</li><li>list item 2</li></ul></div><div><ul><li>qux</li><li>   </li></ul></div><div><ul><li>corge</li><li>   </li></ul></div><div><ul><li>last item</li><li>qux</li></ul></div>
+            \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}

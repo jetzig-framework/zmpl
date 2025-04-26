@@ -277,7 +277,7 @@ fn parse(self: *Template) !void {
     if (self.state != .tokenized) unreachable;
 
     const root_token = getRootToken(self.tokens.items);
-    self.root_node = try self.createNode(root_token);
+    self.root_node = try self.createNode(root_token, null);
 
     try self.parseChildren(self.root_node);
 
@@ -290,18 +290,19 @@ fn parse(self: *Template) !void {
 fn parseChildren(self: *Template, node: *Node) !void {
     var tokens_it = self.tokensIterator(node.token);
     while (tokens_it.next()) |token| {
-        const child_node = try self.createNode(token);
+        const child_node = try self.createNode(token, node);
         try node.children.append(child_node);
         try self.parseChildren(child_node);
     }
 }
 
 // Create an AST node.
-fn createNode(self: Template, token: Token) !*Node {
+fn createNode(self: Template, token: Token, parent: ?*const Node) !*Node {
     const node = try self.allocator.create(Node);
     node.* = .{
         .allocator = self.allocator,
         .token = token,
+        .parent = parent,
         .children = std.ArrayList(*Node).init(self.allocator),
         .generated_template_name = self.name,
         .template_map = self.template_map,
