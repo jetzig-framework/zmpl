@@ -71,3 +71,8 @@ fn resolveString(value: anytype) ![]const u8 {
         else => value,
     };
 }
+
+pub fn json(self: Format, value: anytype) ![]const u8 {
+    try std.json.stringify(value, .{}, self.writer);
+    return "";
+}

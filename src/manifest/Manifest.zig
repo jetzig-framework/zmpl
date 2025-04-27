@@ -248,7 +248,7 @@ fn compileTemplates(
             .prefix = templates_path.prefix,
             .content = output,
             .partial = partial,
-            .blocks = try template.block_map.clone(),
+            .blocks = template.block_map,
         };
 
         try array.append(template_def);
