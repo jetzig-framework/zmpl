@@ -47,17 +47,26 @@ pub fn main() !void {
         const path_start = prefix_end + ",path=".len;
         const prefix = syntax[prefix_start..prefix_end];
         const path = syntax[path_start..];
-        try templates_paths.append(.{ .prefix = prefix, .path = try std.fs.realpathAlloc(allocator, path) });
+        const present = !std.mem.eql(u8, path, "_");
+        try templates_paths.append(.{
+            .prefix = prefix,
+            .path = if (present) try std.fs.realpathAlloc(allocator, path) else "_",
+            .present = present,
+        });
     }
 
     const template_paths = args[3..];
 
     var template_paths_buf = std.ArrayList(Manifest.TemplatePath).init(allocator);
     for (template_paths) |path| {
-        const prefix = for (templates_paths.items) |templates_path| {
-            if (std.mem.startsWith(u8, path, templates_path.path)) break templates_path.prefix;
+        const templates_path = for (templates_paths.items) |templates_path| {
+            if (std.mem.startsWith(u8, path, templates_path.path)) break templates_path;
         } else unreachable;
-        try template_paths_buf.append(.{ .prefix = prefix, .path = path });
+        try template_paths_buf.append(.{
+            .path = path,
+            .prefix = templates_path.prefix,
+            .present = templates_path.present,
+        });
     }
 
     var manifest = Manifest.init(allocator, templates_paths.items, template_paths_buf.items);

@@ -20,7 +20,7 @@ templates_paths_map: std.StringHashMap([]const u8),
 templates_path: []const u8,
 template_prefix: []const u8,
 template_func_name: []const u8,
-block_writer: std.ArrayList(u8).Writer,
+block_writer: Writer,
 block_map: *std.StringHashMap(std.ArrayList(Block)),
 
 const else_token = "@else";
@@ -79,8 +79,9 @@ pub const Writer = struct {
     }
 };
 
-pub fn compile(self: Node, input: []const u8, writer: *Writer, options: type) !void {
-    writer.token = self.token;
+pub fn compile(self: Node, input: []const u8, writer: Writer, options: type) !void {
+    var compile_writer = writer;
+    compile_writer.token = self.token;
 
     if (self.token.mode == .partial and self.children.items.len > 0) {
         std.log.err(
@@ -97,25 +98,25 @@ pub fn compile(self: Node, input: []const u8, writer: *Writer, options: type) !v
     for (self.children.items) |child_node| {
         if (start < child_node.token.start) {
             const content = input[start .. child_node.token.start - 1];
-            try self.render(if (initial) .initial else .secondary, content, options, writer);
+            try self.render(if (initial) .initial else .secondary, content, options, compile_writer);
             initial = false;
         }
 
         start = child_node.token.end + 1;
-        try child_node.compile(input, writer, options);
+        try child_node.compile(input, compile_writer, options);
     }
 
     if (self.children.items.len == 0) {
         const content = input[self.token.startOfContent()..self.token.endOfContent()];
-        try self.render(.initial, content, options, writer);
+        try self.render(.initial, content, options, compile_writer);
     } else {
         const last_child = self.children.items[self.children.items.len - 1];
         if (last_child.token.end + 1 < self.token.endOfContent()) {
             const content = input[last_child.token.end + 1 .. self.token.endOfContent()];
-            try self.render(.secondary, content, options, writer);
+            try self.render(.secondary, content, options, compile_writer);
         }
     }
-    try self.renderClose(writer);
+    try self.renderClose(compile_writer);
 }
 
 const Context = enum { initial, secondary };
@@ -134,7 +135,7 @@ fn render(
         };
 
     const stripped_content = try self.stripComments(content);
-    try self.renderMode(self.token.mode, context, stripped_content, markdown_fragments, writer);
+    try self.renderMode(self.token.mode, context, stripped_content, markdown_fragments, if (self.hasBlockParent()) self.block_writer else writer);
 }
 
 fn renderMode(self: Node, mode: Mode, context: Context, content: []const u8, markdown_fragments: type, writer: anytype) !void {
@@ -169,9 +170,13 @@ fn stripComments(self: Node, content: []const u8) ![]const u8 {
 }
 
 fn renderClose(self: Node, writer: anytype) !void {
+    const close_writer = switch (self.token.mode) {
+        .block => self.block_writer,
+        else => writer,
+    };
     switch (self.token.mode) {
-        .@"for", .@"if" => try writer.writeAll("\n}\n"),
-        .zig, .html, .markdown, .partial, .args, .extend, .block, .blocks => {},
+        .@"for", .@"if", .block => try close_writer.writeAll("\n}\n"),
+        .zig, .html, .markdown, .partial, .args, .extend, .blocks => {},
     }
 }
 
@@ -185,6 +190,14 @@ fn renderZig(self: Node, content: []const u8, writer: anytype) !void {
             .zig => try writer.print("{s}\n", .{line}),
         }
     }
+}
+
+fn hasBlockParent(self: Node) bool {
+    const parent = self.parent orelse return false;
+    return switch (parent.token.mode) {
+        .block => true,
+        else => parent.hasBlockParent(),
+    };
 }
 
 const HtmlIterator = struct {
@@ -425,7 +438,11 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
         return error.ZmplSyntaxError;
     }
 
-    const generated_partial_name = self.template_map.get(prefix).?.get(
+    const prefix_map = self.template_map.get(prefix) orelse {
+        std.log.warn("Failed detecting Zmpl prefix directory: `{s}` in partial `{s}`", .{ prefix, partial_name });
+        return;
+    };
+    const generated_partial_name = prefix_map.get(
         try util.templatePathFetch(self.allocator, partial_name, true),
     );
 
@@ -825,33 +842,37 @@ fn ifStatement(self: Node, input: []const u8) !IfStatement {
     return IfStatement.init(ast);
 }
 
+// Write a `@block` definition - note that we write to a different output buffer here - each
+// block is compiled into a separate function which is written after the main manifest body.
 fn writeBlock(self: Node, context: Context, content: []const u8, markdown_fragments: type) !void {
-    const args = self.token.args orelse {
-        std.log.err("Missing argument to `@block` mode: `{s}`", .{self.token.mode_line});
-        return error.ZmplSyntaxError;
-    };
-    const name_end = std.mem.indexOf(u8, args, self.token.delimiter.toString(.open)) orelse {
-        std.log.err("Missing delimiter `@block` mode: `{s}`", .{self.token.mode_line});
-        return error.ZmplSyntaxError;
-    };
-    const block_name = std.mem.trim(
-        u8,
-        args[0..name_end],
-        &std.ascii.whitespace,
-    );
+    if (context == .initial) {
+        const args = self.token.args orelse {
+            std.log.err("Missing argument to `@block` mode: `{s}`", .{self.token.mode_line});
+            return error.ZmplSyntaxError;
+        };
+        const name_end = std.mem.indexOf(u8, args, self.token.delimiter.toString(.open)) orelse {
+            std.log.err("Missing delimiter `@block` mode: `{s}`", .{self.token.mode_line});
+            return error.ZmplSyntaxError;
+        };
+        const block_name = std.mem.trim(
+            u8,
+            args[0..name_end],
+            &std.ascii.whitespace,
+        );
 
-    const function_name = try util.generateVariableNameAlloc(self.allocator);
+        const function_name = try util.generateVariableNameAlloc(self.allocator);
+        try self.block_writer.print(
+            \\pub fn {s}(zmpl: *__zmpl.Data, Context: type, context: Context) !void {{
+            \\  _ = zmpl.noop(Context, context);
+            \\
+        , .{function_name});
+
+        const result = try self.block_map.getOrPut(block_name);
+        if (!result.found_existing) result.value_ptr.* = std.ArrayList(Block).init(self.allocator);
+        try result.value_ptr.append(.{ .func = function_name, .name = block_name });
+    }
+
     const writer = self.block_writer;
-    try self.block_writer.print(
-        \\pub fn {s}(zmpl: *__zmpl.Data, Context: type, context: Context) !void {{
-        \\  _ = zmpl.noop(Context, context);
-        \\
-    , .{function_name});
-
-    const result = try self.block_map.getOrPut(block_name);
-    if (!result.found_existing) result.value_ptr.* = std.ArrayList(Block).init(self.allocator);
-    try result.value_ptr.append(.{ .func = function_name, .name = block_name });
-
     if (self.parent) |parent| {
         switch (parent.token.mode) {
             .zig => try self.renderZig(content, writer),
@@ -872,7 +893,6 @@ fn writeBlock(self: Node, context: Context, content: []const u8, markdown_fragme
     } else {
         try self.renderHtml(content, .{}, writer);
     }
-    try writer.writeAll("}\n");
 }
 
 fn writeBlocks(self: Node, writer: anytype) !void {
@@ -1096,10 +1116,16 @@ fn getPartialArgsSignature(self: Node, prefix: []const u8, partial_name: []const
     std.mem.replaceScalar(u8, fetch_name, '/', std.fs.path.sep);
     const with_extension = try std.mem.concat(self.allocator, u8, &[_][]const u8{ fetch_name, ".zmpl" });
     defer self.allocator.free(with_extension);
-    const templates_path = self.templates_paths_map.get(prefix).?;
+    const templates_path = self.templates_paths_map.get(prefix) orelse {
+        std.log.err(
+            "Error locating templates path for prefix `{s}`",
+            .{prefix},
+        );
+        return error.ZmplSyntaxError;
+    };
     const path = try std.fs.path.join(self.allocator, &[_][]const u8{ templates_path, with_extension });
     defer self.allocator.free(path);
-    const content = try util.readFile(self.allocator, std.fs.cwd(), path);
+    const content = util.readFile(self.allocator, std.fs.cwd(), path) catch return &.{};
     defer self.allocator.free(content);
     var it = std.mem.splitScalar(u8, content, '\n');
 

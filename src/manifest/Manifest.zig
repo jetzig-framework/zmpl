@@ -13,6 +13,7 @@ const Manifest = @This();
 pub const TemplatePath = struct {
     prefix: []const u8,
     path: []const u8,
+    present: bool,
 };
 
 const TemplateDef = struct {
@@ -219,6 +220,7 @@ fn compileTemplates(
     comptime options: type,
 ) !void {
     for (self.template_paths) |template_path| {
+        if (!template_path.present) continue;
         if (!std.mem.eql(u8, template_path.prefix, templates_path.prefix)) continue;
 
         const key = try util.templatePathStore(self.allocator, templates_paths_map.get(template_path.prefix).?, template_path.path);

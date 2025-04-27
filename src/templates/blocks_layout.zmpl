@@ -2,4 +2,4 @@
     <head>
         @blocks head
     </head>
-<html>
+</html>

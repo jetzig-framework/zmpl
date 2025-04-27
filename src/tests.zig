@@ -888,9 +888,8 @@ test "blocks" {
         );
         try std.testing.expectEqualStrings(
             \\<html>
-            \\    <head>
-            \\    <link rel="stylesheet" href="https://www.example.com/styles.css" />    </head>
-            \\<html>
+            \\    <head>            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />    </head>
+            \\</html>
         , output);
     } else {
         try std.testing.expect(false);

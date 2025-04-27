@@ -109,10 +109,10 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
     var buf = std.ArrayList(u8).init(self.allocator);
     defer buf.deinit();
 
-    var writer = Node.Writer{ .buf = &buf, .token = self.tokens.items[0] };
-
+    const writer = Node.Writer{ .buf = &buf, .token = self.tokens.items[0] };
     try self.renderHeader(writer, options);
-    try self.root_node.compile(self.input, &writer, options);
+    try self.root_node.compile(self.input, writer, options);
+
     try self.renderFooter(writer);
 
     self.state = .compiled;
@@ -325,7 +325,7 @@ fn createNode(self: *Template, token: Token, parent: ?*const Node) !*Node {
         .templates_path = self.templates_path,
         .template_prefix = self.prefix,
         .templates_paths_map = self.templates_paths_map,
-        .block_writer = self.block_buf.writer(),
+        .block_writer = Node.Writer{ .buf = &self.block_buf, .token = self.tokens.items[0] },
         .block_map = &self.block_map,
     };
     return node;

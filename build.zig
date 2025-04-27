@@ -204,15 +204,11 @@ pub fn templatesPaths(allocator: std.mem.Allocator, paths: []const TemplatesPath
         const absolute_path = if (std.fs.path.isAbsolute(joined))
             try allocator.dupe(u8, joined)
         else
-            std.fs.cwd().realpathAlloc(allocator, joined) catch |err| {
+            std.fs.cwd().realpathAlloc(allocator, joined) catch |err|
                 switch (err) {
-                    error.FileNotFound => {
-                        std.log.warn("[zmpl] Templates path not found: `{s}` - skipping.", .{joined});
-                        continue;
-                    },
+                    error.FileNotFound => "_",
                     else => return err,
-                }
-            };
+                };
 
         try buf.append(
             try std.mem.concat(allocator, u8, &.{ "prefix=", path.prefix, ",path=", absolute_path }),
@@ -252,6 +248,8 @@ fn findTemplates(b: *std.Build, templates_paths: []const []const u8) ![][]const 
     }
 
     for (templates_paths_buf.items) |templates_path| {
+        if (std.mem.eql(u8, templates_path, "_")) continue;
+
         var dir = std.fs.cwd().openDir(templates_path, .{ .iterate = true }) catch |err| {
             switch (err) {
                 error.FileNotFound => {
