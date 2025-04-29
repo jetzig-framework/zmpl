@@ -1468,7 +1468,7 @@ pub const Value = union(ValueType) {
             },
             bool => switch (self) {
                 .boolean => |capture| capture.value,
-                .string => |capture| std.mem.eql(u8, capture.value, "1"),
+                .string => |capture| std.mem.eql(u8, capture.value, "1") or std.mem.eql(u8, capture.value, "on"),
                 else => |tag| zmplError(
                     .compare,
                     "Cannot compare Zmpl `{s}` with `{s}`",
@@ -1715,7 +1715,7 @@ pub const Object = struct {
                 },
                 .boolean => switch (value.*) {
                     .boolean => |capture| capture.value,
-                    .string => |capture| std.mem.eql(u8, capture.value, "1"),
+                    .string => |capture| std.mem.eql(u8, capture.value, "1") or std.mem.eql(u8, capture.value, "on"),
                     .integer => |capture| capture.value > 0,
                     else => null,
                 },
@@ -2470,6 +2470,21 @@ test "coerce enum" {
     const e2: E = .bar;
     try std.testing.expect(e1 == try value.coerce(E));
     try std.testing.expect(e2 != try value.coerce(E));
+}
+
+test "coerce boolean" {
+    const value1 = Value{ .string = .{ .allocator = undefined, .value = "1" } };
+    const value2 = Value{ .string = .{ .allocator = undefined, .value = "0" } };
+    const value3 = Value{ .string = .{ .allocator = undefined, .value = "on" } };
+    const value4 = Value{ .string = .{ .allocator = undefined, .value = "random" } };
+    const value5 = Value{ .boolean = .{ .allocator = undefined, .value = true } };
+    const value6 = Value{ .boolean = .{ .allocator = undefined, .value = false } };
+    try std.testing.expect(try value1.coerce(bool));
+    try std.testing.expect(!try value2.coerce(bool));
+    try std.testing.expect(try value3.coerce(bool));
+    try std.testing.expect(!try value4.coerce(bool));
+    try std.testing.expect(try value5.coerce(bool));
+    try std.testing.expect(!try value6.coerce(bool));
 }
 
 test "array pop" {
