@@ -967,6 +967,22 @@ pub const Value = union(ValueType) {
         }
     }
 
+    /// Detect if one container includes another (i.e. an object or array contains all members of
+    /// another object/array).
+    pub fn includes(self: Value, other: Value) bool {
+        return switch (self) {
+            .object => |self_obj| switch (other) {
+                .object => |other_obj| self_obj.includes(other_obj),
+                else => false,
+            },
+            .array => |self_arr| switch (other) {
+                .array => |other_arr| self_arr.includes(other_arr),
+                else => false,
+            },
+            else => false,
+        };
+    }
+
     /// Compare a `Value` to an arbitrary type with the given `operator`.
     /// ```zig
     /// const is_less_than = try value.compare(.less_than, 100);
@@ -1666,6 +1682,28 @@ pub const Object = struct {
         return true;
     }
 
+    /// Recursively compare an object, verifying that all fields in `other` exist in `self`.
+    pub fn includes(self: Object, other: Object) bool {
+        var it = other.hashmap.iterator();
+        while (it.next()) |item| {
+            const self_value = self.get(item.key_ptr.*) orelse return false;
+            const other_value = item.value_ptr.*.*;
+            switch (other_value) {
+                .object => |obj| switch (self_value.*) {
+                    .object => |self_obj| if (!self_obj.includes(obj)) return false,
+                    else => return false,
+                },
+                .array => |arr| switch (self_value.*) {
+                    .array => |self_arr| if (!self_arr.includes(arr)) return false,
+                    else => return false,
+                },
+                else => if (!self_value.eql(other_value)) return false,
+            }
+        }
+
+        return true;
+    }
+
     pub fn put(self: *Object, key: []const u8, value: anytype) !PutAppend(@TypeOf(value)) {
         const zmpl_value = try zmplValue(value, self.allocator);
         const key_dupe = try self.allocator.dupe(u8, key);
@@ -1906,6 +1944,20 @@ pub const Array = struct {
         if (self.count() != other.count()) return false;
         for (self.array.items, other.array.items) |lhs, rhs| {
             if (!lhs.eql(rhs.*)) return false;
+        }
+        return true;
+    }
+
+    // Verify that all elements in `other` exist in `self`.
+    pub fn includes(self: Array, other: Array) bool {
+        for (other.array.items) |lhs| {
+            for (self.array.items) |rhs| {
+                switch (rhs.*) {
+                    .array => if (lhs.includes(rhs.*)) break,
+                    .object => if (!lhs.includes(rhs.*)) break,
+                    else => if (lhs.eql(rhs.*)) break,
+                }
+            } else return false;
         }
         return true;
     }
