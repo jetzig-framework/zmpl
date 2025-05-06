@@ -613,7 +613,7 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
     // contains whitespace etc.
     if (context != .initial) {
         if (self.parent) |parent| {
-            switch (parent.token.mode) {
+            switch (parent.contentRenderMode()) {
                 .zig => try self.renderZig(content, writer),
                 .html => try self.renderHtml(content, .{}, writer),
                 .markdown => try self.renderHtml(
@@ -621,10 +621,6 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
                     .{},
                     writer,
                 ),
-                .partial, .args, .extend, .@"for", .@"if" => {},
-                // TODO
-                .block => {},
-                .blocks => {},
             }
         }
         return;
@@ -686,7 +682,7 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
     );
 
     if (self.parent) |parent| {
-        switch (parent.token.mode) {
+        switch (parent.contentRenderMode()) {
             .zig => try self.renderZig(content, writer),
             .html => try self.renderHtml(content, .{}, writer),
             .markdown => try self.renderHtml(
@@ -694,10 +690,6 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
                 .{},
                 writer,
             ),
-            .partial, .args, .extend, .@"for", .@"if" => {},
-            // TODO
-            .block => {},
-            .blocks => {},
         }
     }
 }
@@ -1140,6 +1132,16 @@ fn getPartialArgsSignature(self: Node, prefix: []const u8, partial_name: []const
     } else {
         return &.{};
     }
+}
+
+const ContentRenderMode = enum { html, zig, markdown };
+fn contentRenderMode(self: Node) ContentRenderMode {
+    return switch (self.token.mode) {
+        .html => .html,
+        .zig => .zig,
+        .markdown => .markdown,
+        else => if (self.parent) |parent| parent.contentRenderMode() else .html,
+    };
 }
 
 fn isIdentifier(arg: []const u8) bool {
