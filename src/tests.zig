@@ -47,6 +47,34 @@ test "readme example" {
     }
 }
 
+test "object passing to partial" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+    var user = try data.object();
+
+    try user.put("email", data.string("john@example.com"));
+    try user.put("name", data.string("John Doe"));
+
+    try root.put("user", user);
+
+    if (zmpl.find("object_root_layout")) |template| {
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
+
+        try std.testing.expectEqualStrings(
+            \\<h1>User</h1>
+            \\
+            \\<div>User email: john@example.com</div>
+            \\<div>User name: John Doe</div>
+            \\
+            \\This is a placeholder text to demonstrate object passing.
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
+
 test "complex example" {
     var data = zmpl.Data.init(std.testing.allocator);
     defer data.deinit();
