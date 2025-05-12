@@ -64,11 +64,9 @@ test "object passing to partial" {
 
         try std.testing.expectEqualStrings(
             \\<h1>User</h1>
-            \\
             \\<div>User email: john@example.com</div>
             \\<div>User name: John Doe</div>
             \\
-            \\This is a placeholder text to demonstrate object passing.
         , output);
     } else {
         try std.testing.expect(false);
