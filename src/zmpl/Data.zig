@@ -439,7 +439,19 @@ pub fn getConst(self: *Data, T: type, name: []const u8) !T {
 /// Coerce a data reference to the given type.
 /// If a partial argument is a data reference (as opposed to a local constant/literal/etc.),
 /// attempt to coerce it to the expected argument type.
+/// Supports passing objects to partials when using *ZmplValue/*Value type for the argument.
 pub fn getCoerce(self: Data, T: type, name: []const u8) !T {
+    if (T == *Value or T == *const Value or T == Value) {
+        if (self.ref(name)) |value| {
+            return switch (T) {
+                *Value, *const Value => value,
+                Value => value.*,
+                else => unreachable,
+            };
+        }
+        return unknownRef(name);
+    }
+
     var it = std.mem.tokenizeScalar(u8, name, '.');
     const value = self.value orelse return unknownRef(name);
 
