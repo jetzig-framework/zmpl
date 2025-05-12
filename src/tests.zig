@@ -887,6 +887,7 @@ test "if statement with indented HTML - if branch" {
     if (zmpl.find("if_indented_html")) |template| {
         const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
+            \\
             \\                <div class="d-none d-md-block ms-2 dropdown">
             \\                    <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="userMenuDropdown" data-bs-toggle="dropdown" aria-expanded="false">
             \\                        TestUser
@@ -916,6 +917,7 @@ test "if statement with indented HTML - else branch" {
     if (zmpl.find("if_indented_html")) |template| {
         const output = try template.render(&data, Context, .{}, &.{}, .{});
         try std.testing.expectEqualStrings(
+            \\
             \\                <div class="d-none d-md-flex align-items-center ms-2">
             \\                    <a href="/login" class="btn btn-outline-secondary btn-sm">Log in</a>
             \\                    <a href="/register" class="btn btn-primary btn-sm ms-2">Sign up</a>

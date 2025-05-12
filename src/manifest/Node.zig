@@ -151,7 +151,7 @@ fn renderMode(self: Node, mode: Mode, context: Context, content: []const u8, mar
         .args => try self.renderArgs(writer),
         .extend => try self.renderExtend(writer),
         .@"for" => try self.renderFor(context, content, writer, markdown_fragments),
-        .@"if" => try self.renderIf(context, content, writer),
+        .@"if" => try self.renderIf(context, content, writer, markdown_fragments),
         .block => try self.writeBlock(context, content, markdown_fragments),
         .blocks => try self.writeBlocks(writer),
     }
@@ -747,7 +747,7 @@ fn parseZmpl(self: Node, content: []const u8) ![]const u8 {
     return try buf.toOwnedSlice();
 }
 
-fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype) !void {
+fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype, markdown_fragments: type) !void {
     if (context == .initial) {
         // When we render nodes, we render child nodes that exist within their bounds as we work
         // through each node. We only want to render the initial `if` statement defined by this
@@ -761,17 +761,36 @@ fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype) 
     }
 
     const content_end = util.indexOfWord(content, else_token) orelse content.len;
-    // TODO: We should render for the mode scoped above us instead of assuming HTML.
-    try self.renderHtml(content[0..content_end], .{}, writer);
+    // Render content using the parent's render mode
+    switch (self.contentRenderMode()) {
+        .html => try self.renderHtml(content[0..content_end], .{}, writer),
+        .zig => try self.renderZig(content[0..content_end], writer),
+        .markdown => try self.renderHtml(
+            try self.renderMarkdown(content[0..content_end], markdown_fragments),
+            .{},
+            writer,
+        ),
+    }
 
     var it = ElseIterator{ .input = content, .index = 0, .node = self };
     while (try it.next()) |token| {
-        try writer.writeAll("\n} else ");
+        try writer.writeAll("\n} else");
         if (token.if_statement) |if_else_statement| {
+            try writer.writeAll(" ");
             try if_else_statement.render(writer);
         }
         try writer.writeAll(" {\n");
-        try self.renderHtml(token.content, .{}, writer);
+
+        // Render else/else-if content using the parent's render mode
+        switch (self.contentRenderMode()) {
+            .html => try self.renderHtml(token.content, .{}, writer),
+            .zig => try self.renderZig(token.content, writer),
+            .markdown => try self.renderHtml(
+                try self.renderMarkdown(token.content, markdown_fragments),
+                .{},
+                writer,
+            ),
+        }
     }
 }
 
@@ -793,11 +812,13 @@ const ElseIterator = struct {
                 const if_statement = try self.node.ifStatement(rest[if_index + "if".len .. eol]);
                 const end = util.indexOfWord(rest[eol..], else_token) orelse rest.len - eol;
                 const content = rest[eol .. eol + end];
-                self.index += eol + content.len;
+                self.index += index + eol + content.len;
                 return .{ .content = content, .if_statement = if_statement };
             } else {
-                self.index += rest.len + else_token.len;
-                return .{ .content = rest[else_token.len..], .if_statement = null };
+                const end = util.indexOfWord(rest[eol..], else_token) orelse rest.len - eol;
+                const content = rest[eol .. eol + end];
+                self.index += index + eol + content.len;
+                return .{ .content = content, .if_statement = null };
             }
         } else return null;
     }
@@ -870,7 +891,7 @@ fn writeBlock(self: Node, context: Context, content: []const u8, markdown_fragme
             .args => try self.renderArgs(writer),
             .extend => try self.renderExtend(writer),
             .@"for" => try self.renderFor(context, content, writer, markdown_fragments),
-            .@"if" => try self.renderIf(context, content, writer),
+            .@"if" => try self.renderIf(context, content, writer, markdown_fragments),
             .block => try self.writeBlock(context, content, markdown_fragments),
             .blocks => try self.writeBlocks(writer),
         }
