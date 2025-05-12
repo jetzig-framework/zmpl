@@ -874,6 +874,59 @@ test "mix mardown and zig" {
     }
 }
 
+test "if statement with indented HTML - if branch" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+    var user = try data.object();
+    try user.put("is_logged_in", true);
+    try user.put("display_name", "TestUser");
+    try root.put("user", user);
+
+    if (zmpl.find("if_indented_html")) |template| {
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
+        try std.testing.expectEqualStrings(
+            \\                <div class="d-none d-md-block ms-2 dropdown">
+            \\                    <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="userMenuDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+            \\                        TestUser
+            \\                    </button>
+            \\                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userMenuDropdown">
+            \\                        <li><a class="dropdown-item" href="/profile"><i class="bi bi-person me-2"></i>Profile</a></li>
+            \\                        <li><hr class="dropdown-divider"></li>
+            \\                        <li><a class="dropdown-item" href="/logout"><i class="bi bi-box-arrow-right me-2"></i>Log out</a></li>
+            \\                    </ul>
+            \\                </div>
+            \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
+
+test "if statement with indented HTML - else branch" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+    var user = try data.object();
+    try user.put("is_logged_in", false);
+    try root.put("user", user);
+
+    if (zmpl.find("if_indented_html")) |template| {
+        const output = try template.render(&data, Context, .{}, &.{}, .{});
+        try std.testing.expectEqualStrings(
+            \\                <div class="d-none d-md-flex align-items-center ms-2">
+            \\                    <a href="/login" class="btn btn-outline-secondary btn-sm">Log in</a>
+            \\                    <a href="/register" class="btn btn-primary btn-sm ms-2">Sign up</a>
+            \\                </div>
+            \\
+        , output);
+    } else {
+        try std.testing.expect(false);
+    }
+}
+
 test "blocks" {
     var data = zmpl.Data.init(std.testing.allocator);
     defer data.deinit();
