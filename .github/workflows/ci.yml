@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test on Ubuntu
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@main
+
+      - name: Print Zig version
+        run: zig version
+
+      - name: Build
+        run: zig build --verbose
+
+      - name: Run Tests
+        run: zig build test --summary all
+
+      - name: Formatting check
+        run: zig fmt --check .
