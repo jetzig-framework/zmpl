@@ -173,7 +173,7 @@ inline fn isOperator(tag: std.zig.Ast.Node.Tag) bool {
 // `if` statement.
 fn isWrapTrue(self: IfStatement, has_payload: bool, node: std.zig.Ast.Node.Index) bool {
     if (has_payload or isOperator(self.ast.nodeTag(node))) return false;
-    
+
     return true;
 }
 

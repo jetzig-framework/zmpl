@@ -904,18 +904,18 @@ test "nullable if" {
     // Test for nullable if statements:
     // - null and empty strings should be falsey
     // - non-empty strings should be truthy
-    
+
     // Test with null value - should be falsey
     {
         var data = zmpl.Data.init(std.testing.allocator);
         defer data.deinit();
-        
+
         var clip = try data.object();
         try clip.put("notes", null);
-        
+
         var root = try data.root(.object);
         try root.put("clip", clip);
-        
+
         if (zmpl.find("nullable_if")) |template| {
             const output = try template.render(&data, Context, .{}, &.{}, .{});
             try std.testing.expectEqualStrings("\nThe value is null\n", output);
@@ -923,18 +923,18 @@ test "nullable if" {
             try std.testing.expect(false);
         }
     }
-    
+
     // Test with non-null, non-empty string - should be truthy
     {
         var data = zmpl.Data.init(std.testing.allocator);
         defer data.deinit();
-        
+
         var clip = try data.object();
         try clip.put("notes", "Some notes");
-        
+
         var root = try data.root(.object);
         try root.put("clip", clip);
-        
+
         if (zmpl.find("nullable_if")) |template| {
             const output = try template.render(&data, Context, .{}, &.{}, .{});
             // Non-empty string should correctly evaluate as truthy
@@ -943,18 +943,18 @@ test "nullable if" {
             try std.testing.expect(false);
         }
     }
-    
+
     // Test with empty string - should be falsey like null
     {
         var data = zmpl.Data.init(std.testing.allocator);
         defer data.deinit();
-        
+
         var clip = try data.object();
         try clip.put("notes", "");
-        
+
         var root = try data.root(.object);
         try root.put("clip", clip);
-        
+
         if (zmpl.find("nullable_if")) |template| {
             const output = try template.render(&data, Context, .{}, &.{}, .{});
             try std.testing.expectEqualStrings("\nThe value is null\n", output);
