@@ -716,6 +716,11 @@ pub fn getPresence(self: *const Data, key: []const u8) bool {
     return value.isPresent();
 }
 
+/// Same as getPresence but works with a direct reference
+pub fn refPresence(self: *const Data, ref_key: []const u8) bool {
+    return if (self.ref(ref_key)) |value| value.isPresent() else false;
+}
+
 /// Receives an array of keys and recursively gets each key from nested objects, returning `null`
 /// if a key is not found, or `*Value` if all keys are found.
 pub fn chain(self: *Data, keys: []const []const u8) ?*Value {
@@ -1064,11 +1069,13 @@ pub const Value = union(ValueType) {
             .equal => switch (self) {
                 .string => if (comptime isString(T))
                     std.mem.eql(u8, coerced, other)
+                else if (T == bool)
+                    coerced == other
                 else
                     unreachable,
                 .integer, .float, .boolean => switch (@typeInfo(T)) {
                     .int, .comptime_int, .float, .comptime_float, .bool => coerced == other,
-                    else => unreachable, // `coerce` will fail before we get here.
+                    else => unreachable,
                 },
                 .datetime => switch (@typeInfo(T)) {
                     .int, .comptime_int => coerced == other,
@@ -1277,16 +1284,15 @@ pub const Value = union(ValueType) {
 
     /// Detect presence of a value, use for truthiness testing.
     pub fn isPresent(self: *const Value) bool {
-        return switch (self.*) {
-            .object => |*capture| capture.count() > 0,
-            .array => |*capture| capture.count() > 0,
+        const result = switch (self.*) {
+            .null => false,
             .string => |capture| capture.value.len > 0,
             .boolean => |capture| capture.value,
             .integer => |capture| capture.value > 0,
             .float => |capture| capture.value > 0,
-            .datetime => true,
-            .null => false,
+            .object, .array, .datetime => true,
         };
+        return result;
     }
 
     /// Receives an array of keys and recursively gets each key from nested objects, returning
@@ -1495,13 +1501,9 @@ pub const Value = union(ValueType) {
                 ),
             },
             bool => switch (self) {
-                .boolean => |capture| capture.value,
                 .string => |capture| std.mem.eql(u8, capture.value, "1") or std.mem.eql(u8, capture.value, "on"),
-                else => |tag| zmplError(
-                    .compare,
-                    "Cannot compare Zmpl `{s}` with `{s}`",
-                    .{ @tagName(tag), @typeName(T) },
-                ),
+                .null => false,
+                else => self.isPresent(),
             },
             jetcommon.types.DateTime => switch (self) {
                 .datetime => |capture| capture.value,
@@ -2037,8 +2039,18 @@ pub fn compare(self: *Data, comptime operator: Operator, lhs: anytype, rhs: anyt
     return switch (comptime operator) {
         .equal => if (comptime isZmplComparable(@TypeOf(lhs), @TypeOf(rhs)))
             resolveValue(lhs).eql(resolveValue(rhs))
-        else if (comptime isZmplValue(@TypeOf(lhs))) blk: {
+        else if (comptime isZmplValue(@TypeOf(lhs)) and @TypeOf(rhs) == bool) {
+            if (rhs == true) {
+                return try zmpl.isPresent(resolveValue(lhs));
+            }
+            return !try zmpl.isPresent(resolveValue(lhs));
+        } else if (comptime isZmplValue(@TypeOf(lhs))) blk: {
             break :blk try resolveValue(lhs).compareT(.equal, @TypeOf(rhs), rhs);
+        } else if (comptime isZmplValue(@TypeOf(rhs)) and @TypeOf(lhs) == bool) {
+            if (lhs == true) {
+                return try zmpl.isPresent(resolveValue(rhs));
+            }
+            return !try zmpl.isPresent(resolveValue(rhs));
         } else if (comptime isZmplValue(@TypeOf(rhs)))
             try resolveValue(rhs).compareT(.equal, @TypeOf(lhs), lhs)
         else if (comptime isString(@TypeOf(lhs)) and isString(@TypeOf(rhs)))

@@ -44,6 +44,47 @@ pub fn sanitize(writer: anytype, input: []const u8) !void {
     _ = try fmt.sanitize(input);
 }
 
+/// Check if a value is present for use in if conditions.
+/// This is used to make nullable values behave intuitively in if statements.
+/// For example, `@if (foo.bar)` will be true if `foo.bar` is not null.
+pub fn isPresent(value: anytype) !bool {
+    const T = @TypeOf(value);
+
+    // Handle null values
+    if (T == @TypeOf(null)) return false;
+
+    // Handle optional values
+    if (@typeInfo(T) == .optional) {
+        if (value == null) return false;
+        return try isPresent(value.?);
+    }
+
+    // Handle ZmplValue
+    if (comptime isZmplValue(T)) {
+        return value.isPresent();
+    }
+
+    // For booleans, return the value directly
+    if (T == bool) return value;
+
+    // For strings, check if the string is not empty
+    if (comptime std.meta.trait.isZigString(T)) {
+        return value.len > 0;
+    }
+
+    // For numbers, check if the value is not zero
+    if (comptime std.meta.trait.isNumber(T)) {
+        return value != 0;
+    }
+
+    // Default to true for any other value that exists
+    return true;
+}
+
+pub fn refIsPresent(data: *Data, ref_key: []const u8) !bool {
+    return data.refPresence(ref_key);
+}
+
 test {
     std.testing.refAllDecls(@This());
 }

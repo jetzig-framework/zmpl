@@ -42,9 +42,13 @@ pub fn render(self: IfStatement, writer: anytype) !void {
             const if_full = self.ast.ifSimple(node);
 
             const wrap_true = self.isWrapTrue(if_full.payload_token != null, if_full.ast.cond_expr);
-            if (wrap_true) try writer.writeAll(wrap_eql_open);
-            try self.writeNode(if_full.ast.cond_expr, writer);
-            if (wrap_true) try writer.writeAll(wrap_eql_close_true);
+            if (wrap_true) {
+                try writer.writeAll(wrap_eql_open);
+                try self.writeNode(if_full.ast.cond_expr, writer);
+                try writer.writeAll(wrap_eql_close_true);
+            } else {
+                try self.writeNode(if_full.ast.cond_expr, writer);
+            }
 
             try writer.writeAll(")");
             if (if_full.payload_token) |payload_token| {
