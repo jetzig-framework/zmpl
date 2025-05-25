@@ -73,7 +73,7 @@ pub fn main() !void {
 
     const content = try manifest.compile(Template, zmpl_options);
 
-    const file = try std.fs.createFileAbsolute(manifest_path, .{ .truncate = true });
+    const file = try std.fs.cwd().createFile(manifest_path, .{ .truncate = true });
     try file.writeAll(content);
     file.close();
 }
