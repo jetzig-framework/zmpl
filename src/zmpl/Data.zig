@@ -2182,8 +2182,16 @@ pub fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
                 for (value) |item| try inner_array.append(item);
                 break :blk Value{ .array = inner_array };
             } else try structToValue(value.*, alloc),
-            // Assume a string and let the compiler fail if incompatible.
-            else => Value{ .string = .{ .value = value, .allocator = alloc } },
+            else => switch (info.child) {
+                else => if (comptime isString(@TypeOf(value))) blk: {
+                    break :blk Value{ .string = .{ .value = value, .allocator = alloc } };
+                } else blk: {
+                    // Assume we have an array - let the compiler complain if not.
+                    var arr = try createArray(alloc);
+                    for (value) |item| try arr.append(item);
+                    break :blk arr.*;
+                },
+            },
         },
         .array => |info| switch (info.child) {
             u8 => Value{ .string = .{ .value = value, .allocator = alloc } },

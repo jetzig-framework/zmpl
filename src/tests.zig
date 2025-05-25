@@ -1040,3 +1040,40 @@ test "blocks" {
         try std.testing.expect(false);
     }
 }
+
+test "append struct with []const []const u8 field" {
+    var data = zmpl.Data.init(std.testing.allocator);
+    defer data.deinit();
+
+    var root = try data.root(.object);
+    const Foo = struct {
+        bar: []const u8,
+        baz: []const []const u8,
+        qux: []const usize,
+    };
+
+    try root.put("foo", Foo{ .bar = "bar", .baz = &.{ "baz", "qux" }, .qux = &.{ 1, 2, 3 } });
+
+    const foo = root.get("foo").?;
+    const baz = foo.get("baz").?;
+    const baz_items = baz.items(.array);
+
+    try std.testing.expectEqual(baz_items.len, 2);
+
+    const expected_baz: []const []const u8 = &.{ "baz", "qux" };
+
+    for (baz_items, 0..) |item, index| {
+        try std.testing.expectEqualStrings(expected_baz[index], item.string.value);
+    }
+
+    const qux = foo.get("qux").?;
+    const qux_items = qux.items(.array);
+
+    try std.testing.expectEqual(qux_items.len, 3);
+
+    const expected_qux: []const usize = &.{ 1, 2, 3 };
+
+    for (qux_items, 0..) |item, index| {
+        try std.testing.expectEqual(expected_qux[index], item.integer.value);
+    }
+}
