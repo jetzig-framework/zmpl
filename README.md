@@ -16,6 +16,7 @@ Visit the [Jetzig Documentation](https://jetzig.dev/documentation.html) page to 
 * [Vim](https://github.com/jetzig-framework/zmpl.vim)
 * [VSCode](https://github.com/z1fire/zmpl-syntax-highlighting-vscode) by [Zackary Housend](https://github.com/z1fire)
 * [VSCode extension](https://marketplace.visualstudio.com/items?itemName=uzyn.zmpl) by [U-Zyn Chua](https://github.com/uzyn)
+* [Sublime Text package](https://packagecontrol.io/packages/Zmpl) by [U-Zyn Chua](https://github.com/uzyn)
 
 ## Example
 
