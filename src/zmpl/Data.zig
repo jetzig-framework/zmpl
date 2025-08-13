@@ -1624,7 +1624,8 @@ pub const String = struct {
 
     pub fn toJson(self: String, writer: Writer, comptime options: ToJsonOptions) !void {
         var buf = std.ArrayList(u8).init(self.allocator);
-        try std.json.encodeJsonString(self.value, .{}, buf.writer());
+        var new_writer = buf.writer().adaptToNewApi().new_interface;
+        try std.json.Stringify.value(self.value, .{}, &new_writer);
         try highlight(
             writer,
             .string,
@@ -2238,7 +2239,8 @@ const Field = struct {
 
     pub fn toJson(self: Field, writer: Writer, comptime options: ToJsonOptions) !void {
         var buf = std.ArrayList(u8).init(self.allocator);
-        try std.json.encodeJsonString(self.value, .{}, buf.writer());
+        var new_writer = buf.writer().adaptToNewApi().new_interface;
+        try std.json.Stringify.value(self.value, .{}, &new_writer);
         try highlight(
             writer,
             .field,
