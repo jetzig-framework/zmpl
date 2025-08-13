@@ -10,19 +10,23 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
     const use_llvm = b.option(bool, "use_llvm", "Use LLVM") orelse true;
 
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
         .name = "zmpl",
-        .root_source_file = b.path("src/zmpl.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/zmpl.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
         .use_llvm = use_llvm,
     });
 
     const exe = b.addExecutable(.{
         .name = "zmpl",
-        .root_source_file = b.path("src/main.zig"),
-        .optimize = optimize,
-        .target = target,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .optimize = optimize,
+            .target = target,
+        }),
         .use_llvm = use_llvm,
     });
     const run_artifact = b.addRunArtifact(exe);
@@ -92,9 +96,11 @@ pub fn build(b: *std.Build) !void {
 
     const manifest_exe = b.addExecutable(.{
         .name = "manifest",
-        .root_source_file = b.path("src/manifest/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/manifest/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
         .use_llvm = use_llvm,
     });
 
@@ -131,23 +137,29 @@ pub fn build(b: *std.Build) !void {
 
         const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match any filter") orelse &.{};
         const template_tests = b.addTest(.{
-            .root_source_file = b.path(tests_path),
-            .target = target,
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(tests_path),
+                .target = target,
+                .optimize = optimize,
+            }),
             .filters = test_filters,
         });
 
         const zmpl_tests = b.addTest(.{
-            .root_source_file = b.path("src/zmpl.zig"),
-            .target = target,
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/zmpl.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
             .filters = test_filters,
         });
 
         const manifest_tests = b.addTest(.{
-            .root_source_file = b.path("src/manifest/main.zig"),
-            .target = target,
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/manifest/main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
             .filters = test_filters,
         });
 
