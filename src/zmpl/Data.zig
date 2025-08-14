@@ -1623,13 +1623,13 @@ pub const String = struct {
     }
 
     pub fn toJson(self: String, writer: Writer, comptime options: ToJsonOptions) !void {
-        var buf = std.ArrayList(u8).init(self.allocator);
-        var new_writer = buf.writer().adaptToNewApi().new_interface;
-        try std.json.Stringify.value(self.value, .{}, &new_writer);
+        var new_writer: std.io.Writer.Allocating = .init(self.allocator);
+        defer new_writer.deinit();
+        try std.json.Stringify.value(self.value, .{}, &new_writer.writer);
         try highlight(
             writer,
             .string,
-            .{try buf.toOwnedSlice()},
+            .{try new_writer.toOwnedSlice()},
             options.color,
         );
     }
@@ -2238,13 +2238,14 @@ const Field = struct {
     allocator: std.mem.Allocator,
 
     pub fn toJson(self: Field, writer: Writer, comptime options: ToJsonOptions) !void {
-        var buf = std.ArrayList(u8).init(self.allocator);
-        var new_writer = buf.writer().adaptToNewApi().new_interface;
-        try std.json.Stringify.value(self.value, .{}, &new_writer);
+        //var buf = std.ArrayList(u8).init(self.allocator);
+        var new_writer: std.io.Writer.Allocating = .init(self.allocator);
+        defer new_writer.deinit();
+        try std.json.Stringify.value(self.value, .{}, &new_writer.writer);
         try highlight(
             writer,
             .field,
-            .{try buf.toOwnedSlice()},
+            .{try new_writer.toOwnedSlice()},
             options.color,
         );
     }
