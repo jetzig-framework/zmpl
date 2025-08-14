@@ -836,10 +836,12 @@ fn ifStatement(self: Node, input: []const u8) !IfStatement {
     if (ast.errors.len > 0) {
         for (ast.errors) |err| {
             var buf: [1024]u8 = undefined;
-            var stream = std.io.fixedBufferStream(&buf);
-            const writer = stream.writer();
-            try ast.renderError(err, writer);
-            std.log.err("Error parsing `@if` conditions: {s}", .{stream.getWritten()});
+            var writer: std.io.Writer = .fixed(&buf);
+            try ast.renderError(err, &writer);
+            std.log.err(
+                "Error parsing `@if` conditions: {s}",
+                .{writer.buffered()}, // not entirely sure this is right
+            );
         }
         return error.ZmplSyntaxError;
     }

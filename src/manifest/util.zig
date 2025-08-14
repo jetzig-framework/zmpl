@@ -227,13 +227,12 @@ pub fn readFile(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
 /// Output an escaped string suitable for use in generated Zig code.
 pub fn zigStringEscape(allocator: std.mem.Allocator, input: ?[]const u8) ![]const u8 {
     if (input) |string| {
-        var buf = std.ArrayList(u8).init(allocator);
-        const writer = buf.writer();
-        try writer.writeByte('"');
-        try std.zig.stringEscape(string, "", .{}, writer);
-        try writer.writeByte('"');
-        return try buf.toOwnedSlice();
-    } else {
-        return try allocator.dupe(u8, "null");
+        var writer: std.io.Writer.Allocating = .init(allocator);
+        defer writer.deinit();
+        try writer.writer.writeByte('"');
+        try std.zig.stringEscape(string, &writer.writer);
+        try writer.writer.writeByte('"');
+        return writer.toOwnedSlice();
     }
+    return allocator.dupe(u8, "null");
 }

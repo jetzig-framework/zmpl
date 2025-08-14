@@ -352,7 +352,7 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
     const arena = self.allocator;
 
     return switch (formatter) {
-        .default => try std.fmt.allocPrint(arena, "{}", .{value}),
+        .default => try std.fmt.allocPrint(arena, "{any}", .{value}),
         .optional_default => try std.fmt.allocPrint(arena, "{?}", .{value}),
         .string => try std.fmt.allocPrint(arena, "{s}", .{value}),
         .optional_string => try std.fmt.allocPrint(arena, "{?s}", .{value}),
@@ -763,8 +763,8 @@ pub fn toJsonOptions(self: *Data, comptime options: ToJsonOptions) ![]const u8 {
 /// Inverse of `toJson`
 pub fn parseJsonSlice(self: *Data, json: []const u8) !*Value {
     const alloc = self.allocator;
-    var json_stream = std.io.fixedBufferStream(json);
-    var reader = std.json.reader(alloc, json_stream.reader());
+    var json_stream: std.io.Reader = .fixed(json);
+    var reader: std.json.Reader = .init(alloc, &json_stream);
     var container_stack = std.ArrayList(*Value).init(alloc);
     var current_container: ?*Value = null;
     var current_key: ?[]const u8 = null;
@@ -1623,13 +1623,13 @@ pub const String = struct {
     }
 
     pub fn toJson(self: String, writer: Writer, comptime options: ToJsonOptions) !void {
-        var buf = std.ArrayList(u8).init(self.allocator);
-        var new_writer = buf.writer().adaptToNewApi().new_interface;
-        try std.json.Stringify.value(self.value, .{}, &new_writer);
+        var new_writer: std.io.Writer.Allocating = .init(self.allocator);
+        defer new_writer.deinit();
+        try std.json.Stringify.value(self.value, .{}, &new_writer.writer);
         try highlight(
             writer,
             .string,
-            .{try buf.toOwnedSlice()},
+            .{try new_writer.toOwnedSlice()},
             options.color,
         );
     }
@@ -2238,13 +2238,14 @@ const Field = struct {
     allocator: std.mem.Allocator,
 
     pub fn toJson(self: Field, writer: Writer, comptime options: ToJsonOptions) !void {
-        var buf = std.ArrayList(u8).init(self.allocator);
-        var new_writer = buf.writer().adaptToNewApi().new_interface;
-        try std.json.Stringify.value(self.value, .{}, &new_writer);
+        //var buf = std.ArrayList(u8).init(self.allocator);
+        var new_writer: std.io.Writer.Allocating = .init(self.allocator);
+        defer new_writer.deinit();
+        try std.json.Stringify.value(self.value, .{}, &new_writer.writer);
         try highlight(
             writer,
             .field,
-            .{try buf.toOwnedSlice()},
+            .{try new_writer.toOwnedSlice()},
             options.color,
         );
     }

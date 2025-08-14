@@ -122,7 +122,7 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
     return if (ast.errors.len > 0)
         try buf.toOwnedSlice()
     else
-        ast.render(self.allocator);
+        ast.renderAlloc(self.allocator);
 }
 
 /// Here for compatibility with `Template` only - manifest generates random names for templates
