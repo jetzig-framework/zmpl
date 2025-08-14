@@ -352,7 +352,7 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
     const arena = self.allocator;
 
     return switch (formatter) {
-        .default => try std.fmt.allocPrint(arena, "{}", .{value}),
+        .default => try std.fmt.allocPrint(arena, "{any}", .{value}),
         .optional_default => try std.fmt.allocPrint(arena, "{?}", .{value}),
         .string => try std.fmt.allocPrint(arena, "{s}", .{value}),
         .optional_string => try std.fmt.allocPrint(arena, "{?s}", .{value}),
