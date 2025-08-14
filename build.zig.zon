@@ -5,7 +5,7 @@
     .minimum_zig_version = "0.15.0-dev.355+206bd1ced",
     .dependencies = .{
         .jetcommon = .{
-            .url = "https://github.com/PoeCoh/jetcommon/archive/62874496715f37399a67452a1de099cfe57a809e.tar.gz",
+            .url = "https://github.com/jetzig-framework/jetcommon/archive/ff1f2cf50e6d0b35bfdadc77f9d21cf2a3e05b26.tar.gz",
             .hash = "jetcommon-0.1.0-jPY_DdNIAAA7pPOLsOkd5BH4juCnM4F71sNLK2aiwMs6",
         },
         .zmd = .{
