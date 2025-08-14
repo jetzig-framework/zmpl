@@ -763,8 +763,10 @@ pub fn toJsonOptions(self: *Data, comptime options: ToJsonOptions) ![]const u8 {
 /// Inverse of `toJson`
 pub fn parseJsonSlice(self: *Data, json: []const u8) !*Value {
     const alloc = self.allocator;
-    var json_stream = std.io.fixedBufferStream(json);
-    var reader = std.json.reader(alloc, json_stream.reader());
+    var json_stream: std.io.Reader = .fixed(json);
+    //var json_stream = std.io.fixedBufferStream(json);
+    var reader: std.json.Reader = .init(alloc, &json_stream);
+    //var reader = std.json.reader(alloc, json_stream.reader());
     var container_stack = std.ArrayList(*Value).init(alloc);
     var current_container: ?*Value = null;
     var current_key: ?[]const u8 = null;

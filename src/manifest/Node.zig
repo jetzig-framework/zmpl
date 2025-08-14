@@ -837,8 +837,8 @@ fn ifStatement(self: Node, input: []const u8) !IfStatement {
         for (ast.errors) |err| {
             var buf: [1024]u8 = undefined;
             var stream = std.io.fixedBufferStream(&buf);
-            const writer = stream.writer();
-            try ast.renderError(err, writer);
+            var writer = stream.writer().adaptToNewApi().new_interface;
+            try ast.renderError(err, &writer);
             std.log.err("Error parsing `@if` conditions: {s}", .{stream.getWritten()});
         }
         return error.ZmplSyntaxError;
