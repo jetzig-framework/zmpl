@@ -2,15 +2,15 @@
     .name = .zmpl,
     .version = "0.0.1",
     .fingerprint = 0xef2931206468149,
-    .minimum_zig_version = "0.15.0-dev.1425+7ee6dab39",
+    .minimum_zig_version = "0.15.0-dev.1564+2761cc8be",
     .dependencies = .{
         .jetcommon = .{
-            .url = "https://github.com/jetzig-framework/jetcommon/archive/ff1f2cf50e6d0b35bfdadc77f9d21cf2a3e05b26.tar.gz",
-            .hash = "jetcommon-0.1.0-jPY_DdNIAAA7pPOLsOkd5BH4juCnM4F71sNLK2aiwMs6",
+            .url = "https://github.com/jetzig-framework/jetcommon/archive/f613f2cb9084d4b1c19ea89f5dab9ad7ba4fa3c4.tar.gz",
+            .hash = "jetcommon-0.1.0-jPY_DRRJAADaN4sQby3c31hyFSAgqIP90D4DYcTNVquG",
         },
         .zmd = .{
-            .url = "https://github.com/jetzig-framework/zmd/archive/06785a84373590c98873a37ced09579ed497a57f.tar.gz",
-            .hash = "zmd-0.0.0-H8YV7bzhAAA7XORg8YjsqxPcnFHJ43rUfEDUm2_xRIxF",
+            .url = "https://github.com/jetzig-framework/zmd/archive/efff447f3c09cdb5dd5acabb5700afb7c0dd990c.tar.gz",
+            .hash = "zmd-0.1.0-H8YV7X7iAADfm-S0PlR9uYifxuqG1k0SqT5e7ue9XgpU",
         },
     },
 
