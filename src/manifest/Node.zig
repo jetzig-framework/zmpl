@@ -11,7 +11,7 @@ const util = @import("util.zig");
 const IfStatement = @import("IfStatement.zig");
 
 token: Token,
-children: std.ArrayList(*Node),
+children: std.array_list.Managed(*Node),
 parent: ?*const Node,
 generated_template_name: []const u8,
 allocator: std.mem.Allocator,
@@ -21,7 +21,7 @@ templates_path: []const u8,
 template_prefix: []const u8,
 template_func_name: []const u8,
 block_writer: Writer,
-block_map: *std.StringHashMap(std.ArrayList(Block)),
+block_map: *std.StringHashMap(std.array_list.Managed(Block)),
 
 const else_token = "@else";
 
@@ -40,7 +40,7 @@ pub const Block = struct {
 /// In non-debug builds, debug tokens are omitted as a stack trace is required for them to be
 /// useful.
 pub const Writer = struct {
-    buf: *std.ArrayList(u8),
+    buf: *std.array_list.Managed(u8),
     token: Token,
 
     pub fn print(self: Writer, comptime input: []const u8, args: anytype) !void {
@@ -160,7 +160,7 @@ fn renderMode(self: Node, mode: Mode, context: Context, content: []const u8, mar
 fn stripComments(self: Node, content: []const u8) ![]const u8 {
     const comment_token = "@//";
 
-    var buf = std.ArrayList(u8).init(self.allocator);
+    var buf = std.array_list.Managed(u8).init(self.allocator);
     var it = util.tokenizeRetainToken(content, "\n");
     while (it.next()) |line| {
         if (util.startsWithIgnoringWhitespace(line, comment_token)) continue;
@@ -314,8 +314,8 @@ fn renderHtml(
 ) !void {
     var index: usize = 0;
 
-    var ref_buf = std.ArrayList(u8).init(self.allocator);
-    var html_buf = std.ArrayList(u8).init(self.allocator);
+    var ref_buf = std.array_list.Managed(u8).init(self.allocator);
+    var html_buf = std.array_list.Managed(u8).init(self.allocator);
     var ref_open = false;
     var escaped = false;
 
@@ -395,7 +395,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
 
     const expected_partial_args = try self.getPartialArgsSignature(prefix, partial_name);
 
-    var reordered_args = std.ArrayList(Arg).init(self.allocator);
+    var reordered_args = std.array_list.Managed(Arg).init(self.allocator);
     defer reordered_args.deinit();
 
     outer: for (expected_partial_args, 0..) |expected_arg, expected_arg_index| {
@@ -453,7 +453,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
 
     const slots = try self.generateSlots(content);
 
-    var args_buf = std.ArrayList([]const u8).init(self.allocator);
+    var args_buf = std.array_list.Managed([]const u8).init(self.allocator);
     defer args_buf.deinit();
 
     for (reordered_args.items, expected_partial_args, 0..) |arg, expected_arg, index| {
@@ -544,10 +544,10 @@ const Slots = struct {
 };
 
 fn generateSlots(self: Node, content: []const u8) !Slots {
-    var slots_buf = std.ArrayList(u8).init(self.allocator);
+    var slots_buf = std.array_list.Managed(u8).init(self.allocator);
     defer slots_buf.deinit();
 
-    var slots_content_buf = std.ArrayList(u8).init(self.allocator);
+    var slots_content_buf = std.array_list.Managed(u8).init(self.allocator);
     defer slots_content_buf.deinit();
 
     var slots_it = std.mem.splitScalar(u8, content, '\n');
@@ -559,7 +559,7 @@ fn generateSlots(self: Node, content: []const u8) !Slots {
 
         try slots_content_buf.appendSlice(
             try std.fmt.allocPrint(self.allocator,
-                \\var {0s}_buf = std.ArrayList(u8).init(allocator);
+                \\var {0s}_buf = std.array_list.Managed(u8).init(allocator);
                 \\const {0s}_writer = {0s}_buf.writer();
                 \\
             , .{
@@ -655,7 +655,7 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
 
     const block_args = util.strip(rest[block_args_start.? + 1 .. block_args_end.? + 1]);
 
-    var for_args_joined = std.ArrayList(u8).init(self.allocator);
+    var for_args_joined = std.array_list.Managed(u8).init(self.allocator);
     var for_args_writer = for_args_joined.writer();
     var for_args_it = std.mem.tokenizeScalar(u8, for_args, ',');
     while (for_args_it.next()) |arg| {
@@ -695,7 +695,7 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
 }
 
 fn parseZmpl(self: Node, content: []const u8) ![]const u8 {
-    var buf = std.ArrayList(u8).init(self.allocator);
+    var buf = std.array_list.Managed(u8).init(self.allocator);
     const writer = buf.writer();
     var single_quoted = false;
     var double_quoted = false;
@@ -875,7 +875,7 @@ fn writeBlock(self: Node, context: Context, content: []const u8, markdown_fragme
         , .{function_name});
 
         const result = try self.block_map.getOrPut(block_name);
-        if (!result.found_existing) result.value_ptr.* = std.ArrayList(Block).init(self.allocator);
+        if (!result.found_existing) result.value_ptr.* = std.array_list.Managed(Block).init(self.allocator);
         try result.value_ptr.append(.{ .func = function_name, .name = block_name });
     }
 
@@ -926,18 +926,18 @@ const Arg = struct {
 };
 
 pub fn parsePartialArgs(self: Node, input: []const u8) ![]Arg {
-    var args = std.ArrayList(Arg).init(self.allocator);
+    var args = std.array_list.Managed(Arg).init(self.allocator);
 
     const first_token = std.mem.indexOfScalar(u8, input, '(');
     const last_token = std.mem.lastIndexOfScalar(u8, input, ')');
     if (first_token == null or last_token == null) return try args.toOwnedSlice();
     if (first_token.? + 1 >= last_token.?) return try args.toOwnedSlice();
 
-    var chunks = std.ArrayList([]const u8).init(self.allocator);
+    var chunks = std.array_list.Managed([]const u8).init(self.allocator);
     defer chunks.deinit();
     defer for (chunks.items) |chunk| self.allocator.free(chunk);
 
-    var chunk_buf = std.ArrayList(u8).init(self.allocator);
+    var chunk_buf = std.array_list.Managed(u8).init(self.allocator);
     defer chunk_buf.deinit();
 
     var quote_open = false;

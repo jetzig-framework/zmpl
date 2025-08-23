@@ -17,15 +17,15 @@ path: []const u8,
 input: []const u8,
 template_type: TemplateType,
 state: enum { initial, tokenized, parsed, compiled } = .initial,
-tokens: std.ArrayList(Token),
+tokens: std.array_list.Managed(Token),
 root_node: *Node = undefined,
 index: usize = 0,
 args: ?[]const u8 = null,
 partial: bool,
 template_map: std.StringHashMap(TemplateMap),
 templates_paths_map: std.StringHashMap([]const u8),
-block_buf: std.ArrayList(u8),
-block_map: std.StringHashMap(std.ArrayList(Node.Block)),
+block_buf: std.array_list.Managed(u8),
+block_map: std.StringHashMap(std.array_list.Managed(Node.Block)),
 
 const end_token = "@end";
 
@@ -85,12 +85,12 @@ pub fn init(
         .path = path,
         .template_type = templateType(path),
         .input = util.normalizeInput(allocator, input),
-        .tokens = std.ArrayList(Token).init(allocator),
+        .tokens = std.array_list.Managed(Token).init(allocator),
         .partial = std.mem.startsWith(u8, std.fs.path.basename(path), "_"),
         .template_map = template_map,
         .templates_paths_map = templates_paths_map,
-        .block_buf = std.ArrayList(u8).init(allocator),
-        .block_map = std.StringHashMap(std.ArrayList(Node.Block)).init(allocator),
+        .block_buf = std.array_list.Managed(u8).init(allocator),
+        .block_map = std.StringHashMap(std.array_list.Managed(Node.Block)).init(allocator),
     };
 }
 
@@ -106,7 +106,7 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
     try self.tokenize();
     try self.parse();
 
-    var buf = std.ArrayList(u8).init(self.allocator);
+    var buf = std.array_list.Managed(u8).init(self.allocator);
     defer buf.deinit();
 
     const writer = Node.Writer{ .buf = &buf, .token = self.tokens.items[0] };
@@ -178,7 +178,7 @@ const Context = struct {
 fn tokenize(self: *Template) !void {
     if (self.state != .initial) unreachable;
 
-    var stack = std.ArrayList(Context).init(self.allocator);
+    var stack = std.array_list.Managed(Context).init(self.allocator);
     defer stack.deinit();
     try stack.append(.{ .mode = self.defaultMode(), .depth = 1, .start = 0, .delimiter = .eof });
 
@@ -318,7 +318,7 @@ fn createNode(self: *Template, token: Token, parent: ?*const Node) !*Node {
         .allocator = self.allocator,
         .token = token,
         .parent = parent,
-        .children = std.ArrayList(*Node).init(self.allocator),
+        .children = std.array_list.Managed(*Node).init(self.allocator),
         .generated_template_name = self.name,
         .template_func_name = self.name,
         .template_map = self.template_map,
@@ -483,7 +483,7 @@ fn delimiterFromString(string: []const u8) Delimiter {
 // When the current context's mode is `zig`, evaluate open and close braces to determine the
 // current nesting depth. For other modes, ignore braces except for a closing brace as the
 // leading character on the given line.
-fn resolveNesting(line: []const u8, stack: std.ArrayList(Context)) void {
+fn resolveNesting(line: []const u8, stack: std.array_list.Managed(Context)) void {
     if (stack.items.len == 0) return;
 
     const current_context = stack.items[stack.items.len - 1];
@@ -550,7 +550,7 @@ fn getBraceDepth(mode: Mode, line: []const u8) isize {
 
 // Render the function definiton and inject any provided constants.
 fn renderHeader(self: *Template, writer: anytype, options: type) !void {
-    var decls_buf = std.ArrayList(u8).init(self.allocator);
+    var decls_buf = std.array_list.Managed(u8).init(self.allocator);
     defer decls_buf.deinit();
 
     if (@hasDecl(options, "template_constants")) {
@@ -581,7 +581,7 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
         );
 
         const args = try self.root_node.parsePartialArgs(args_mode_line);
-        var args_buf = std.ArrayList(u8).init(self.allocator);
+        var args_buf = std.array_list.Managed(u8).init(self.allocator);
         const args_writer = args_buf.writer();
 
         for (args) |arg| {

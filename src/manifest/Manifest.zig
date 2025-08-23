@@ -22,10 +22,10 @@ const TemplateDef = struct {
     prefix: []const u8,
     content: []const u8,
     partial: bool,
-    blocks: std.StringHashMap(std.ArrayList(Node.Block)),
+    blocks: std.StringHashMap(std.array_list.Managed(Node.Block)),
 
     pub fn renderBlocks(template_def: TemplateDef, allocator: std.mem.Allocator) ![]const u8 {
-        var buf = std.ArrayList(u8).init(allocator);
+        var buf = std.array_list.Managed(u8).init(allocator);
         const writer = buf.writer();
         var it = template_def.blocks.valueIterator();
         while (it.next()) |blocks| {
@@ -58,7 +58,7 @@ pub fn compile(
     comptime TemplateType: type,
     comptime options: type,
 ) ![]const u8 {
-    var template_defs = std.ArrayList(TemplateDef).init(self.allocator);
+    var template_defs = std.array_list.Managed(TemplateDef).init(self.allocator);
 
     var templates_paths_map = std.StringHashMap([]const u8).init(self.allocator);
     for (self.templates_paths) |templates_path| {
@@ -105,7 +105,7 @@ pub fn compile(
     }
     std.debug.print("[zmpl] Compiled {} template(s)\n", .{self.template_paths.len});
 
-    var buf = std.ArrayList(u8).init(self.allocator);
+    var buf = std.array_list.Managed(u8).init(self.allocator);
     const writer = buf.writer();
     defer buf.deinit();
 
@@ -212,7 +212,7 @@ pub fn compile(
 
 fn compileTemplates(
     self: *Manifest,
-    array: *std.ArrayList(TemplateDef),
+    array: *std.array_list.Managed(TemplateDef),
     templates_path: TemplatePath,
     templates_paths_map: std.StringHashMap([]const u8),
     comptime TemplateType: type,

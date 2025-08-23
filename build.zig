@@ -208,7 +208,7 @@ const TemplatesPath = struct {
 };
 
 pub fn templatesPaths(allocator: std.mem.Allocator, paths: []const TemplatesPath) ![]const []const u8 {
-    var buf = std.ArrayList([]const u8).init(allocator);
+    var buf = std.array_list.Managed([]const u8).init(allocator);
     for (paths) |path| {
         const joined = try std.fs.path.join(allocator, path.path);
         defer allocator.free(joined);
@@ -248,9 +248,9 @@ pub fn addTemplateConstants(b: *std.Build, comptime constants: type) ![]const u8
 }
 
 fn findTemplates(b: *std.Build, templates_paths: []const []const u8) ![][]const u8 {
-    var templates = std.ArrayList([]const u8).init(b.allocator);
+    var templates = std.array_list.Managed([]const u8).init(b.allocator);
 
-    var templates_paths_buf = std.ArrayList([]const u8).init(b.allocator);
+    var templates_paths_buf = std.array_list.Managed([]const u8).init(b.allocator);
     defer templates_paths_buf.deinit();
     for (templates_paths) |syntax| {
         const prefix_end = std.mem.indexOf(u8, syntax, ",path=").?;
@@ -316,7 +316,7 @@ fn generateZmplOptions(
 
 fn parseZmplConstants(allocator: std.mem.Allocator, constants_string: ?[]const u8) ![]const u8 {
     if (constants_string) |string| {
-        var array = std.ArrayList(u8).init(allocator);
+        var array = std.array_list.Managed(u8).init(allocator);
         var pairs_it = std.mem.splitScalar(u8, string, '|');
         try array.appendSlice("pub const template_constants = struct {\n");
         while (pairs_it.next()) |pair| {
@@ -350,7 +350,7 @@ fn parseZmplConstants(allocator: std.mem.Allocator, constants_string: ?[]const u
 
 fn splitPath(allocator: std.mem.Allocator, path: []const u8) ![]const []const u8 {
     var it = std.mem.tokenizeSequence(u8, path, std.fs.path.sep_str);
-    var buf = std.ArrayList([]const u8).init(allocator);
+    var buf = std.array_list.Managed([]const u8).init(allocator);
     while (it.next()) |segment| try buf.append(segment);
 
     return try buf.toOwnedSlice();

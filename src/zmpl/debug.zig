@@ -129,7 +129,7 @@ fn findDebugLine(
 
     try file.seekTo(position);
     cursor = position;
-    var debug_line_buf = std.ArrayList(u8).init(allocator);
+    var debug_line_buf = std.array_list.Managed(u8).init(allocator);
     const debug_writer = debug_line_buf.writer();
 
     outer: {

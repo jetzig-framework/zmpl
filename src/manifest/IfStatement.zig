@@ -267,7 +267,7 @@ fn expectIfStatement(expected: []const u8, input: [:0]const u8) !void {
 
     const if_statement = IfStatement.init(ast);
 
-    var buf = std.ArrayList(u8).init(std.testing.allocator);
+    var buf = std.array_list.Managed(u8).init(std.testing.allocator);
     defer buf.deinit();
 
     try if_statement.render(buf.writer());
