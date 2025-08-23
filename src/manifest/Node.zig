@@ -120,6 +120,14 @@ pub fn compile(self: Node, input: []const u8, writer: Writer, options: type) !vo
 }
 
 const Context = enum { initial, secondary };
+fn divFormatter(allocator: std.mem.Allocator, node: zmd.Node) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "<div>{s}</div>",
+        .{node.content},
+    );
+}
+
 fn render(
     self: Node,
     context: Context,
@@ -130,7 +138,7 @@ fn render(
     const formatters: zmd.Formatters = if (@hasDecl(options, "formatters"))
         options.formatters
     else
-        .{};
+        zmd.Formatters{ .root = divFormatter };
 
     const stripped_content = try self.stripComments(content);
     try self.renderMode(
