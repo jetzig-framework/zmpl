@@ -43,7 +43,7 @@ const util = zmpl.util;
 const zmd = @import("zmd");
 
 /// Output stream for writing values into a rendered template.
-pub const Writer = std.ArrayList(u8).Writer;
+pub const Writer = std.array_list.Managed(u8).Writer;
 
 const Data = @This();
 
@@ -76,9 +76,9 @@ const StackFallbackAllocator = std.heap.StackFallbackAllocator(buffer_size);
 parent_allocator: std.mem.Allocator,
 arena: *std.heap.ArenaAllocator,
 allocator: std.mem.Allocator,
-json_buf: std.ArrayList(u8),
-output_buf: *std.ArrayList(u8),
-output_writer: std.ArrayList(u8).Writer,
+json_buf: std.array_list.Managed(u8),
+output_buf: *std.array_list.Managed(u8),
+output_writer: std.array_list.Managed(u8).Writer,
 value: ?*Value = null,
 partial: bool = false,
 content: LayoutContent = .{ .data = "" },
@@ -91,9 +91,9 @@ const indent = "  ";
 
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
 pub fn init(parent_allocator: std.mem.Allocator) Data {
-    const json_buf = std.ArrayList(u8).init(parent_allocator);
-    const output_buf = parent_allocator.create(std.ArrayList(u8)) catch unreachable;
-    output_buf.* = std.ArrayList(u8).init(parent_allocator);
+    const json_buf = std.array_list.Managed(u8).init(parent_allocator);
+    const output_buf = parent_allocator.create(std.array_list.Managed(u8)) catch unreachable;
+    output_buf.* = std.array_list.Managed(u8).init(parent_allocator);
     const arena = parent_allocator.create(std.heap.ArenaAllocator) catch unreachable;
     arena.* = std.heap.ArenaAllocator.init(parent_allocator);
 
@@ -765,7 +765,7 @@ pub fn parseJsonSlice(self: *Data, json: []const u8) !*Value {
     const alloc = self.allocator;
     var json_stream: std.io.Reader = .fixed(json);
     var reader: std.json.Reader = .init(alloc, &json_stream);
-    var container_stack = std.ArrayList(*Value).init(alloc);
+    var container_stack = std.array_list.Managed(*Value).init(alloc);
     var current_container: ?*Value = null;
     var current_key: ?[]const u8 = null;
 
@@ -1357,7 +1357,7 @@ pub const Value = union(ValueType) {
         const arena = switch (self.*) {
             inline else => |capture| capture.allocator,
         };
-        var buf = std.ArrayList(u8).init(arena);
+        var buf = std.array_list.Managed(u8).init(arena);
         const writer = buf.writer();
         try self._toJson(writer, .{}, 0);
         return try buf.toOwnedSlice();
@@ -1648,7 +1648,7 @@ pub const DateTime = struct {
     }
 
     pub fn toJson(self: DateTime, writer: Writer, comptime options: ToJsonOptions) !void {
-        var buf = std.ArrayList(u8).init(self.allocator);
+        var buf = std.array_list.Managed(u8).init(self.allocator);
         try self.value.toJson(buf.writer());
         try highlight(
             writer,
@@ -1659,7 +1659,7 @@ pub const DateTime = struct {
     }
 
     pub fn toString(self: DateTime) ![]const u8 {
-        var buf = std.ArrayList(u8).init(self.allocator);
+        var buf = std.array_list.Managed(u8).init(self.allocator);
         const writer = buf.writer();
         try self.value.toString(writer);
         return try buf.toOwnedSlice();
@@ -1898,7 +1898,7 @@ pub const Object = struct {
     }
 
     pub fn items(self: Object) []const Item {
-        var items_array = std.ArrayList(Item).init(self.allocator);
+        var items_array = std.array_list.Managed(Item).init(self.allocator);
         for (self.hashmap.keys(), self.hashmap.values()) |key, value| {
             items_array.append(.{ .key = key, .value = value }) catch @panic("OOM");
         }
@@ -1943,11 +1943,11 @@ pub const Object = struct {
 
 pub const Array = struct {
     allocator: std.mem.Allocator,
-    array: std.ArrayList(*Value),
+    array: std.array_list.Managed(*Value),
     it: Iterator = undefined,
 
     pub fn init(arena: std.mem.Allocator) Array {
-        return .{ .array = std.ArrayList(*Value).init(arena), .allocator = arena };
+        return .{ .array = std.array_list.Managed(*Value).init(arena), .allocator = arena };
     }
 
     pub fn deinit(self: *Array) void {
@@ -2024,7 +2024,7 @@ pub const Array = struct {
 };
 
 pub const Iterator = struct {
-    array: std.ArrayList(*Value),
+    array: std.array_list.Managed(*Value),
     index: usize = 0,
 
     pub fn next(self: *Iterator) ?*Value {
@@ -2238,7 +2238,7 @@ const Field = struct {
     allocator: std.mem.Allocator,
 
     pub fn toJson(self: Field, writer: Writer, comptime options: ToJsonOptions) !void {
-        //var buf = std.ArrayList(u8).init(self.allocator);
+        //var buf = std.array_list.Managed(u8).init(self.allocator);
         var new_writer: std.io.Writer.Allocating = .init(self.allocator);
         defer new_writer.deinit();
         try std.json.Stringify.value(self.value, .{}, &new_writer.writer);

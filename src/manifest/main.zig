@@ -38,7 +38,7 @@ pub fn main() !void {
 
     const manifest_path = args[1];
 
-    var templates_paths = std.ArrayList(Manifest.TemplatePath).init(allocator);
+    var templates_paths = std.array_list.Managed(Manifest.TemplatePath).init(allocator);
 
     var it = std.mem.tokenizeSequence(u8, args[2], ";");
     while (it.next()) |syntax| {
@@ -57,7 +57,7 @@ pub fn main() !void {
 
     const template_paths = args[3..];
 
-    var template_paths_buf = std.ArrayList(Manifest.TemplatePath).init(allocator);
+    var template_paths_buf = std.array_list.Managed(Manifest.TemplatePath).init(allocator);
     for (template_paths) |path| {
         const templates_path = for (templates_paths.items) |templates_path| {
             if (std.mem.startsWith(u8, path, templates_path.path)) break templates_path;

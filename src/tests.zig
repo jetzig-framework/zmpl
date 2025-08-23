@@ -581,7 +581,7 @@ test "put slice" {
     var root = try data.root(.object);
 
     const T = struct { foo: []const u8, bar: []const u8 };
-    var array = std.ArrayList(T).init(std.testing.allocator);
+    var array = std.array_list.Managed(T).init(std.testing.allocator);
     try array.append(.{ .foo = "abc", .bar = "def" });
     try array.append(.{ .foo = "ghi", .bar = "jkl" });
 

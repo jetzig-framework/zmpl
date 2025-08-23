@@ -21,7 +21,7 @@ pub fn indent(
     comptime indent_size: usize,
 ) ![]const u8 {
     var it = std.mem.splitScalar(u8, input, '\n');
-    var buf = std.ArrayList(u8).init(allocator);
+    var buf = std.array_list.Managed(u8).init(allocator);
     const writer = buf.writer();
 
     while (it.next()) |line| {

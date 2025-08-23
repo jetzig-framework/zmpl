@@ -201,7 +201,7 @@ pub fn templatePathFetch(allocator: std.mem.Allocator, path: []const u8, partial
 }
 
 pub fn normalizePathPosix(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
-    var buf = std.ArrayList([]const u8).init(allocator);
+    var buf = std.array_list.Managed([]const u8).init(allocator);
     defer buf.deinit();
     var it = std.mem.tokenizeSequence(u8, path, std.fs.path.sep_str);
     while (it.next()) |segment| try buf.append(segment);
