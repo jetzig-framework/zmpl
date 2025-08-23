@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const Zmd = @import("zmd").Zmd;
+const zmd = @import("zmd");
 const ZmdNode = @import("zmd").Node;
 
 const Token = @import("Template.zig").Token;
@@ -120,6 +120,14 @@ pub fn compile(self: Node, input: []const u8, writer: Writer, options: type) !vo
 }
 
 const Context = enum { initial, secondary };
+fn divFormatter(allocator: std.mem.Allocator, node: zmd.Node) ![]const u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "<div>{s}</div>",
+        .{node.content},
+    );
+}
+
 fn render(
     self: Node,
     context: Context,
@@ -127,32 +135,43 @@ fn render(
     options: type,
     writer: anytype,
 ) !void {
-    const markdown_fragments = if (@hasDecl(options, "markdown_fragments"))
-        options.markdown_fragments
+    const formatters: zmd.Formatters = if (@hasDecl(options, "formatters"))
+        options.formatters
     else
-        struct {
-            pub const root = .{ "<div>", "</div>" };
-        };
+        zmd.Formatters{ .root = divFormatter };
 
     const stripped_content = try self.stripComments(content);
-    try self.renderMode(self.token.mode, context, stripped_content, markdown_fragments, if (self.hasBlockParent()) self.block_writer else writer);
+    try self.renderMode(
+        self.token.mode,
+        context,
+        stripped_content,
+        formatters,
+        if (self.hasBlockParent()) self.block_writer else writer,
+    );
 }
 
-fn renderMode(self: Node, mode: Mode, context: Context, content: []const u8, markdown_fragments: type, writer: anytype) !void {
+fn renderMode(
+    self: Node,
+    mode: Mode,
+    context: Context,
+    content: []const u8,
+    formatters: zmd.Formatters,
+    writer: anytype,
+) !void {
     switch (mode) {
         .zig => try self.renderZig(content, writer),
         .html => try self.renderHtml(content, .{}, writer),
         .markdown => try self.renderHtml(
-            try self.renderMarkdown(content, markdown_fragments),
+            try self.renderMarkdown(content, formatters),
             .{},
             writer,
         ),
         .partial => try self.renderPartial(content, writer),
         .args => try self.renderArgs(writer),
         .extend => try self.renderExtend(writer),
-        .@"for" => try self.renderFor(context, content, writer, markdown_fragments),
-        .@"if" => try self.renderIf(context, content, writer, markdown_fragments),
-        .block => try self.writeBlock(context, content, markdown_fragments),
+        .@"for" => try self.renderFor(context, content, writer, formatters),
+        .@"if" => try self.renderIf(context, content, writer, formatters),
+        .block => try self.writeBlock(context, content, formatters),
         .blocks => try self.writeBlocks(writer),
     }
 }
@@ -291,12 +310,8 @@ fn getHtmlLineMode(line: []const u8) enum { html, zig } {
         .zig;
 }
 
-fn renderMarkdown(self: Node, content: []const u8, fragments: type) ![]const u8 {
-    var zmd = Zmd.init(self.allocator);
-    defer zmd.deinit();
-
-    try zmd.parse(content);
-    return try zmd.toHtml(fragments);
+fn renderMarkdown(self: Node, content: []const u8, formatters: zmd.Formatters) ![]const u8 {
+    return zmd.parse(self.allocator, content, formatters);
 }
 
 const Syntax = struct {
@@ -607,7 +622,13 @@ fn renderExtend(self: Node, writer: anytype) !void {
     )});
 }
 
-fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype, markdown_fragments: type) !void {
+fn renderFor(
+    self: Node,
+    context: Context,
+    content: []const u8,
+    writer: anytype,
+    formatters: zmd.Formatters,
+) !void {
     // If we have already rendered once, re-rendering the for loop makes no sense so we can just
     // write the remaining content directly. This can happen when a child node of the for loop
     // contains whitespace etc.
@@ -617,7 +638,7 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
                 .zig => try self.renderZig(content, writer),
                 .html => try self.renderHtml(content, .{}, writer),
                 .markdown => try self.renderHtml(
-                    try self.renderMarkdown(content, markdown_fragments),
+                    try self.renderMarkdown(content, formatters),
                     .{},
                     writer,
                 ),
@@ -686,7 +707,7 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
             .zig => try self.renderZig(content, writer),
             .html => try self.renderHtml(content, .{}, writer),
             .markdown => try self.renderHtml(
-                try self.renderMarkdown(content, markdown_fragments),
+                try self.renderMarkdown(content, formatters),
                 .{},
                 writer,
             ),
@@ -747,7 +768,13 @@ fn parseZmpl(self: Node, content: []const u8) ![]const u8 {
     return try buf.toOwnedSlice();
 }
 
-fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype, markdown_fragments: type) !void {
+fn renderIf(
+    self: Node,
+    context: Context,
+    content: []const u8,
+    writer: anytype,
+    formatters: zmd.Formatters,
+) !void {
     if (context == .initial) {
         // When we render nodes, we render child nodes that exist within their bounds as we work
         // through each node. We only want to render the initial `if` statement defined by this
@@ -766,7 +793,7 @@ fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype, 
         .html => try self.renderHtml(content[0..content_end], .{}, writer),
         .zig => try self.renderZig(content[0..content_end], writer),
         .markdown => try self.renderHtml(
-            try self.renderMarkdown(content[0..content_end], markdown_fragments),
+            try self.renderMarkdown(content[0..content_end], formatters),
             .{},
             writer,
         ),
@@ -786,7 +813,7 @@ fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype, 
             .html => try self.renderHtml(token.content, .{}, writer),
             .zig => try self.renderZig(token.content, writer),
             .markdown => try self.renderHtml(
-                try self.renderMarkdown(token.content, markdown_fragments),
+                try self.renderMarkdown(token.content, formatters),
                 .{},
                 writer,
             ),
@@ -851,7 +878,12 @@ fn ifStatement(self: Node, input: []const u8) !IfStatement {
 
 // Write a `@block` definition - note that we write to a different output buffer here - each
 // block is compiled into a separate function which is written after the main manifest body.
-fn writeBlock(self: Node, context: Context, content: []const u8, markdown_fragments: type) !void {
+fn writeBlock(
+    self: Node,
+    context: Context,
+    content: []const u8,
+    formatters: zmd.Formatters,
+) !void {
     if (context == .initial) {
         const args = self.token.args orelse {
             std.log.err("Missing argument to `@block` mode: `{s}`", .{self.token.mode_line});
@@ -885,16 +917,16 @@ fn writeBlock(self: Node, context: Context, content: []const u8, markdown_fragme
             .zig => try self.renderZig(content, writer),
             .html => try self.renderHtml(content, .{}, writer),
             .markdown => try self.renderHtml(
-                try self.renderMarkdown(content, markdown_fragments),
+                try self.renderMarkdown(content, formatters),
                 .{},
                 writer,
             ),
             .partial => try self.renderPartial(content, writer),
             .args => try self.renderArgs(writer),
             .extend => try self.renderExtend(writer),
-            .@"for" => try self.renderFor(context, content, writer, markdown_fragments),
-            .@"if" => try self.renderIf(context, content, writer, markdown_fragments),
-            .block => try self.writeBlock(context, content, markdown_fragments),
+            .@"for" => try self.renderFor(context, content, writer, formatters),
+            .@"if" => try self.renderIf(context, content, writer, formatters),
+            .block => try self.writeBlock(context, content, formatters),
             .blocks => try self.writeBlocks(writer),
         }
     } else {
