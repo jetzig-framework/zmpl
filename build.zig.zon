@@ -2,15 +2,15 @@
     .name = .zmpl,
     .version = "0.0.1",
     .fingerprint = 0xef2931206468149,
-    .minimum_zig_version = "0.15.0-dev.1564+2761cc8be",
+    .minimum_zig_version = "0.15.1",
     .dependencies = .{
         .jetcommon = .{
             .url = "https://github.com/jetzig-framework/jetcommon/archive/f613f2cb9084d4b1c19ea89f5dab9ad7ba4fa3c4.tar.gz",
             .hash = "jetcommon-0.1.0-jPY_DRRJAADaN4sQby3c31hyFSAgqIP90D4DYcTNVquG",
         },
         .zmd = .{
-            .url = "https://github.com/jetzig-framework/zmd/archive/efff447f3c09cdb5dd5acabb5700afb7c0dd990c.tar.gz",
-            .hash = "zmd-0.1.0-H8YV7X7iAADfm-S0PlR9uYifxuqG1k0SqT5e7ue9XgpU",
+            .url = "https://github.com/jetzig-framework/zmd/archive/89d4c7a17009d077b95822f87ed798e5a1d377fe.tar.gz",
+            .hash = "zmd-0.1.0-H8YV7T3iAABKSUpySUgTppc0BkTvQFI0E5KpmXWQabw5",
         },
     },
 
