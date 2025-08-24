@@ -35,4 +35,5 @@ jobs:
           zig build test --summary all
 
       - name: Formatting check
+        if: matrix.platform != 'windows-latest'
         run: zig fmt --check .
