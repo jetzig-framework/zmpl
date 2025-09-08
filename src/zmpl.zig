@@ -1,4 +1,5 @@
 const std = @import("std");
+const Writer = std.Io.Writer;
 
 const build_options = @import("build_options");
 
@@ -34,7 +35,7 @@ pub fn chomp(input: []const u8) []const u8 {
 
 /// Sanitize input. Used internally for rendering data refs. Use `zmpl.fmt.sanitize` to manually
 /// sanitize other values.
-pub fn sanitize(writer: anytype, input: []const u8) !void {
+pub fn sanitize(writer: *Writer, input: []const u8) !void {
     if (!build_options.sanitize) {
         _ = try writer.write(input);
         return;

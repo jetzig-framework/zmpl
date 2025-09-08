@@ -1,4 +1,8 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const Color = std.Io.tty.Color;
+const Config = std.Io.tty.Config;
+const Writer = std.Io.Writer;
 
 const builtin = @import("builtin");
 
@@ -51,9 +55,9 @@ const ansi_colors = .{
     .{ "0", .reset },
 };
 pub const codes_map = if (@hasDecl(std, "ComptimeStringMap"))
-    std.ComptimeStringMap(std.io.tty.Color, ansi_colors)
+    std.ComptimeStringMap(Color, ansi_colors)
 else if (@hasDecl(std, "StaticStringMap"))
-    std.StaticStringMap(std.io.tty.Color).initComptime(ansi_colors)
+    std.StaticStringMap(Color).initComptime(ansi_colors)
 else
     unreachable;
 
@@ -92,25 +96,29 @@ else
 /// invoke the appropriate Windows API call to set the terminal color before writing each token.
 /// We must do it this way because Windows colors are set by API calls at the time of write, not
 /// encoded into the message string.
-pub fn colorize(color: std.io.tty.Color, buf: []u8, input: []const u8, is_colorized: bool) ![]const u8 {
+pub fn colorize(
+    color: Color,
+    buf: []u8,
+    input: []const u8,
+    is_colorized: bool,
+) ![]const u8 {
     if (!is_colorized) return input;
 
-    const config: std.io.tty.Config = .escape_codes;
-    var stream = std.io.fixedBufferStream(buf);
-    const writer = stream.writer();
+    const config: Config = .escape_codes;
+    var writer: Writer = .fixed(buf);
     try config.setColor(writer, color);
     try writer.writeAll(input);
     try config.setColor(writer, .reset);
 
-    return stream.getWritten();
+    return writer.buffered();
 }
 
 fn wrap(comptime attribute: []const u8, comptime message: []const u8) []const u8 {
     return codes.escape ++ attribute ++ message ++ codes.escape ++ codes.reset;
 }
 
-fn runtimeWrap(allocator: std.mem.Allocator, attribute: []const u8, message: []const u8) ![]const u8 {
-    return try std.mem.join(
+fn runtimeWrap(allocator: Allocator, attribute: []const u8, message: []const u8) ![]const u8 {
+    return std.mem.join(
         allocator,
         "",
         &[_][]const u8{ codes.escape, attribute, message, codes.escape, codes.reset },
@@ -125,32 +133,32 @@ pub fn black(comptime message: []const u8) []const u8 {
     return wrap(codes.black, message);
 }
 
-pub fn runtimeBlack(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
-    return try runtimeWrap(allocator, codes.black, message);
+pub fn runtimeBlack(allocator: Allocator, message: []const u8) ![]const u8 {
+    return runtimeWrap(allocator, codes.black, message);
 }
 
 pub fn red(comptime message: []const u8) []const u8 {
     return wrap(codes.red, message);
 }
 
-pub fn runtimeRed(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
-    return try runtimeWrap(allocator, codes.red, message);
+pub fn runtimeRed(allocator: Allocator, message: []const u8) ![]const u8 {
+    return runtimeWrap(allocator, codes.red, message);
 }
 
 pub fn green(comptime message: []const u8) []const u8 {
     return wrap(codes.green, message);
 }
 
-pub fn runtimeGreen(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
-    return try runtimeWrap(allocator, codes.green, message);
+pub fn runtimeGreen(allocator: Allocator, message: []const u8) ![]const u8 {
+    return runtimeWrap(allocator, codes.green, message);
 }
 
 pub fn yellow(comptime message: []const u8) []const u8 {
     return wrap(codes.yellow, message);
 }
 
-pub fn runtimeYellow(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
-    return try runtimeWrap(allocator, codes.yellow, message);
+pub fn runtimeYellow(allocator: Allocator, message: []const u8) ![]const u8 {
+    return runtimeWrap(allocator, codes.yellow, message);
 }
 
 pub fn blue(comptime message: []const u8) []const u8 {
@@ -161,32 +169,35 @@ pub fn bright(comptime color: anytype, message: []const u8) []const u8 {
     return wrap(@field(codes, "bright_" ++ @tagName(color)), message);
 }
 
-pub fn runtimeBlue(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
-    return try runtimeWrap(allocator, codes.blue, message);
+pub fn runtimeBlue(allocator: Allocator, message: []const u8) ![]const u8 {
+    return runtimeWrap(allocator, codes.blue, message);
 }
 
 pub fn magenta(comptime message: []const u8) []const u8 {
     return wrap(codes.magenta, message);
 }
 
-pub fn runtimeMagenta(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
-    return try runtimeWrap(allocator, codes.magenta, message);
+pub fn runtimeMagenta(allocator: Allocator, message: []const u8) ![]const u8 {
+    return runtimeWrap(allocator, codes.magenta, message);
 }
 
 pub fn cyan(comptime message: []const u8) []const u8 {
     return wrap(codes.cyan, message);
 }
 
-pub fn runtimeCyan(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
-    return try runtimeWrap(allocator, codes.cyan, message);
+pub fn runtimeCyan(allocator: Allocator, message: []const u8) ![]const u8 {
+    return runtimeWrap(allocator, codes.cyan, message);
 }
 
 pub fn white(comptime message: []const u8) []const u8 {
     return wrap(codes.white, message);
 }
 
-pub fn runtimeWhite(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
-    return try runtimeWrap(allocator, codes.white, message);
+pub fn runtimeWhite(
+    allocator: Allocator,
+    message: []const u8,
+) ![]const u8 {
+    return runtimeWrap(allocator, codes.white, message);
 }
 
 pub fn duration(buf: *[256]u8, delta: i64, is_colorized: bool) ![]const u8 {
@@ -198,7 +209,7 @@ pub fn duration(buf: *[256]u8, delta: i64, is_colorized: bool) ![]const u8 {
         );
     }
 
-    const color: std.io.tty.Color = if (delta < 1000000)
+    const color: Color = if (delta < 1000000)
         .green
     else if (delta < 5000000)
         .yellow
@@ -210,5 +221,5 @@ pub fn duration(buf: *[256]u8, delta: i64, is_colorized: bool) ![]const u8 {
         "{}",
         .{std.fmt.fmtDurationSigned(delta)},
     );
-    return try colorize(color, buf, formatted_duration, true);
+    return colorize(color, buf, formatted_duration, true);
 }

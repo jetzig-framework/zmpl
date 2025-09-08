@@ -1,4 +1,7 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const Writer = std.Io.Writer;
+const ArrayList = std.ArrayList;
 
 /// Strip all leading and trailing `\n` except one.
 pub fn chomp(input: []const u8) []const u8 {
@@ -16,17 +19,20 @@ pub inline fn strip(input: []const u8) []const u8 {
 
 /// Indent a line-separated string with the given indent size.
 pub fn indent(
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     input: []const u8,
     comptime indent_size: usize,
 ) ![]const u8 {
     var it = std.mem.splitScalar(u8, input, '\n');
-    var buf = std.array_list.Managed(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+    const writer = &buf.writer;
 
     while (it.next()) |line| {
-        try writer.writeByteNTimes(' ', indent_size);
+        try writer.writeSplat;
+        for (0..indent_size) |_|
+            try writer.write(' ');
         try writer.print("{s}\n", .{line});
     }
-    return try buf.toOwnedSlice();
+    return buf.toOwnedSlice();
 }
