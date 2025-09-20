@@ -1,4 +1,5 @@
 const std = @import("std");
+const Writer = std.Io.Writer;
 
 ast: std.zig.Ast,
 if_ast: std.zig.Ast.full.If,
@@ -267,10 +268,12 @@ fn expectIfStatement(expected: []const u8, input: [:0]const u8) !void {
 
     const if_statement = IfStatement.init(ast);
 
-    var buf = std.array_list.Managed(u8).init(std.testing.allocator);
+    var buf: Writer.Allocating = .init(std.testing.allocator);
     defer buf.deinit();
 
-    try if_statement.render(buf.writer());
+    try if_statement.render(&buf.writer);
+    const output = try buf.toOwnedSlice();
+    std.testing.allocator.free(output);
 
-    try std.testing.expectEqualStrings(expected, buf.items);
+    try std.testing.expectEqualStrings(expected, output);
 }

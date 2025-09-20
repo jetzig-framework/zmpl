@@ -1,4 +1,8 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
+const StringHashMap = std.StringHashMap;
+const Writer = std.Io.Writer;
 
 const jetcommon = @import("jetcommon");
 
@@ -9,7 +13,7 @@ const Template = @This();
 
 pub const TemplateMap = std.StringHashMap([]const u8);
 
-allocator: std.mem.Allocator,
+allocator: Allocator,
 templates_path: []const u8,
 name: []const u8,
 prefix: []const u8,
@@ -17,15 +21,15 @@ path: []const u8,
 input: []const u8,
 template_type: TemplateType,
 state: enum { initial, tokenized, parsed, compiled } = .initial,
-tokens: std.array_list.Managed(Token),
+tokens: ArrayList(Token),
 root_node: *Node = undefined,
 index: usize = 0,
 args: ?[]const u8 = null,
 partial: bool,
-template_map: std.StringHashMap(TemplateMap),
-templates_paths_map: std.StringHashMap([]const u8),
-block_buf: std.array_list.Managed(u8),
-block_map: std.StringHashMap(std.array_list.Managed(Node.Block)),
+template_map: StringHashMap(TemplateMap),
+templates_paths_map: StringHashMap([]const u8),
+block_buf: ArrayList(u8),
+block_map: StringHashMap(ArrayList(Node.Block)),
 
 const end_token = "@end";
 
@@ -68,14 +72,14 @@ pub const Token = struct {
 
 /// Initialize a new template.
 pub fn init(
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     name: []const u8,
     templates_path: []const u8,
     prefix: []const u8,
     path: []const u8,
-    templates_paths_map: std.StringHashMap([]const u8),
+    templates_paths_map: StringHashMap([]const u8),
     input: []const u8,
-    template_map: std.StringHashMap(TemplateMap),
+    template_map: StringHashMap(TemplateMap),
 ) Template {
     return .{
         .allocator = allocator,
@@ -85,12 +89,12 @@ pub fn init(
         .path = path,
         .template_type = templateType(path),
         .input = util.normalizeInput(allocator, input),
-        .tokens = std.array_list.Managed(Token).init(allocator),
+        .tokens = .empty,
         .partial = std.mem.startsWith(u8, std.fs.path.basename(path), "_"),
         .template_map = template_map,
         .templates_paths_map = templates_paths_map,
-        .block_buf = std.array_list.Managed(u8).init(allocator),
-        .block_map = std.StringHashMap(std.array_list.Managed(Node.Block)).init(allocator),
+        .block_buf = .empty,
+        .block_map = .init(allocator),
     };
 }
 
@@ -101,15 +105,16 @@ pub fn deinit(self: *Template) void {
 
 /// Compile a template into a Zig code which can then be written out and compiled by Zig.
 pub fn compile(self: *Template, comptime options: type) ![]const u8 {
-    if (self.state != .initial) unreachable;
-
     try self.tokenize();
     try self.parse();
+    var buf: ArrayList(u8) = .empty;
+    defer buf.deinit(self.allocator);
 
-    var buf = std.array_list.Managed(u8).init(self.allocator);
-    defer buf.deinit();
-
-    const writer = Node.Writer{ .buf = &buf, .token = self.tokens.items[0] };
+    const writer = Node.Writer{
+        .buf = &buf,
+        .token = self.tokens.items[0],
+        .allocator = self.allocator,
+    };
     try self.renderHeader(writer, options);
     try self.root_node.compile(self.input, writer, options);
 
@@ -120,7 +125,7 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
     const with_sentinel = try std.mem.concatWithSentinel(self.allocator, u8, &.{buf.items}, 0);
     var ast = try std.zig.Ast.parse(self.allocator, with_sentinel, .zig);
     return if (ast.errors.len > 0)
-        try buf.toOwnedSlice()
+        try buf.toOwnedSlice(self.allocator)
     else
         ast.renderAlloc(self.allocator);
 }
@@ -176,11 +181,14 @@ const Context = struct {
 // Tokenize template into (possibly nested) sections, where each section is a mode declaration
 // and its content, specified by start and end markers.
 fn tokenize(self: *Template) !void {
-    if (self.state != .initial) unreachable;
-
-    var stack = std.array_list.Managed(Context).init(self.allocator);
-    defer stack.deinit();
-    try stack.append(.{ .mode = self.defaultMode(), .depth = 1, .start = 0, .delimiter = .eof });
+    var stack: ArrayList(Context) = .empty;
+    defer stack.deinit(self.allocator);
+    try stack.append(self.allocator, .{
+        .mode = self.defaultMode(),
+        .depth = 1,
+        .start = 0,
+        .delimiter = .eof,
+    });
 
     var line_it = std.mem.splitScalar(u8, self.input, '\n');
     var cursor: usize = 0;
@@ -202,7 +210,7 @@ fn tokenize(self: *Template) !void {
             if (context.delimiter == .none) {
                 try self.appendToken(context, cursor + line.len, depth + 1);
             } else {
-                try stack.append(context);
+                try stack.append(self.allocator, context);
                 depth += 1;
             }
             continue;
@@ -239,8 +247,6 @@ fn tokenize(self: *Template) !void {
     try self.appendRootToken();
 
     // for (self.tokens.items) |token| self.debugToken(token, false);
-
-    self.state = .tokenized;
 }
 
 // Append a new token. Note that tokens are not ordered in any meaningful way - use
@@ -258,7 +264,7 @@ fn appendToken(self: *Template, context: Context, end: usize, depth: usize) !voi
             std.mem.trim(u8, args[args_start..], &std.ascii.whitespace)
         else
             "";
-        try self.tokens.append(.{
+        try self.tokens.append(self.allocator, .{
             .mode = context.mode,
             .start = context.start,
             .delimiter = context.delimiter,
@@ -274,7 +280,7 @@ fn appendToken(self: *Template, context: Context, end: usize, depth: usize) !voi
 
 // Append a root token with the default mode that covers the entire input.
 fn appendRootToken(self: *Template) !void {
-    try self.tokens.append(.{
+    try self.tokens.append(self.allocator, .{
         .mode = self.defaultMode(),
         .delimiter = .eof,
         .start = 0,
@@ -289,16 +295,12 @@ fn appendRootToken(self: *Template) !void {
 
 // Recursively parse tokens into an AST.
 fn parse(self: *Template) !void {
-    if (self.state != .tokenized) unreachable;
-
     const root_token = getRootToken(self.tokens.items);
     self.root_node = try self.createNode(root_token, null);
 
     try self.parseChildren(self.root_node);
 
     // debugTree(self.root_node, 0, self.path);
-
-    self.state = .parsed;
 }
 
 // Parse tokenized input by offloading to the relevant parser for each token's assigned mode.
@@ -306,7 +308,7 @@ fn parseChildren(self: *Template, node: *Node) !void {
     var tokens_it = self.tokensIterator(node.token);
     while (tokens_it.next()) |token| {
         const child_node = try self.createNode(token, node);
-        try node.children.append(child_node);
+        try node.children.append(self.allocator, child_node);
         try self.parseChildren(child_node);
     }
 }
@@ -318,14 +320,18 @@ fn createNode(self: *Template, token: Token, parent: ?*const Node) !*Node {
         .allocator = self.allocator,
         .token = token,
         .parent = parent,
-        .children = std.array_list.Managed(*Node).init(self.allocator),
+        .children = .empty,
         .generated_template_name = self.name,
         .template_func_name = self.name,
         .template_map = self.template_map,
         .templates_path = self.templates_path,
         .template_prefix = self.prefix,
         .templates_paths_map = self.templates_paths_map,
-        .block_writer = Node.Writer{ .buf = &self.block_buf, .token = self.tokens.items[0] },
+        .block_writer = Node.Writer{
+            .buf = &self.block_buf,
+            .token = self.tokens.items[0],
+            .allocator = self.allocator,
+        },
         .block_map = &self.block_map,
     };
     return node;
@@ -388,7 +394,7 @@ const TokensIterator = struct {
 // Return an iterator that yields tokens in an order appropriate for parsing (i.e. root node,
 // then modal sections within the root node, modal sections within each modal section, etc.).
 fn tokensIterator(self: Template, token: ?Token) TokensIterator {
-    return TokensIterator.init(self.tokens.items, token);
+    return .init(self.tokens.items, token);
 }
 
 // Given an input line, identify a mode sigil (`@`) and, if present, return the specified mode.
@@ -483,7 +489,7 @@ fn delimiterFromString(string: []const u8) Delimiter {
 // When the current context's mode is `zig`, evaluate open and close braces to determine the
 // current nesting depth. For other modes, ignore braces except for a closing brace as the
 // leading character on the given line.
-fn resolveNesting(line: []const u8, stack: std.array_list.Managed(Context)) void {
+fn resolveNesting(line: []const u8, stack: ArrayList(Context)) void {
     if (stack.items.len == 0) return;
 
     const current_context = stack.items[stack.items.len - 1];
@@ -550,8 +556,8 @@ fn getBraceDepth(mode: Mode, line: []const u8) isize {
 
 // Render the function definiton and inject any provided constants.
 fn renderHeader(self: *Template, writer: anytype, options: type) !void {
-    var decls_buf = std.array_list.Managed(u8).init(self.allocator);
-    defer decls_buf.deinit();
+    var decls_buf: ArrayList(u8) = .empty;
+    defer decls_buf.deinit(self.allocator);
 
     if (@hasDecl(options, "template_constants")) {
         inline for (std.meta.fields(options.template_constants)) |field| {
@@ -562,8 +568,8 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
 
             const decl_string = "const " ++ field.name ++ ": " ++ type_str ++ " = try zmpl.getConst(" ++ type_str ++ ", \"" ++ field.name ++ "\");\n"; // :(
 
-            try decls_buf.appendSlice("    " ++ decl_string);
-            try decls_buf.appendSlice("    zmpl.noop(" ++ type_str ++ ", " ++ field.name ++ ");\n");
+            try decls_buf.appendSlice(self.allocator, "    " ++ decl_string);
+            try decls_buf.appendSlice(self.allocator, "    zmpl.noop(" ++ type_str ++ ", " ++ field.name ++ ");\n");
         }
     }
 
@@ -580,18 +586,19 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
             .{util.trimParentheses(util.strip(token.mode_line["@args".len..]))},
         );
 
+        var aw: Writer.Allocating = .init(self.allocator);
+        defer aw.deinit();
         const args = try self.root_node.parsePartialArgs(args_mode_line);
-        var args_buf = std.array_list.Managed(u8).init(self.allocator);
-        const args_writer = args_buf.writer();
 
         for (args) |arg| {
             if (arg.name == null) {
                 std.debug.print("Error parsing `@args` pragma: `{s}`\n", .{token.mode_line});
                 return error.ZmplSyntaxError;
             }
-            try args_writer.print("{0s}: {1s}, ", .{ arg.name.?, arg.value });
+            try aw.writer.print("{0s}: {1s}, ", .{ arg.name.?, arg.value });
         }
-        self.args = try args_buf.toOwnedSlice();
+        const output = try aw.toOwnedSlice();
+        self.args = output;
     }
 
     const header = try std.fmt.allocPrint(
@@ -626,12 +633,11 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
         },
     );
     defer self.allocator.free(header);
-
     try writer.writeAll(header);
 }
 
 // Render the final component of the template function.
-fn renderFooter(self: Template, writer: anytype) !void {
+fn renderFooter(self: Template, writer: Node.Writer) !void {
     try writer.print(
         \\
         \\    if (__extend) |__capture| {{

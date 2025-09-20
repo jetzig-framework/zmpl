@@ -1,4 +1,6 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const Writer = std.Io.Writer;
 
 /// The first non-whitespace character of a given input (line).
 pub fn firstMeaningfulChar(input: []const u8) ?u8 {
@@ -220,14 +222,14 @@ pub fn readFile(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
             else => return err,
         }
     };
-    const content = std.fs.cwd().readFileAlloc(allocator, path, @intCast(stat.size));
+    const content = std.fs.cwd().readFileAlloc(path, allocator, .limited64(stat.size));
     return content;
 }
 
 /// Output an escaped string suitable for use in generated Zig code.
-pub fn zigStringEscape(allocator: std.mem.Allocator, input: ?[]const u8) ![]const u8 {
+pub fn zigStringEscape(allocator: Allocator, input: ?[]const u8) ![]const u8 {
     if (input) |string| {
-        var writer: std.io.Writer.Allocating = .init(allocator);
+        var writer: Writer.Allocating = .init(allocator);
         defer writer.deinit();
         try writer.writer.writeByte('"');
         try std.zig.stringEscape(string, &writer.writer);

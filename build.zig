@@ -1,9 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const zmd = @import("zmd");
+
 pub const zmpl = @import("src/zmpl.zig");
 pub const Data = zmpl.Data;
-const zmd = @import("zmd");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});

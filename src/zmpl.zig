@@ -12,9 +12,10 @@ pub const zmpl = @This();
 /// Generic, JSON-compatible data type.
 pub const Data = @import("zmpl/Data.zig");
 pub const Template = @import("zmpl/Template.zig");
+const Writer = std.Io.Writer;
 pub const Manifest = Template.Manifest;
 pub const colors = @import("zmpl/colors.zig");
-pub const Format = @import("zmpl/Format.zig");
+pub const format = @import("zmpl/format.zig");
 pub const debug = @import("zmpl/debug.zig");
 
 pub const isZmplValue = Data.isZmplValue;
@@ -34,14 +35,12 @@ pub fn chomp(input: []const u8) []const u8 {
 
 /// Sanitize input. Used internally for rendering data refs. Use `zmpl.fmt.sanitize` to manually
 /// sanitize other values.
-pub fn sanitize(writer: anytype, input: []const u8) !void {
+pub fn sanitize(writer: *Writer, input: []const u8) !void {
     if (!build_options.sanitize) {
         _ = try writer.write(input);
         return;
     }
-
-    const fmt = Format{ .writer = if (@TypeOf(writer) == *Data) writer.output_writer else writer };
-    _ = try fmt.sanitize(input);
+    _ = try format.sanitize(input);
 }
 
 /// Check if a value is present for use in if conditions.
