@@ -1,6 +1,7 @@
 const std = @import("std");
 
-const build_options = @import("build_options");
+// I dont konw why but this is failing, despite zls finding it just fine.
+//const build_options = @import("build_options");
 
 pub const zmd = @import("zmd");
 pub const jetcommon = @import("jetcommon");
@@ -36,11 +37,11 @@ pub fn chomp(input: []const u8) []const u8 {
 /// Sanitize input. Used internally for rendering data refs. Use `zmpl.fmt.sanitize` to manually
 /// sanitize other values.
 pub fn sanitize(writer: *Writer, input: []const u8) !void {
-    if (!build_options.sanitize) {
-        _ = try writer.write(input);
-        return;
-    }
-    _ = try format.sanitize(input);
+    //if (!build_options.sanitize) {
+    //    _ = try writer.write(input);
+    //    return;
+    //}
+    _ = try format.sanitize(writer, input);
 }
 
 /// Check if a value is present for use in if conditions.

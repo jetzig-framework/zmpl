@@ -107,9 +107,7 @@ pub fn init(allocator: Allocator) !Data {
 /// Frees all resources used by this `Data` instance.
 pub fn deinit(self: *Data, allocator: Allocator) void {
     self.output_buf.deinit(self.allocator);
-    self.allocator.free(self.output_buf);
     self.json_buf.deinit(self.allocator);
-    self.allocator.free(self.json_buf);
     self.arena.deinit();
     allocator.destroy(self.arena);
 }

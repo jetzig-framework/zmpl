@@ -230,9 +230,13 @@ fn compileTemplates(
         const generated_name = template_map.get(template_path.prefix).?.get(key).?;
 
         var file = try std.fs.openFileAbsolute(template_path.path, .{});
-        const size = (try file.stat()).size;
-        var fr = file.reader(&.{});
-        const content = try fr.interface.allocRemaining(self.allocator, .limited64(size));
+        //const size = (try file.stat()).size;
+        var buf: [4096]u8 = undefined;
+        var fr = file.reader(&buf);
+        const content = try fr.interface.allocRemaining(
+            self.allocator,
+            .unlimited,
+        );
         var template = TemplateType.init(
             self.allocator,
             generated_name,

@@ -139,7 +139,9 @@ const Context = enum { initial, secondary };
 fn divFormatter(allocator: Allocator, node: zmd.Node) ![]const u8 {
     return std.fmt.allocPrint(
         allocator,
-        "<div>{s}</div>",
+        \\//manifest/Node.zig divFormatter
+        \\<div>{s}</div>
+    ,
         .{node.content},
     );
 }
@@ -492,6 +494,7 @@ fn renderPartial(self: Node, content: []const u8, writer: Writer) !void {
             // Pass a *Zmpl.Value to partial using regular data lookup syntax.
             const value = try std.fmt.allocPrint(
                 self.allocator,
+                \\//manifest/Node.zig 497
                 \\(try zmpl.getCoerce({s}, "{s}"))
             ,
                 .{ expected_arg.value, arg.value[1..] },
@@ -504,6 +507,7 @@ fn renderPartial(self: Node, content: []const u8, writer: Writer) !void {
                 if (isIdentifier(root) and it.rest().len > 0) {
                     const chain = try std.fmt.allocPrint(
                         self.allocator,
+                        \\//manifest/Node.zig 510
                         \\if (comptime __zmpl.isZmplValue(@TypeOf({0s})))
                         \\    try {0s}.chainRefT(@typeInfo(@TypeOf({2s}_renderPartial)).@"fn".params[{3}].type.?, "{1s}",)
                         \\else
@@ -525,6 +529,7 @@ fn renderPartial(self: Node, content: []const u8, writer: Writer) !void {
                     try args_buf.append(
                         try std.fmt.allocPrint(
                             self.allocator,
+                            \\//manifest/Node.zig 532
                             \\if (comptime __zmpl.isZmplValue(@TypeOf({0s})))
                             \\    try {0s}.coerce(@typeInfo(@TypeOf({1s}_renderPartial)).@"fn".params[{2}].type.?)
                             \\else
@@ -546,6 +551,7 @@ fn renderPartial(self: Node, content: []const u8, writer: Writer) !void {
     }
 
     const template =
+        \\//manifest/Node.zig 554
         \\{{
         \\{0s}
         \\        const __slots = [_]__zmpl.Data.Slot{{
@@ -589,6 +595,7 @@ fn generateSlots(self: Node, content: []const u8) !Slots {
         const slot_writer = try std.fmt.allocPrint(self.allocator, "{s}_writer", .{slot_name});
 
         try slots_content_buf.writer.print(
+            \\//manifest/Node.zig 598
             \\var {0s}_aw: std.Io.Writer.Allocating = .init(allocator);
             \\defer {0s}_aw.deinit();
             \\const {0s}_writer = {0s}_aw.writer();
@@ -604,6 +611,7 @@ fn generateSlots(self: Node, content: []const u8) !Slots {
         try slots_buf.appendSlice(
             self.allocator,
             try std.fmt.allocPrint(self.allocator,
+                \\//manifest/Node.zig 614
                 \\    __zmpl.Data.Slot{{ .data = {s}_buf.items }},
                 \\
             , .{slot_name}),

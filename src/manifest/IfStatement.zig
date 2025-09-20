@@ -1,8 +1,10 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
+const Ast = std.zig.Ast;
 
-ast: std.zig.Ast,
-if_ast: std.zig.Ast.full.If,
+ast: Ast,
+if_ast: Ast.full.If,
 
 const IfStatement = @This();
 
@@ -10,21 +12,21 @@ const wrap_eql_open = "try zmpl.compare(.equal, ";
 const wrap_eql_close_true = ", true)";
 const wrap_eql_close_false = ", false)";
 
-pub fn parse(allocator: std.mem.Allocator, input: []const u8) !std.zig.Ast {
+pub fn parse(allocator: Allocator, input: []const u8) !Ast {
     const source = try std.mem.concatWithSentinel(
         allocator,
         u8,
         &.{ "_ = if ", input, "{}" },
         0,
     );
-    return try std.zig.Ast.parse(allocator, source, .zig);
+    return Ast.parse(allocator, source, .zig);
 }
 
-pub fn init(ast: std.zig.Ast) IfStatement {
+pub fn init(ast: Ast) IfStatement {
     const tags = ast.nodes.items(.tag);
 
     for (tags, 0..) |tag, index| {
-        const node: std.zig.Ast.Node.Index = @enumFromInt(index);
+        const node: Ast.Node.Index = @enumFromInt(index);
         if (tag == .if_simple) {
             const if_simple = ast.ifSimple(node);
             return .{ .ast = ast, .if_ast = if_simple };
@@ -37,7 +39,7 @@ pub fn render(self: IfStatement, writer: anytype) !void {
     const tags = self.ast.nodes.items(.tag);
 
     for (tags, 0..) |tag, index| {
-        const node: std.zig.Ast.Node.Index = @enumFromInt(index);
+        const node: Ast.Node.Index = @enumFromInt(index);
         if (tag == .if_simple) {
             try writer.writeAll("if (");
             const if_full = self.ast.ifSimple(node);
@@ -61,7 +63,7 @@ pub fn render(self: IfStatement, writer: anytype) !void {
     unreachable;
 }
 
-fn writeNode(self: IfStatement, node: std.zig.Ast.Node.Index, writer: anytype) !void {
+fn writeNode(self: IfStatement, node: Ast.Node.Index, writer: anytype) !void {
     const main_tokens = self.ast.nodes.items(.main_token);
     const node_data = self.ast.nodeData(node);
     switch (self.ast.nodeTag(node)) {
@@ -153,7 +155,7 @@ fn writeNode(self: IfStatement, node: std.zig.Ast.Node.Index, writer: anytype) !
     }
 }
 
-inline fn isOperator(tag: std.zig.Ast.Node.Tag) bool {
+inline fn isOperator(tag: Ast.Node.Tag) bool {
     return switch (tag) {
         .equal_equal,
         .bang_equal,
@@ -172,7 +174,7 @@ inline fn isOperator(tag: std.zig.Ast.Node.Tag) bool {
 // ```
 // This allows (e.g.) a `ZmplValue` boolean to evaluate to a Zig boolean for use in a regular Zig
 // `if` statement.
-fn isWrapTrue(self: IfStatement, has_payload: bool, node: std.zig.Ast.Node.Index) bool {
+fn isWrapTrue(self: IfStatement, has_payload: bool, node: Ast.Node.Index) bool {
     if (has_payload or isOperator(self.ast.nodeTag(node))) return false;
 
     return true;
@@ -273,7 +275,7 @@ fn expectIfStatement(expected: []const u8, input: [:0]const u8) !void {
 
     try if_statement.render(&buf.writer);
     const output = try buf.toOwnedSlice();
-    std.testing.allocator.free(output);
+    defer std.testing.allocator.free(output);
 
     try std.testing.expectEqualStrings(expected, output);
 }
