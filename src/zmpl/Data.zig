@@ -43,6 +43,7 @@ const Allocator = std.mem.Allocator;
 const jetcommon = @import("jetcommon");
 const manifest = @import("zmpl.manifest").__Manifest;
 const zmd = @import("zmd");
+
 const zmpl = @import("../zmpl.zig");
 const util = zmpl.util;
 const zmpl_format = @import("format.zig");
@@ -55,14 +56,7 @@ pub var log_errors = true;
 pub const LayoutContent = struct {
     data: []const u8,
 
-    pub fn format(
-        self: LayoutContent,
-        actual_fmt: []const u8,
-        options: anytype,
-        writer: *Writer,
-    ) !void {
-        _ = options;
-        _ = actual_fmt;
+    pub fn format(self: LayoutContent, writer: *Writer) !void {
         try writer.writeAll(self.data);
     }
 };
@@ -70,9 +64,7 @@ pub const LayoutContent = struct {
 pub const Slot = struct {
     data: []const u8,
 
-    pub fn format(self: Slot, actual_fmt: []const u8, options: anytype, writer: *Writer) !void {
-        _ = options;
-        _ = actual_fmt;
+    pub fn format(self: Slot, writer: *Writer) !void {
         try writer.writeAll(self.data);
     }
 };
@@ -84,6 +76,7 @@ const StackFallbackAllocator = std.heap.StackFallbackAllocator(buffer_size);
 arena: *ArenaAllocator,
 allocator: Allocator,
 json_buf: ArrayList(u8),
+output_writer: *Writer,
 output_buf: ArrayList(u8),
 value: ?*Value = null,
 partial: bool = false,
@@ -95,7 +88,7 @@ slots: ?[]const String = null,
 const indent = "  ";
 
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
-pub fn init(allocator: Allocator) !Data {
+pub fn init(allocator: Allocator, writer: *Writer) !Data {
     const arena = try allocator.create(ArenaAllocator);
     arena.* = .init(allocator);
 
@@ -103,6 +96,7 @@ pub fn init(allocator: Allocator) !Data {
         .allocator = arena.allocator(),
         .arena = arena,
         .json_buf = .empty,
+        .output_writer = writer,
         .output_buf = .empty,
         .template_decls = .init(allocator),
     };
@@ -118,12 +112,10 @@ pub fn deinit(self: *Data, allocator: Allocator) void {
 
 /// Chomps output buffer.
 pub fn chompOutputBuffer(self: *Data) void {
-    if (std.mem.endsWith(u8, self.output_buf.items, "\r\n")) {
+    if (std.mem.endsWith(u8, self.output_buf.items, "\n"))
         _ = self.output_buf.pop();
+    if (std.mem.endsWith(u8, self.output_buf.items, "\r"))
         _ = self.output_buf.pop();
-    } else if (std.mem.endsWith(u8, self.output_buf.items, "\n")) {
-        _ = self.output_buf.pop();
-    }
 }
 
 /// Convenience wrapper for `util.strip` to be used by compiled templates.
@@ -213,7 +205,10 @@ const Item = struct {
 
 const IteratorSelector = enum { array, object };
 
-pub fn items(self: *Data, comptime selector: IteratorSelector) []switch (selector) {
+pub fn items(
+    self: *Data,
+    comptime selector: IteratorSelector,
+) []switch (selector) {
     .array => *Value,
     .object => Item,
 } {
@@ -245,13 +240,12 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
             inline else => blk: {
                 if (@hasDecl(@TypeOf(value), "format")) {
                     break :blk .default;
-                } else {
-                    return zmplError(
-                        .syntax,
-                        "Struct does not implement `format()`: " ++ zmpl.colors.red("{s}"),
-                        .{@TypeOf(value)},
-                    );
                 }
+                return zmplError(
+                    .syntax,
+                    "Struct does not implement `format()`: " ++ zmpl.colors.red("{s}"),
+                    .{@TypeOf(value)},
+                );
             },
         },
         .comptime_float => .float,
@@ -267,34 +261,31 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
             Value, String, Integer, Float, Boolean, NullType => .zmpl,
             []const u8 => |child| blk: {
                 if (isStringCoercablePointer(pointer, child))
-                    break :blk .string_array
-                else
-                    return zmplError(
-                        .type,
-                        "Unsupported type: " ++ zmpl.colors.red("{s}"),
-                        .{@typeName(@TypeOf(pointer))},
-                    );
+                    break :blk .string_array;
+                return zmplError(
+                    .type,
+                    "Unsupported type: " ++ zmpl.colors.red("{s}"),
+                    .{@typeName(@TypeOf(pointer))},
+                );
             },
             u8 => |child| blk: {
                 if (isStringCoercablePointer(pointer, child))
-                    break :blk .string
-                else
-                    return zmplError(
-                        .syntax,
-                        "Unsupported type: " ++ zmpl.colors.red("{s}"),
-                        .{@typeName(@TypeOf(pointer))},
-                    );
+                    break :blk .string;
+                return zmplError(
+                    .syntax,
+                    "Unsupported type: " ++ zmpl.colors.red("{s}"),
+                    .{@typeName(@TypeOf(pointer))},
+                );
             },
             []u8 => .string,
             type => blk: {
                 if (@hasDecl(@TypeOf(value.*), "format"))
-                    break :blk .default
-                else
-                    return zmplError(
-                        .type,
-                        "Struct does not implement `format()`: " ++ zmpl.colors.red("{s}"),
-                        .{@TypeOf(value.*)},
-                    );
+                    break :blk .default;
+                return zmplError(
+                    .type,
+                    "Struct does not implement `format()`: " ++ zmpl.colors.red("{s}"),
+                    .{@TypeOf(value.*)},
+                );
             },
             inline else => blk: {
                 const child = @typeInfo(pointer.child);
@@ -552,7 +543,7 @@ pub fn root(self: *Data, root_type: enum { object, array }) !*Value {
 /// try object.put("nested", nested_object); // <-- adds a nested object to the root object.
 pub fn object(self: *Data) !*Value {
     if (self.value) |_|
-        return try createObject(self.allocator);
+        return createObject(self.allocator);
     self.value = try createObject(self.allocator);
     return self.value.?;
 }
@@ -573,7 +564,7 @@ pub fn createObject(alloc: Allocator) !*Value {
 /// try array.append(nested_array); // <-- adds a nested array to the root array.
 pub fn array(self: *Data) !*Value {
     if (self.value) |_|
-        return try createArray(self.allocator);
+        return createArray(self.allocator);
     self.value = try createArray(self.allocator);
     return self.value.?;
 }
@@ -2463,7 +2454,9 @@ test "Value.compareT array" {
 }
 
 test "append/put array/object" {
-    var data: Data = try .init(std.testing.allocator);
+    var aw: Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
+    var data: Data = try .init(std.testing.allocator, &aw.writer);
     defer data.deinit(std.testing.allocator);
 
     var array1 = try data.root(.array);
@@ -2512,7 +2505,9 @@ test "coerce boolean" {
 }
 
 test "array pop" {
-    var data: Data = try .init(std.testing.allocator);
+    var aw: Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
+    var data: Data = try .init(std.testing.allocator, &aw.writer);
     defer data.deinit(std.testing.allocator);
 
     var array1 = try data.root(.array);
@@ -2532,7 +2527,9 @@ test "array pop" {
 }
 
 test "getT(.null, ...)" {
-    var data: Data = try .init(std.testing.allocator);
+    var aw: Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
+    var data: Data = try .init(std.testing.allocator, &aw.writer);
     defer data.deinit(std.testing.allocator);
 
     var obj = try data.root(.object);
@@ -2543,7 +2540,9 @@ test "getT(.null, ...)" {
 }
 
 test "parseJsonSlice" {
-    var data: Data = try .init(std.testing.allocator);
+    var aw: Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
+    var data: Data = try .init(std.testing.allocator, &aw.writer);
     defer data.deinit(std.testing.allocator);
 
     const string_value = try data.parseJsonSlice(

@@ -7,7 +7,11 @@ const zmpl = @import("../zmpl.zig");
 
 const Format = @This();
 
-pub fn datetime(writer: *Writer, value: anytype, comptime fmt: []const u8) ![]const u8 {
+pub fn datetime(
+    writer: *Writer,
+    value: anytype,
+    comptime fmt: []const u8,
+) ![]const u8 {
     const Type = switch (@typeInfo(@TypeOf(value))) {
         .pointer => |info| info.child,
         .optional => |info| switch (@typeInfo(info.child)) {
@@ -72,6 +76,6 @@ fn resolveString(value: anytype) ![]const u8 {
 }
 
 pub fn json(writer: *Writer, value: anytype) ![]const u8 {
-    try std.json.stringify(value, .{}, writer);
+    try std.json.Stringify.value(value, .{}, writer);
     return "";
 }
