@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 const Ast = std.zig.Ast;
+const Node = @import("Node.zig");
 
 ast: Ast,
 if_ast: Ast.full.If,
@@ -49,14 +50,11 @@ pub fn render(self: IfStatement, writer: anytype) !void {
                 try writer.writeAll(wrap_eql_open);
                 try self.writeNode(if_full.ast.cond_expr, writer);
                 try writer.writeAll(wrap_eql_close_true);
-            } else {
-                try self.writeNode(if_full.ast.cond_expr, writer);
-            }
+            } else try self.writeNode(if_full.ast.cond_expr, writer);
 
             try writer.writeAll(")");
-            if (if_full.payload_token) |payload_token| {
+            if (if_full.payload_token) |payload_token|
                 try writer.print(" |{s}|", .{self.ast.tokenSlice(payload_token)});
-            }
             return;
         }
     }
@@ -143,9 +141,8 @@ fn writeNode(self: IfStatement, node: Ast.Node.Index, writer: anytype) !void {
             try self.writeNode(full_if.ast.else_expr.unwrap().?, writer);
             try writer.writeByte(')');
 
-            if (full_if.payload_token) |payload_token| {
+            if (full_if.payload_token) |payload_token|
                 try writer.print(" |{s}| ", .{self.ast.tokenSlice(payload_token)});
-            }
         },
         else => |tag| {
             if (comptime false) std.debug.print("tag: {s}\n", .{@tagName(tag)});
@@ -175,9 +172,7 @@ inline fn isOperator(tag: Ast.Node.Tag) bool {
 // This allows (e.g.) a `ZmplValue` boolean to evaluate to a Zig boolean for use in a regular Zig
 // `if` statement.
 fn isWrapTrue(self: IfStatement, has_payload: bool, node: Ast.Node.Index) bool {
-    if (has_payload or isOperator(self.ast.nodeTag(node))) return false;
-
-    return true;
+    return !(has_payload or isOperator(self.ast.nodeTag(node)));
 }
 
 test "simple" {
@@ -265,10 +260,10 @@ test "simple if without capture" {
 }
 
 fn expectIfStatement(expected: []const u8, input: [:0]const u8) !void {
-    var ast = try std.zig.Ast.parse(std.testing.allocator, input, .zig);
+    var ast = try Ast.parse(std.testing.allocator, input, .zig);
     defer ast.deinit(std.testing.allocator);
 
-    const if_statement = IfStatement.init(ast);
+    const if_statement: IfStatement = .init(ast);
 
     var buf: Writer.Allocating = .init(std.testing.allocator);
     defer buf.deinit();

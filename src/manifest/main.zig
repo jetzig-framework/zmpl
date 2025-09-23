@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const ArrayList = std.ArrayList;
 const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
@@ -29,7 +30,7 @@ pub fn main() !void {
     }
 
     var gpa: GeneralPurposeAllocator(.{}) = .init;
-    defer std.debug.assert(gpa.deinit() == .ok);
+    defer assert(gpa.deinit() == .ok);
 
     const gpa_allocator = gpa.allocator();
 

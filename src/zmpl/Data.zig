@@ -34,16 +34,15 @@
 /// automatically.
 const std = @import("std");
 const ArrayList = std.ArrayList;
-const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const StringArrayHashMap = std.StringArrayHashMap;
 const StringHashMap = std.StringHashMap;
+const Allocator = std.mem.Allocator;
 
 const jetcommon = @import("jetcommon");
 const manifest = @import("zmpl.manifest").__Manifest;
 const zmd = @import("zmd");
-
 const zmpl = @import("../zmpl.zig");
 const util = zmpl.util;
 const zmpl_format = @import("format.zig");
@@ -56,7 +55,12 @@ pub var log_errors = true;
 pub const LayoutContent = struct {
     data: []const u8,
 
-    pub fn format(self: LayoutContent, actual_fmt: []const u8, options: anytype, writer: *Writer) !void {
+    pub fn format(
+        self: LayoutContent,
+        actual_fmt: []const u8,
+        options: anytype,
+        writer: *Writer,
+    ) !void {
         _ = options;
         _ = actual_fmt;
         try writer.writeAll(self.data);
@@ -144,12 +148,9 @@ const MarkdownNode = struct {
 
 /// Evaluate equality of two Data trees, recursively comparing all values.
 pub fn eql(self: *const Data, other: *const Data) bool {
-    return if (self.value != null and other.value != null)
-        self.value.?.eql(other.value.?)
-    else if (self.value == null and other.value == null)
-        true
-    else
-        false;
+    if (self.value != null and other.value != null)
+        return self.value.?.eql(other.value.?);
+    return self.value == null and other.value == null;
 }
 
 /// Takes a string such as `foo.bar.baz` and translates into a path into the data tree to return
