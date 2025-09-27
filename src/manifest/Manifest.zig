@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Decoder = std.base64.standard.Decoder;
 const ArrayList = std.ArrayList;
 const builtin = @import("builtin");
 const Writer = std.Io.Writer;
@@ -125,9 +126,9 @@ pub fn compile(
     var header: []u8 = undefined;
     if (@hasDecl(options, "manifest_header")) {
         const manifest_header = options.manifest_header;
-        const decodedHeader: []u8 = try self.allocator.alloc(u8, try std.base64.standard.Decoder.calcSizeForSlice(manifest_header));
+        const decodedHeader: []u8 = try self.allocator.alloc(u8, try Decoder.calcSizeForSlice(manifest_header));
         defer self.allocator.free(decodedHeader);
-        try std.base64.standard.Decoder.decode(decodedHeader, manifest_header);
+        try Decoder.decode(decodedHeader, manifest_header);
         header = decodedHeader;
         try aw.writer.writeAll(decodedHeader);
     } else header = "";

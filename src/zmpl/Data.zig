@@ -39,6 +39,9 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const StringArrayHashMap = std.StringArrayHashMap;
 const StringHashMap = std.StringHashMap;
 const Allocator = std.mem.Allocator;
+const Simple = @import("Type.zig").Info;
+const Syntax = @import("Type.zig").Syntax;
+const DateTime = jetcommon.types.DateTime;
 
 const jetcommon = @import("jetcommon");
 const manifest = @import("zmpl.manifest").__Manifest;
@@ -75,47 +78,39 @@ const StackFallbackAllocator = std.heap.StackFallbackAllocator(buffer_size);
 
 arena: *ArenaAllocator,
 allocator: Allocator,
-json_buf: ArrayList(u8),
-output_writer: *Writer,
-output_buf: ArrayList(u8),
 value: ?*Value = null,
 partial: bool = false,
 content: LayoutContent = .{ .data = "" },
 partial_data: ?*Object = null,
 template_decls: StringHashMap(*Value),
-slots: ?[]const String = null,
+slots: ?[]const []const u8 = null,
 
 const indent = "  ";
 
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
-pub fn init(allocator: Allocator, writer: *Writer) !Data {
+pub fn init(allocator: Allocator) !Data {
     const arena = try allocator.create(ArenaAllocator);
     arena.* = .init(allocator);
 
     return .{
         .allocator = arena.allocator(),
         .arena = arena,
-        .json_buf = .empty,
-        .output_writer = writer,
-        .output_buf = .empty,
         .template_decls = .init(allocator),
     };
 }
 
 /// Frees all resources used by this `Data` instance.
 pub fn deinit(self: *Data, allocator: Allocator) void {
-    self.output_buf.deinit(self.allocator);
-    self.json_buf.deinit(self.allocator);
     self.arena.deinit();
     allocator.destroy(self.arena);
 }
 
 /// Chomps output buffer.
-pub fn chompOutputBuffer(self: *Data) void {
-    if (std.mem.endsWith(u8, self.output_buf.items, "\n"))
-        _ = self.output_buf.pop();
-    if (std.mem.endsWith(u8, self.output_buf.items, "\r"))
-        _ = self.output_buf.pop();
+pub fn chompOutputBuffer(writer: *Writer) void {
+    if (std.mem.endsWith(u8, writer.buffered(), "\n"))
+        writer.undo(1);
+    if (std.mem.endsWith(u8, writer.buffered(), "\r"))
+        writer.undo(1);
 }
 
 /// Convenience wrapper for `util.strip` to be used by compiled templates.
@@ -236,11 +231,10 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
         .int => .default,
         .float => .float,
         .@"struct" => switch (@TypeOf(value)) {
-            Value, String, Integer, Float, Boolean, NullType => .zmpl,
+            Value => .zmpl,
             inline else => blk: {
-                if (@hasDecl(@TypeOf(value), "format")) {
+                if (@hasDecl(@TypeOf(value), "format"))
                     break :blk .default;
-                }
                 return zmplError(
                     .syntax,
                     "Struct does not implement `format()`: " ++ zmpl.colors.red("{s}"),
@@ -258,7 +252,7 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
             };
         },
         .pointer => |pointer| switch (pointer.child) {
-            Value, String, Integer, Float, Boolean, NullType => .zmpl,
+            Value => .zmpl,
             []const u8 => |child| blk: {
                 if (isStringCoercablePointer(pointer, child))
                     break :blk .string_array;
@@ -327,15 +321,15 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
     const arena = self.allocator;
 
     return switch (formatter) {
-        .default => try std.fmt.allocPrint(arena, "{any}", .{value}),
-        .optional_default => try std.fmt.allocPrint(arena, "{?}", .{value}),
-        .string => try std.fmt.allocPrint(arena, "{s}", .{value}),
-        .optional_string => try std.fmt.allocPrint(arena, "{?s}", .{value}),
-        .string_array => try std.mem.join(arena, "\n", value),
-        .float => try std.fmt.allocPrint(arena, "{d}", .{value}),
-        .zmpl => try value.toString(),
+        .default => std.fmt.allocPrint(arena, "{any}", .{value}),
+        .optional_default => std.fmt.allocPrint(arena, "{?}", .{value}),
+        .string => std.fmt.allocPrint(arena, "{s}", .{value}),
+        .optional_string => std.fmt.allocPrint(arena, "{?s}", .{value}),
+        .string_array => std.mem.join(arena, "\n", value),
+        .float => std.fmt.allocPrint(arena, "{d}", .{value}),
+        .zmpl => value.toString(),
         .zmpl_union => switch (value) {
-            inline else => |capture| try capture.toString(),
+            inline else => |capture| capture.toString(),
         },
         .none => "",
     };
@@ -357,7 +351,7 @@ pub fn maybeRef(self: *Data, value: anytype, key: []const u8) ![]const u8 {
     _ = self;
     return switch (resolveValue(value)) {
         .object => |*ptr| if (ptr.chainRef(key)) |capture|
-            try capture.toString()
+            capture.toString()
         else
             unknownRef(key),
         else => |tag| zmplError(
@@ -373,7 +367,7 @@ fn resolveValue(value: anytype) Value {
         .optional => return if (value) |capture|
             resolveValue(capture)
         else
-            Value{ .null = NullType{ .allocator = undefined } },
+            Value{ .null = null },
         else => {},
     }
 
@@ -469,7 +463,7 @@ pub fn getCoerce(self: Data, T: type, name: []const u8) !T {
         else
             unknownRef(name),
         bool => self.getT(.boolean, last_key) orelse unknownRef(name),
-        jetcommon.types.DateTime => current_object.getT(.datetime, last_key) orelse unknownRef(name),
+        DateTime => current_object.getT(.datetime, last_key) orelse unknownRef(name),
         *Value, *const Value => current_object.get(last_key) orelse unknownRef(name),
         Value => if (current_object.get(last_key)) |ptr| ptr.* else unknownRef(name),
         else => @compileError("Unsupported type for data lookup in partial args: " ++ @typeName(T)),
@@ -503,8 +497,6 @@ pub fn chainRefT(self: *Data, T: type, ref_key: []const u8) !T {
 pub fn reset(self: *Data) void {
     if (self.value) |*ptr|
         ptr.*.deinit();
-    self.output_buf.clearAndFree(self.allocator);
-    self.json_buf.clearAndFree(self.allocator);
     self.value = null;
 }
 
@@ -581,54 +573,50 @@ pub fn createArray(alloc: Allocator) !*Value {
 pub fn string(self: *Data, value: []const u8) *Value {
     const duped = self.allocator.dupe(u8, value) catch @panic("Out of memory");
     const val = self.allocator.create(Value) catch @panic("Out of memory");
-    val.* = .{ .string = .{ .value = duped, .allocator = self.allocator } };
+    val.* = .{ .string = duped };
     return val;
 }
 
 /// Creates a new `Value` representing an integer (e.g. `1234`).
 pub fn integer(self: *Data, value: i128) *Value {
     const val = self.allocator.create(Value) catch @panic("Out of memory");
-    val.* = .{ .integer = .{ .value = value, .allocator = self.allocator } };
+    val.* = .{ .integer = value };
     return val;
 }
 
 /// Creates a new `Value` representing a float (e.g. `1.234`).
 pub fn float(self: *Data, value: f128) *Value {
     const val = self.allocator.create(Value) catch @panic("Out of memory");
-    val.* = .{ .float = .{ .value = value, .allocator = self.allocator } };
+    val.* = .{ .float = value };
     return val;
 }
 
 /// Creates a new `Value` representing a boolean (true/false).
 pub fn boolean(self: *Data, value: bool) *Value {
     const val = self.allocator.create(Value) catch @panic("Out of memory");
-    val.* = .{ .boolean = .{ .value = value, .allocator = self.allocator } };
+    val.* = .{ .boolean = value };
     return val;
 }
 
 /// Creates a new `Value` representing a datetime.
-pub fn datetime(self: *Data, value: jetcommon.types.DateTime) *Value {
+pub fn datetime(self: *Data, value: DateTime) *Value {
     const val = self.allocator.create(Value) catch @panic("Out of memory");
-    val.* = .{ .datetime = .{ .value = value, .allocator = self.allocator } };
+    val.* = .{ .datetime = value };
     return val;
 }
 
 /// Create a new `Value` representing a `null` value. Public, but for internal use only.
 pub fn _null(arena: Allocator) *Value {
     const val = arena.create(Value) catch @panic("Out of memory");
-    val.* = .{ .null = NullType{ .allocator = arena } };
+    val.* = .{ .null = Null{} };
     return val;
 }
 
 /// Write a given string to the output buffer. Creates a new output buffer if not already
 /// present. Used by compiled Zmpl templates.
-pub fn write(self: *Data, maybe_err_slice: anytype) !void {
-    var aw: Writer.Allocating = .fromArrayList(self.allocator, self.output_buf);
-    defer aw.deinit();
-
+pub fn write(self: *Data, writer: *Writer, maybe_err_slice: anytype) !void {
     const slice = try self.resolveSlice(maybe_err_slice);
-    try aw.writer.writeAll(slice);
-    self.output_buf = aw.toArrayList();
+    try writer.writeAll(slice);
 }
 
 /// Get a value from the data tree using an exact key. Returns `null` if key not found or if
@@ -709,7 +697,7 @@ pub fn toJsonOptions(self: *Data, comptime options: ToJsonOptions) ![]const u8 {
     var aw: Writer.Allocating = .init(self.allocator);
     defer aw.deinit();
 
-    try value._toJson(&aw.writer, options, 0);
+    try value._toJson(self.allocator, &aw.writer, options, 0);
     try aw.writer.writeByte('\n');
 
     const output = try aw.toOwnedSlice();
@@ -843,9 +831,8 @@ pub fn parseJsonSlice(self: *Data, json: []const u8) !*Value {
                     else => return error.ZmplJsonParseError,
                 };
 
-                if (current_container == null) {
+                if (current_container == null)
                     return self.boolean(value);
-                }
 
                 switch (current_container.?.*) {
                     .array => |*capture| try capture.append(value),
@@ -857,9 +844,8 @@ pub fn parseJsonSlice(self: *Data, json: []const u8) !*Value {
                 }
             },
             .null => {
-                if (current_container == null) {
+                if (current_container == null)
                     return _null(self.allocator);
-                }
 
                 switch (current_container.?.*) {
                     .array => |*capture| try capture.append(null),
@@ -894,71 +880,70 @@ pub const ValueType = enum {
     null,
 };
 
+// becuase null makes comptime complications
+// we just have to make sure we catch any use of it and return null
+const Null = struct {};
+
 /// A generic type representing any supported type. All types are JSON-compatible and can be
 /// serialized and deserialized losslessly.
-pub const Value = union(ValueType) {
+pub const Value = union(enum) {
     object: Object,
     array: Array,
-    float: Float,
-    integer: Integer,
-    boolean: Boolean,
-    string: String,
+    float: f128,
+    integer: i128,
+    boolean: bool,
+    string: []const u8,
     datetime: DateTime,
-    null: NullType,
+    null: Null,
+
+    pub fn val(self: Value) ?switch (self) {
+        .object => Object,
+        .array => Array,
+        .float => f128,
+        .integer => i128,
+        .boolean => bool,
+        .string => []const u8,
+        .datetime => DateTime,
+        .null => null,
+    } {
+        return switch (self) {
+            .null => null,
+            inline else => |v| v,
+        };
+    }
+
+    fn isSameType(this: Value, that: Value) bool {
+        if (@TypeOf(this.val()) != @TypeOf(that.val())) return false;
+        return this.val() == that.val();
+    }
 
     /// Compare one `Value` to another `Value` recursively. Order of `Object` keys is ignored.
     pub fn eql(self: Value, other: anytype) bool {
+        switch (self) {
+            .null => return other == null,
+            else => {},
+        }
         if (comptime !isZmplValue(@TypeOf(other)))
             return self.compareT(.equal, @TypeOf(other), other) catch false;
 
-        switch (self) {
-            .object => |capture| switch (other) {
-                .object => |other_capture| return capture.eql(other_capture),
-                inline else => return false,
-            },
-            .array => |capture| switch (other) {
-                .array => |other_capture| return capture.eql(other_capture),
-                inline else => return false,
-            },
-            .string => |capture| switch (other) {
-                .string => |other_capture| return capture.eql(other_capture),
-                inline else => return false,
-            },
-            .integer => |capture| switch (other) {
-                .integer => |other_capture| return capture.eql(other_capture),
-                inline else => return false,
-            },
-            .float => |capture| switch (other) {
-                .float => |other_capture| return capture.eql(other_capture),
-                inline else => return false,
-            },
-            .boolean => |capture| switch (other) {
-                .boolean => |other_capture| return capture.eql(other_capture),
-                inline else => return false,
-            },
-            .datetime => |capture| switch (other) {
-                .datetime => |other_capture| return capture.eql(other_capture),
-                inline else => return false,
-            },
-            .null => |capture| switch (other) {
-                .null => |other_capture| return capture.eql(other_capture),
-                inline else => return false,
-            },
-        }
+        if (!isSameType(self, other)) return false;
+        const that = other.val();
+
+        return switch (self) {
+            .float, .integer, .boolean => |this| this == that,
+            .string => |this| std.mem.eql(u8, this, that),
+            .datetime, .object, .array => |this| this.eql(that),
+        };
     }
 
     /// Detect if one container includes another (i.e. an object or array contains all members of
     /// another object/array).
     pub fn includes(self: Value, other: Value) bool {
+        if (@TypeOf(self.val()) != @TypeOf(other.val())) return false;
+        const that = self.val();
         return switch (self) {
-            .object => |self_obj| switch (other) {
-                .object => |other_obj| self_obj.includes(other_obj),
-                else => false,
-            },
-            .array => |self_arr| switch (other) {
-                .array => |other_arr| self_arr.includes(other_arr),
-                else => false,
-            },
+            .object => |this| this.includes(that),
+            .array => |this| this.includes(that),
             else => false,
         };
     }
@@ -976,21 +961,21 @@ pub const Value = union(ValueType) {
 
         return switch (self) {
             .integer => |capture| switch (operator) {
-                .equal => capture.value == other.integer.value,
-                .less_than => capture.value < other.integer.value,
-                .greater_than => capture.value > other.integer.value,
-                .less_or_equal => capture.value <= other.integer.value,
-                .greater_or_equal => capture.value >= other.integer.value,
+                .equal => capture == other.integer,
+                .less_than => capture < other.integer,
+                .greater_than => capture > other.integer,
+                .less_or_equal => capture <= other.integer,
+                .greater_or_equal => capture >= other.integer,
             },
             .float => |capture| switch (operator) {
-                .equal => capture.value == other.float.value,
-                .less_than => capture.value < other.float.value,
-                .greater_than => capture.value > other.float.value,
-                .less_or_equal => capture.value <= other.float.value,
-                .greater_or_equal => capture.value >= other.float.value,
+                .equal => capture == other.float,
+                .less_than => capture < other.float,
+                .greater_than => capture > other.float,
+                .less_or_equal => capture <= other.float,
+                .greater_or_equal => capture >= other.float,
             },
             .boolean => |capture| switch (operator) {
-                .equal => capture.value == other.boolean.value,
+                .equal => capture == other.boolean,
                 else => zmplError(
                     .compare,
                     "Zmpl `boolean` does not support `{s}` comparison.",
@@ -998,7 +983,7 @@ pub const Value = union(ValueType) {
                 ),
             },
             .string => |capture| switch (operator) {
-                .equal => std.mem.eql(u8, capture.value, other.string.value),
+                .equal => std.mem.eql(u8, capture, other.string),
                 else => zmplError(
                     .compare,
                     "Zmpl `string` does not support `{s}` comparison.",
@@ -1015,9 +1000,9 @@ pub const Value = union(ValueType) {
                 "Zmpl `object` does not support `{s}` comparison.",
                 .{@tagName(operator)},
             ),
-            .datetime => |capture| capture.value.compare(
+            .datetime => |capture| capture.compare(
                 std.enums.nameCast(jetcommon.Operator, operator),
-                other.datetime.value,
+                other.datetime,
             ),
             .null => true, // If both sides are `Null` then this can only be true.
         };
@@ -1079,7 +1064,7 @@ pub const Value = union(ValueType) {
                     .{@tagName(operator)},
                 ),
                 .datetime => |capture| switch (@typeInfo(T)) {
-                    .int, .comptime_int => capture.value.microseconds() < other,
+                    .int, .comptime_int => capture.microseconds() < other,
                     else => |tag| zmplError(
                         .compare,
                         "Zmpl `datetime` does not support comparison with `{s}`",
@@ -1114,7 +1099,7 @@ pub const Value = union(ValueType) {
                     .{@tagName(operator)},
                 ),
                 .datetime => |capture| switch (@typeInfo(T)) {
-                    .int, .comptime_int => capture.value.microseconds() > other,
+                    .int, .comptime_int => capture.microseconds() > other,
                     else => |tag| zmplError(
                         .compare,
                         "Zmpl `datetime` does not support comparison with `{s}`",
@@ -1149,7 +1134,7 @@ pub const Value = union(ValueType) {
                     .{@tagName(operator)},
                 ),
                 .datetime => |capture| switch (@typeInfo(T)) {
-                    .int, .comptime_int => capture.value.microseconds() <= other,
+                    .int, .comptime_int => capture.microseconds() <= other,
                     else => |tag| zmplError(
                         .compare,
                         "Zmpl `datetime` does not support comparison with `{s}`",
@@ -1184,7 +1169,7 @@ pub const Value = union(ValueType) {
                     .{@tagName(operator)},
                 ),
                 .datetime => |capture| switch (@typeInfo(T)) {
-                    .int, .comptime_int => capture.value.microseconds() >= other,
+                    .int, .comptime_int => capture.microseconds() >= other,
                     else => |tag| zmplError(
                         .compare,
                         "Zmpl `datetime` does not support comparison with `{s}`",
@@ -1249,10 +1234,10 @@ pub const Value = union(ValueType) {
     pub fn isPresent(self: *const Value) bool {
         return switch (self.*) {
             .null => false,
-            .string => |capture| capture.value.len > 0,
-            .boolean => |capture| capture.value,
-            .integer => |capture| capture.value > 0,
-            .float => |capture| capture.value > 0,
+            .string => |capture| capture.len > 0,
+            .boolean => |capture| capture,
+            .integer => |capture| capture > 0,
+            .float => |capture| capture > 0,
             .object, .array, .datetime => true,
         };
     }
@@ -1315,29 +1300,42 @@ pub const Value = union(ValueType) {
     }
 
     /// Convert the value to a JSON string.
-    pub fn toJson(self: *const Value) ![]const u8 {
-        const arena = switch (self.*) {
-            inline else => |capture| capture.allocator,
-        };
-        var aw: Writer.Allocating = .init(arena);
-        defer aw.deinit();
+    pub fn toJson(self: *const Value, allocator: Allocator) ![]const u8 {
+        var buf: Writer.Allocating = .init(allocator);
+        defer buf.deinit();
 
-        try self._toJson(&aw.writer, .{}, 0);
-        return aw.toOwnedSlice();
+        try self._toJson(allocator, &buf.writer, .{}, 0);
+        return buf.toOwnedSlice();
     }
 
     /// Generates a JSON string representing the complete data tree.
     pub fn _toJson(
         self: *const Value,
+        allocator: Allocator,
         writer: *Writer,
         comptime options: ToJsonOptions,
         level: usize,
     ) !void {
-        return switch (self.*) {
+        switch (self.*) {
+            .string => |*capture| {
+                var buf: Writer.Allocating = .init(allocator);
+                defer buf.deinit();
+                try std.json.Stringify.value(capture, .{}, &buf.writer);
+                try highlight(writer, .string, .{try buf.toOwnedSlice()}, options.color);
+            },
+            .datetime => |*capture| {
+                var buf: Writer.Allocating = .init(allocator);
+                defer buf.deinit();
+                try capture.toJson(&buf.writer);
+                try highlight(writer, .datetime, .{try buf.toOwnedSlice()}, options.color);
+            },
+            .float => |*capture| try highlight(writer, .float, .{capture}, options.color),
+            .null => try highlight(writer, .null, .{}, options.color),
+            .boolean => |*capture| try highlight(writer, .boolean, .{capture}, options.color),
             .array => |*capture| try capture.toJson(writer, options, level),
             .object => |*capture| try capture.toJson(writer, options, level),
-            inline else => |*capture| try capture.toJson(writer, options),
-        };
+            .integer => |*capture| try highlight(writer, .integer, .{capture}, options.color),
+        }
     }
 
     /// Create a deep copy of the value.
@@ -1353,17 +1351,26 @@ pub const Value = union(ValueType) {
     }
 
     /// Permit usage of `Value` in a Zig format string.
-    pub fn format(self: Value, actual_fmt: []const u8, options: anytype, writer: *Writer) !void {
-        _ = options;
-        _ = actual_fmt;
+    pub fn format(self: Value, writer: *Writer) !void {
         try writer.writeAll(try self.toString());
     }
 
     /// Converts a primitive type (string, integer, float) to a string representation.
-    pub fn toString(self: Value) ![]const u8 {
+    pub fn toString(self: Value, allocator: Allocator) ![]const u8 {
         return switch (self) {
             .object => "{}",
             .array => "[]",
+            .string => |v| v,
+            .null => "",
+            .datetime => |v| {
+                var aw: Writer.Allocating = .init(allocator);
+                defer aw.deinit();
+                try v.toString(&aw.writer);
+                return aw.toOwnedSlice();
+            },
+            .integer => |v| std.fmt.allocPrint(allocator, "{}", .{v}),
+            .float => |v| std.fmt.allocPrint(allocator, "{d}", .{v}),
+            .boolean => |v| std.fmt.allocPrint(allocator, "{}", .{v}),
             inline else => |*capture| try capture.toString(),
         };
     }
@@ -1373,7 +1380,7 @@ pub const Value = union(ValueType) {
         switch (self.*) {
             .array => |capture| return capture.count(),
             .object => |capture| return capture.count(),
-            else => unreachable,
+            else => @panic(""),
         }
     }
 
@@ -1416,7 +1423,7 @@ pub const Value = union(ValueType) {
     /// Coerce a value to a given type, intented for use with JetQuery for passing Value as query
     /// parameters.
     pub fn toJetQuery(self: *const Value, T: type) !T {
-        return try self.coerce(T);
+        return self.coerce(T);
     }
 
     /// Coerce a value to a given type. Used when passing `ZmplValue` to partial args.
@@ -1424,7 +1431,7 @@ pub const Value = union(ValueType) {
         const CET = ComptimeErasedType(T);
         return switch (CET) {
             []const u8 => switch (self) {
-                .string => |capture| capture.value,
+                .string => |capture| capture,
                 else => zmplError(
                     .compare,
                     "Cannot compare Zmpl `{s}` with `{s}`",
@@ -1432,8 +1439,8 @@ pub const Value = union(ValueType) {
                 ),
             },
             f128, f64, f32 => switch (self) {
-                .float => |capture| @floatCast(capture.value),
-                .string => |capture| std.fmt.parseFloat(CET, capture.value) catch |err|
+                .float => |capture| @floatCast(capture),
+                .string => |capture| std.fmt.parseFloat(CET, capture) catch |err|
                     switch (err) {
                         error.InvalidCharacter => error.ZmplCoerceError,
                     },
@@ -1444,13 +1451,13 @@ pub const Value = union(ValueType) {
                 ),
             },
             usize, u8, u16, u32, u64, u128, isize, i8, i16, i32, i64, i128 => switch (self) {
-                .integer => |capture| @intCast(capture.value),
-                .string => |capture| std.fmt.parseInt(CET, capture.value, 10) catch |err|
+                .integer => |capture| @intCast(capture),
+                .string => |capture| std.fmt.parseInt(CET, capture, 10) catch |err|
                     switch (err) {
                         error.InvalidCharacter, error.Overflow => error.ZmplCoerceError,
                     },
                 .datetime => |capture| switch (CET) {
-                    u128, u64, i64, i128 => @intCast(capture.value.microseconds()),
+                    u128, u64, i64, i128 => @intCast(capture.microseconds()),
                     else => zmplError(
                         .compare,
                         "Cannot compare Zmpl `{s}` with `{s}`",
@@ -1464,7 +1471,7 @@ pub const Value = union(ValueType) {
                 ),
             },
             bool => switch (self) {
-                .string => |capture| std.mem.eql(u8, capture.value, "1") or std.mem.eql(u8, capture.value, "on"),
+                .string => |capture| std.mem.eql(u8, capture, "1") or std.mem.eql(u8, capture, "on"),
                 .null => false,
                 else => self.isPresent(),
             },
@@ -1492,7 +1499,7 @@ pub const Value = union(ValueType) {
                     ),
                 },
                 .@"enum" => switch (self) {
-                    .string => |capture| std.meta.stringToEnum(CET, capture.value) orelse
+                    .string => |capture| std.meta.stringToEnum(CET, capture) orelse
                         error.ZmplCoerceError,
                     else => zmplError(
                         .compare,
@@ -1503,120 +1510,6 @@ pub const Value = union(ValueType) {
                 else => @compileError("Cannot corece Zmpl Value to `" ++ @typeName(T) ++ "`"),
             },
         };
-    }
-};
-
-pub const NullType = struct {
-    allocator: Allocator,
-
-    pub fn toJson(self: NullType, writer: *Writer, comptime options: ToJsonOptions) !void {
-        _ = self;
-        try highlight(writer, .null, .{}, options.color);
-    }
-
-    pub fn eql(self: NullType, other: NullType) bool {
-        _ = other;
-        _ = self;
-        return true;
-    }
-
-    pub fn toString(self: NullType) ![]const u8 {
-        _ = self;
-        return "";
-    }
-};
-
-pub const Float = struct {
-    value: f128,
-    allocator: Allocator,
-
-    pub fn eql(self: Float, other: Float) bool {
-        return self.value == other.value;
-    }
-
-    pub fn toJson(self: Float, writer: *Writer, comptime options: ToJsonOptions) !void {
-        try highlight(writer, .float, .{self.value}, options.color);
-    }
-
-    pub fn toString(self: Float) ![]const u8 {
-        return std.fmt.allocPrint(self.allocator, "{d}", .{self.value});
-    }
-};
-
-pub const Integer = struct {
-    value: i128,
-    allocator: Allocator,
-
-    pub fn eql(self: Integer, other: Integer) bool {
-        return self.value == other.value;
-    }
-
-    pub fn toJson(self: Integer, writer: *Writer, comptime options: ToJsonOptions) !void {
-        try highlight(writer, .integer, .{self.value}, options.color);
-    }
-
-    pub fn toString(self: Integer) ![]const u8 {
-        return std.fmt.allocPrint(self.allocator, "{}", .{self.value});
-    }
-};
-
-pub const Boolean = struct {
-    value: bool,
-    allocator: Allocator,
-
-    pub fn eql(self: Boolean, other: Boolean) bool {
-        return self.value == other.value;
-    }
-
-    pub fn toJson(self: Boolean, writer: *Writer, comptime options: ToJsonOptions) !void {
-        try highlight(writer, .boolean, .{self.value}, options.color);
-    }
-
-    pub fn toString(self: Boolean) ![]const u8 {
-        return std.fmt.allocPrint(self.allocator, "{}", .{self.value});
-    }
-};
-
-pub const String = struct {
-    value: []const u8,
-    allocator: Allocator,
-
-    pub fn eql(self: String, other: String) bool {
-        return std.mem.eql(u8, self.value, other.value);
-    }
-
-    pub fn toJson(self: String, writer: *Writer, comptime options: ToJsonOptions) !void {
-        var aw: Writer.Allocating = .init(self.allocator);
-        defer aw.deinit();
-        try std.json.Stringify.value(self.value, .{}, &aw.writer);
-        try highlight(writer, .string, .{try aw.toOwnedSlice()}, options.color);
-    }
-
-    pub fn toString(self: String) ![]const u8 {
-        return self.value;
-    }
-};
-
-pub const DateTime = struct {
-    value: jetcommon.types.DateTime,
-    allocator: Allocator,
-
-    pub fn eql(self: DateTime, other: DateTime) bool {
-        return self.value.eql(other.value);
-    }
-
-    pub fn toJson(self: DateTime, writer: *Writer, comptime options: ToJsonOptions) !void {
-        var aw: Writer.Allocating = .init(self.allocator);
-        defer aw.deinit();
-        try self.value.toJson(&aw.writer);
-        try highlight(writer, .datetime, .{try aw.toOwnedSlice()}, options.color);
-    }
-
-    pub fn toString(self: DateTime) ![]const u8 {
-        var aw: Writer.Allocating = .init(self.allocator);
-        defer aw.deinit();
-        try self.value.toString(&aw.writer);
-        return aw.toOwnedSlice();
     }
 };
 
@@ -1709,27 +1602,27 @@ pub const Object = struct {
                 else => null,
             },
             .string => switch (value.*) {
-                .string => |capture| capture.value,
+                .string => |capture| capture,
                 else => null,
             },
             .float => switch (value.*) {
-                .float => |capture| capture.value,
-                .string => |capture| std.fmt.parseFloat(f128, capture.value) catch null,
+                .float => |capture| capture,
+                .string => |capture| std.fmt.parseFloat(f128, capture) catch null,
                 else => null,
             },
             .integer => switch (value.*) {
-                .integer => |capture| capture.value,
-                .string => |capture| std.fmt.parseInt(i128, capture.value, 10) catch null,
+                .integer => |capture| capture,
+                .string => |capture| std.fmt.parseInt(i128, capture, 10) catch null,
                 else => null,
             },
             .boolean => switch (value.*) {
-                .boolean => |capture| capture.value,
-                .string => |capture| std.mem.eql(u8, capture.value, "1") or std.mem.eql(u8, capture.value, "on"),
-                .integer => |capture| capture.value > 0,
+                .boolean => |capture| capture,
+                .string => |capture| std.mem.eql(u8, capture, "1") or std.mem.eql(u8, capture, "on"),
+                .integer => |capture| capture > 0,
                 else => null,
             },
             .datetime => switch (value.*) {
-                .datetime => |capture| capture.value,
+                .datetime => |capture| capture,
                 else => null,
             },
             .null => true,
@@ -1853,7 +1746,7 @@ pub const Object = struct {
                 .key = key,
                 .value = value,
             }) catch @panic("OOM");
-        return items_array.toOwnedSlice() catch @panic("OOM");
+        return items_array.toOwnedSlice(self.allocator) catch @panic("OOM");
     }
 
     pub fn toJson(
@@ -1873,7 +1766,7 @@ pub const Object = struct {
             try writer.writeAll(":");
             if (options.pretty) try writer.writeByte(' ');
             var value = self.hashmap.get(key).?;
-            try value._toJson(writer, options, level + 1);
+            try value._toJson(self.allocator, writer, options, level + 1);
             if (index + 1 < keys.len) try writer.writeAll(",");
             if (options.pretty) try writer.writeByte('\n');
         }
@@ -1949,7 +1842,7 @@ pub const Array = struct {
         if (options.pretty) try writer.writeByte('\n');
         for (self.array.items, 0..) |*item, index| {
             if (options.pretty) try writer.writeBytesNTimes(indent, level + 1);
-            try item.*._toJson(writer, options, level + 1);
+            try item.*._toJson(self.allocator, writer, options, level + 1);
             if (index < self.array.items.len - 1) try writer.writeAll(",");
             if (options.pretty) try writer.writeByte('\n');
         }
@@ -2059,20 +1952,6 @@ fn isString(T: type) bool {
     };
 }
 
-const Syntax = enum {
-    open_array,
-    close_array,
-    open_object,
-    close_object,
-    field,
-    float,
-    integer,
-    string,
-    boolean,
-    datetime,
-    null,
-};
-
 fn highlight(writer: *Writer, comptime syntax: Syntax, args: anytype, comptime color: bool) !void {
     const template = comptime switch (syntax) {
         .open_array => if (color) zmpl.colors.cyan("[") else "[",
@@ -2102,18 +1981,18 @@ pub fn zmplValue(value: anytype, alloc: Allocator) !*Value {
             "Enum literal must be `.object` or `.array`, found `" ++ @tagName(value) ++ "`",
         );
 
-    if (@TypeOf(value) == jetcommon.types.DateTime) {
+    if (@TypeOf(value) == DateTime) {
         const val = try alloc.create(Value);
-        val.* = .{ .datetime = .{ .value = value, .allocator = alloc } };
+        val.* = .{ .datetime = value };
         return val;
     }
 
     const val = switch (@typeInfo(@TypeOf(value))) {
-        .int, .comptime_int => Value{ .integer = .{ .value = value, .allocator = alloc } },
-        .float, .comptime_float => Value{ .float = .{ .value = value, .allocator = alloc } },
-        .bool => Value{ .boolean = .{ .value = value, .allocator = alloc } },
-        .null => Value{ .null = NullType{ .allocator = alloc } },
-        .@"enum" => Value{ .string = .{ .value = @tagName(value), .allocator = alloc } },
+        .int, .comptime_int => Value{ .integer = value },
+        .float, .comptime_float => Value{ .float = value },
+        .bool => Value{ .boolean = value },
+        .null => Value{ .null = Null{} },
+        .@"enum" => Value{ .string = @tagName(value) },
         .pointer => |info| switch (@typeInfo(info.child)) {
             .@"union" => {
                 switch (info.child) {
@@ -2128,7 +2007,7 @@ pub fn zmplValue(value: anytype, alloc: Allocator) !*Value {
             } else try structToValue(value.*, alloc),
             else => switch (info.child) {
                 else => if (comptime isString(@TypeOf(value))) blk: {
-                    break :blk Value{ .string = .{ .value = value, .allocator = alloc } };
+                    break :blk Value{ .string = value };
                 } else blk: {
                     // Assume we have an array - let the compiler complain if not.
                     var arr = try createArray(alloc);
@@ -2138,7 +2017,7 @@ pub fn zmplValue(value: anytype, alloc: Allocator) !*Value {
             },
         },
         .array => |info| switch (info.child) {
-            u8 => Value{ .string = .{ .value = value, .allocator = alloc } },
+            u8 => Value{ .string = value },
             []const u8 => blk: {
                 var inner_array: Array = .init(alloc);
                 for (value) |item| try inner_array.append(item);
@@ -2149,7 +2028,7 @@ pub fn zmplValue(value: anytype, alloc: Allocator) !*Value {
         .optional => blk: {
             if (value) |is_value|
                 return zmplValue(is_value, alloc);
-            break :blk Value{ .null = NullType{ .allocator = alloc } };
+            break :blk Value{ .null = Null{} };
         },
         .error_union => return if (value) |capture|
             zmplValue(capture, alloc)
@@ -2179,7 +2058,6 @@ const Field = struct {
     allocator: Allocator,
 
     pub fn toJson(self: Field, writer: *Writer, comptime options: ToJsonOptions) !void {
-        //var buf = std.array_list.Managed(u8).init(self.allocator);
         var aw: Writer.Allocating = .init(self.allocator);
         defer aw.deinit();
         try std.json.Stringify.value(self.value, .{}, &aw.writer);
@@ -2257,9 +2135,9 @@ test {
 }
 
 test "Value.compare integer" {
-    const a = Value{ .integer = .{ .allocator = undefined, .value = 1 } };
-    const b = Value{ .integer = .{ .allocator = undefined, .value = 2 } };
-    const c = Value{ .integer = .{ .allocator = undefined, .value = 2 } };
+    const a: Value = .{ .integer = 1 };
+    const b: Value = .{ .integer = 2 };
+    const c: Value = .{ .integer = 2 };
     try std.testing.expect(!try a.compare(.equal, b));
     try std.testing.expect(try b.compare(.equal, c));
     try std.testing.expect(try a.compare(.less_than, b));
@@ -2271,9 +2149,9 @@ test "Value.compare integer" {
 }
 
 test "Value.compare float" {
-    const a = Value{ .float = .{ .allocator = undefined, .value = 1.0 } };
-    const b = Value{ .float = .{ .allocator = undefined, .value = 1.2 } };
-    const c = Value{ .float = .{ .allocator = undefined, .value = 1.2 } };
+    const a: Value = .{ .float = 1.0 };
+    const b: Value = .{ .float = 1.2 };
+    const c: Value = .{ .float = 1.2 };
     try std.testing.expect(!try a.compare(.equal, b));
     try std.testing.expect(try b.compare(.equal, c));
     try std.testing.expect(try a.compare(.less_than, b));
@@ -2285,9 +2163,9 @@ test "Value.compare float" {
 }
 
 test "Value.compare boolean" {
-    const a = Value{ .boolean = .{ .allocator = undefined, .value = false } };
-    const b = Value{ .boolean = .{ .allocator = undefined, .value = true } };
-    const c = Value{ .boolean = .{ .allocator = undefined, .value = true } };
+    const a: Value = .{ .boolean = false };
+    const b: Value = .{ .boolean = true };
+    const c: Value = .{ .boolean = true };
     try std.testing.expect(!try a.compare(.equal, b));
     try std.testing.expect(try b.compare(.equal, c));
     try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
@@ -2299,9 +2177,9 @@ test "Value.compare boolean" {
 }
 
 test "Value.compare string" {
-    const a = Value{ .string = .{ .allocator = undefined, .value = "foo" } };
-    const b = Value{ .string = .{ .allocator = undefined, .value = "bar" } };
-    const c = Value{ .string = .{ .allocator = undefined, .value = "bar" } };
+    const a: Value = .{ .string = "foo" };
+    const b: Value = .{ .string = "bar" };
+    const c: Value = .{ .string = "bar" };
     try std.testing.expect(!try a.compare(.equal, b));
     try std.testing.expect(try b.compare(.equal, c));
     try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
@@ -2313,18 +2191,9 @@ test "Value.compare string" {
 }
 
 test "Value.compare datetime" {
-    const a = Value{ .datetime = .{
-        .allocator = undefined,
-        .value = try jetcommon.types.DateTime.fromUnix(1731834127, .seconds),
-    } };
-    const b = Value{ .datetime = .{
-        .allocator = undefined,
-        .value = try jetcommon.types.DateTime.fromUnix(1731834128, .seconds),
-    } };
-    const c = Value{ .datetime = .{
-        .allocator = undefined,
-        .value = try jetcommon.types.DateTime.fromUnix(1731834128, .seconds),
-    } };
+    const a: Value = .{ .datetime = try DateTime.fromUnix(1731834127, .seconds) };
+    const b: Value = .{ .datetime = try DateTime.fromUnix(1731834128, .seconds) };
+    const c: Value = .{ .datetime = try DateTime.fromUnix(1731834128, .seconds) };
     try std.testing.expect(!try a.compare(.equal, b));
     try std.testing.expect(try b.compare(.equal, c));
     try std.testing.expect(try a.compare(.less_than, b));
@@ -2336,8 +2205,8 @@ test "Value.compare datetime" {
 }
 
 test "Value.compare object" {
-    const a = Value{ .object = undefined };
-    const b = Value{ .object = undefined };
+    const a: Value = .{ .object = undefined };
+    const b: Value = .{ .object = undefined };
     try std.testing.expectError(error.ZmplCompareError, a.compare(.equal, b));
     try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
     try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
@@ -2348,8 +2217,8 @@ test "Value.compare object" {
 }
 
 test "Value.compare array" {
-    const a = Value{ .array = undefined };
-    const b = Value{ .array = undefined };
+    const a: Value = .{ .array = undefined };
+    const b: Value = .{ .array = undefined };
     try std.testing.expectError(error.ZmplCompareError, a.compare(.equal, b));
     try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
     try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
@@ -2360,8 +2229,8 @@ test "Value.compare array" {
 }
 
 test "Value.compare different types" {
-    const a = Value{ .integer = undefined };
-    const b = Value{ .float = undefined };
+    const a: Value = .{ .integer = undefined };
+    const b: Value = .{ .float = undefined };
     try std.testing.expectError(error.ZmplCompareError, a.compare(.equal, b));
     try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
     try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
@@ -2372,7 +2241,7 @@ test "Value.compare different types" {
 }
 
 test "Value.compareT string" {
-    const a = Value{ .string = .{ .allocator = undefined, .value = "foo" } };
+    const a: Value = .{ .string = "foo" };
     try std.testing.expect(try a.compareT(.equal, []const u8, "foo"));
     try std.testing.expect(try a.compareT(.equal, [:0]const u8, @as([:0]const u8, "foo")));
     try std.testing.expectError(error.ZmplCompareError, a.compareT(.less_than, []const u8, "foo"));
@@ -2380,7 +2249,7 @@ test "Value.compareT string" {
 }
 
 test "Value.compareT integer" {
-    const a = Value{ .integer = .{ .allocator = undefined, .value = 1 } };
+    const a: Value = .{ .integer = 1 };
     try std.testing.expect(try a.compareT(.equal, usize, 1));
     try std.testing.expect(try a.compareT(.equal, u16, 1));
     try std.testing.expect(try a.compareT(.equal, u8, 1));
@@ -2398,7 +2267,7 @@ test "Value.compareT integer" {
 }
 
 test "Value.compareT float" {
-    const a = Value{ .float = .{ .allocator = undefined, .value = 1.0 } };
+    const a: Value = .{ .float = 1.0 };
     try std.testing.expect(try a.compareT(.equal, f128, 1.0));
     try std.testing.expect(try a.compareT(.equal, f64, 1.0));
     try std.testing.expect(try a.compareT(.equal, f32, 1.0));
@@ -2416,10 +2285,7 @@ test "Value.compareT float" {
 }
 
 test "Value.compareT datetime" {
-    const a = Value{ .datetime = .{
-        .allocator = undefined,
-        .value = try jetcommon.types.DateTime.fromUnix(1731834128, .seconds),
-    } };
+    const a: Value = .{ .datetime = try DateTime.fromUnix(1731834128, .seconds) };
     try std.testing.expect(try a.compareT(.equal, u64, 1731834128 * 1_000_000));
     try std.testing.expect(try a.compareT(.equal, u128, 1731834128 * 1_000_000));
     try std.testing.expect(!try a.compareT(.equal, u64, 1731834127 * 1_000_000));
@@ -2438,7 +2304,7 @@ test "Value.compareT datetime" {
 }
 
 test "Value.compareT object" {
-    const a = Value{ .object = undefined };
+    const a: Value = .{ .object = undefined };
     try std.testing.expectError(
         error.ZmplCompareError,
         a.compareT(.equal, []const u8, "foo"),
@@ -2446,7 +2312,7 @@ test "Value.compareT object" {
 }
 
 test "Value.compareT array" {
-    const a = Value{ .array = undefined };
+    const a: Value = .{ .array = undefined };
     try std.testing.expectError(
         error.ZmplCompareError,
         a.compareT(.equal, []const u8, "foo"),
@@ -2454,9 +2320,7 @@ test "Value.compareT array" {
 }
 
 test "append/put array/object" {
-    var aw: Writer.Allocating = .init(std.testing.allocator);
-    defer aw.deinit();
-    var data: Data = try .init(std.testing.allocator, &aw.writer);
+    var data: Data = try .init(std.testing.allocator);
     defer data.deinit(std.testing.allocator);
 
     var array1 = try data.root(.array);
@@ -2481,7 +2345,7 @@ test "append/put array/object" {
 }
 
 test "coerce enum" {
-    const value = Value{ .string = .{ .allocator = undefined, .value = "foo" } };
+    const value: Value = .{ .string = "foo" };
     const E = enum { foo, bar };
     const e1: E = .foo;
     const e2: E = .bar;
@@ -2490,12 +2354,12 @@ test "coerce enum" {
 }
 
 test "coerce boolean" {
-    const value1 = Value{ .string = .{ .allocator = undefined, .value = "1" } };
-    const value2 = Value{ .string = .{ .allocator = undefined, .value = "0" } };
-    const value3 = Value{ .string = .{ .allocator = undefined, .value = "on" } };
-    const value4 = Value{ .string = .{ .allocator = undefined, .value = "random" } };
-    const value5 = Value{ .boolean = .{ .allocator = undefined, .value = true } };
-    const value6 = Value{ .boolean = .{ .allocator = undefined, .value = false } };
+    const value1: Value = .{ .string = "1" };
+    const value2: Value = .{ .string = "0" };
+    const value3: Value = .{ .string = "on" };
+    const value4: Value = .{ .string = "random" };
+    const value5: Value = .{ .boolean = true };
+    const value6: Value = .{ .boolean = false };
     try std.testing.expect(try value1.coerce(bool));
     try std.testing.expect(!try value2.coerce(bool));
     try std.testing.expect(try value3.coerce(bool));
@@ -2505,9 +2369,7 @@ test "coerce boolean" {
 }
 
 test "array pop" {
-    var aw: Writer.Allocating = .init(std.testing.allocator);
-    defer aw.deinit();
-    var data: Data = try .init(std.testing.allocator, &aw.writer);
+    var data: Data = try .init(std.testing.allocator);
     defer data.deinit(std.testing.allocator);
 
     var array1 = try data.root(.array);
@@ -2527,9 +2389,7 @@ test "array pop" {
 }
 
 test "getT(.null, ...)" {
-    var aw: Writer.Allocating = .init(std.testing.allocator);
-    defer aw.deinit();
-    var data: Data = try .init(std.testing.allocator, &aw.writer);
+    var data: Data = try .init(std.testing.allocator);
     defer data.deinit(std.testing.allocator);
 
     var obj = try data.root(.object);
@@ -2540,38 +2400,36 @@ test "getT(.null, ...)" {
 }
 
 test "parseJsonSlice" {
-    var aw: Writer.Allocating = .init(std.testing.allocator);
-    defer aw.deinit();
-    var data: Data = try .init(std.testing.allocator, &aw.writer);
+    var data: Data = try .init(std.testing.allocator);
     defer data.deinit(std.testing.allocator);
 
     const string_value = try data.parseJsonSlice(
         \\"foo"
     );
-    try std.testing.expectEqualStrings("foo", string_value.*.string.value);
+    try std.testing.expectEqualStrings("foo", string_value.*.string);
 
     const boolean_value = try data.parseJsonSlice(
         \\true
     );
-    try std.testing.expectEqual(true, boolean_value.*.boolean.value);
+    try std.testing.expectEqual(true, boolean_value.*.boolean);
 
     const integer_value = try data.parseJsonSlice(
         \\100
     );
-    try std.testing.expectEqual(100, integer_value.*.integer.value);
+    try std.testing.expectEqual(100, integer_value.*.integer);
 
     const float_value = try data.parseJsonSlice(
         \\100.1
     );
-    try std.testing.expectEqual(100.1, float_value.*.float.value);
+    try std.testing.expectEqual(100.1, float_value.*.float);
 
     const object_value = try data.parseJsonSlice(
         \\{"foo": "bar"}
     );
-    try std.testing.expectEqualStrings("bar", object_value.get("foo").?.string.value);
+    try std.testing.expectEqualStrings("bar", object_value.get("foo").?.string);
 
     const array_value = try data.parseJsonSlice(
         \\["foo", "bar"]
     );
-    try std.testing.expectEqualStrings("bar", array_value.items(.array)[1].string.value);
+    try std.testing.expectEqualStrings("bar", array_value.items(.array)[1].string);
 }

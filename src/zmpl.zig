@@ -60,22 +60,19 @@ pub fn isPresent(value: anytype) !bool {
     }
 
     // Handle ZmplValue
-    if (comptime isZmplValue(T)) {
+    if (comptime isZmplValue(T))
         return value.isPresent();
-    }
 
     // For booleans, return the value directly
     if (T == bool) return value;
 
     // For strings, check if the string is not empty
-    if (comptime std.meta.trait.isZigString(T)) {
+    if (comptime std.meta.trait.isZigString(T))
         return value.len > 0;
-    }
 
     // For numbers, check if the value is not zero
-    if (comptime std.meta.trait.isNumber(T)) {
+    if (comptime std.meta.trait.isNumber(T))
         return value != 0;
-    }
 
     // Default to true for any other value that exists
     return true;
