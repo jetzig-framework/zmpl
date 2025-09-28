@@ -229,16 +229,16 @@ pub fn build(b: *Build) !void {
     zmpl.addImport("zmpl.manifest", built_manifest);
 
     if (auto_build) {
+        template_tests.root_module.addImport("zmpl", zmpl);
+        template_tests.root_module.addImport("jetcommon", jetcommon);
+        template_tests.root_module.addImport("zmpl.manifest", built_manifest);
+
         zmpl_tests.root_module.addImport("jetcommon", jetcommon);
         zmpl_tests.root_module.addImport("zmpl.manifest", dummy_manifest);
         zmpl_tests.root_module.addImport("zmd", zmd);
 
         manifest_tests.root_module.addImport("zmpl_options", dummy_zmpl_options);
         manifest_tests.root_module.addImport("zmd", zmd);
-
-        template_tests.root_module.addImport("zmpl", zmpl);
-        template_tests.root_module.addImport("jetcommon", jetcommon);
-        template_tests.root_module.addImport("zmpl.manifest", built_manifest);
 
         const run_template_tests = b.addRunArtifact(template_tests);
         const run_zmpl_tests = b.addRunArtifact(zmpl_tests);
