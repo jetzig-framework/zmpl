@@ -222,7 +222,7 @@ pub fn readFile(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
             else => return err,
         }
     };
-    const content = std.fs.cwd().readFileAlloc(path, allocator, .limited64(stat.size));
+    const content = std.fs.cwd().readFileAlloc(allocator, path, @min(stat.size, std.math.maxInt(usize)));
     return content;
 }
 
