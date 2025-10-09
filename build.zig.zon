@@ -9,8 +9,8 @@
             .hash = "jetcommon-0.1.0-jPY_DbNIAAA0utNExN3zMeqXA4fhZXQ6LDDP1eg8vodj",
         },
         .zmd = .{
-            .url = "https://github.com/jetzig-framework/zmd/archive/907f4f4f98768e7212d73e3923c9e22d0a966aa4.tar.gz",
-            .hash = "zmd-0.1.0-H8YV7bfdAAC9WS9ReC1T61CL-W9iLnrWkNm5p6ng2isI",
+            .url = "https://github.com/jetzig-framework/zmd/archive/87b1c46b517f47b3384eba7ce98d197c463a9d5e.tar.gz",
+            .hash = "zmd-0.1.0-H8YV7bvdAABAVFR2lherqOup7valUMg9UTEiiMFxlTjZ",
         },
     },
 
@@ -24,3 +24,4 @@
         "README.md",
     },
 }
+

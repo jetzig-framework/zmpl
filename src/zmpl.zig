@@ -1,7 +1,6 @@
 const std = @import("std");
 
-// I dont konw why but this is failing, despite zls finding it just fine.
-//const build_options = @import("build_options");
+const build_options = @import("build_options");
 
 pub const zmd = @import("zmd");
 pub const jetcommon = @import("jetcommon");
@@ -13,10 +12,9 @@ pub const zmpl = @This();
 /// Generic, JSON-compatible data type.
 pub const Data = @import("zmpl/Data.zig");
 pub const Template = @import("zmpl/Template.zig");
-const Writer = std.Io.Writer;
 pub const Manifest = Template.Manifest;
 pub const colors = @import("zmpl/colors.zig");
-pub const format = @import("zmpl/format.zig");
+pub const Format = @import("zmpl/Format.zig");
 pub const debug = @import("zmpl/debug.zig");
 
 pub const isZmplValue = Data.isZmplValue;
@@ -36,12 +34,14 @@ pub fn chomp(input: []const u8) []const u8 {
 
 /// Sanitize input. Used internally for rendering data refs. Use `zmpl.fmt.sanitize` to manually
 /// sanitize other values.
-pub fn sanitize(writer: *Writer, input: []const u8) !void {
-    //if (!build_options.sanitize) {
-    //    _ = try writer.write(input);
-    //    return;
-    //}
-    _ = try format.sanitize(writer, input);
+pub fn sanitize(writer: anytype, input: []const u8) !void {
+    if (!build_options.sanitize) {
+        _ = try writer.write(input);
+        return;
+    }
+
+    const fmt = Format{ .writer = if (@TypeOf(writer) == *Data) &writer.output_aw.writer else writer };
+    _ = try fmt.sanitize(input);
 }
 
 /// Check if a value is present for use in if conditions.
@@ -88,3 +88,4 @@ pub fn refIsPresent(data: *Data, ref_key: []const u8) !bool {
 test {
     std.testing.refAllDecls(@This());
 }
+

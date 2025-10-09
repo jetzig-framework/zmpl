@@ -1,4 +1,5 @@
 const std = @import("std");
+const ArrayList = std.array_list.Managed;
 
 /// Strip all leading and trailing `\n` except one.
 pub fn chomp(input: []const u8) []const u8 {
@@ -21,7 +22,7 @@ pub fn indent(
     comptime indent_size: usize,
 ) ![]const u8 {
     var it = std.mem.splitScalar(u8, input, '\n');
-    var buf = std.array_list.Managed(u8).init(allocator);
+    var buf = ArrayList(u8).init(allocator);
     const writer = buf.writer();
 
     while (it.next()) |line| {
@@ -30,3 +31,4 @@ pub fn indent(
     }
     return try buf.toOwnedSlice();
 }
+

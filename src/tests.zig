@@ -1,11 +1,12 @@
 const std = @import("std");
+const ArrayList = std.array_list.Managed;
 const zmpl = @import("zmpl");
 const jetcommon = @import("jetcommon");
 
 const Context = struct { foo: []const u8 = "default" };
 
 test "readme example" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var body = try data.object();
@@ -48,7 +49,7 @@ test "readme example" {
 }
 
 test "object passing to partial" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -74,7 +75,7 @@ test "object passing to partial" {
 }
 
 test "complex example" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var body = try data.object();
@@ -148,7 +149,7 @@ test "complex example" {
 }
 
 test "direct rendering of slots (render [][]const u8 as line-separated string)" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     if (zmpl.find("slots")) |template| {
@@ -168,7 +169,7 @@ test "direct rendering of slots (render [][]const u8 as line-separated string)" 
 }
 
 test "javascript" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     if (zmpl.find("javascript")) |template| {
@@ -189,7 +190,7 @@ test "javascript" {
 }
 
 test "partials without blocks" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     if (zmpl.find("partials_without_blocks")) |template| {
@@ -205,7 +206,7 @@ test "partials without blocks" {
 }
 
 test "custom delimiters" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     if (zmpl.find("custom_delimiters")) |template| {
@@ -227,7 +228,7 @@ test "custom delimiters" {
 }
 
 test ".md.zmpl extension" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     if (zmpl.find("markdown_extension")) |template| {
@@ -242,7 +243,7 @@ test ".md.zmpl extension" {
 }
 
 test "default partial arguments" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     if (zmpl.find("default_partial_arguments")) |template| {
@@ -257,7 +258,7 @@ test "default partial arguments" {
 }
 
 test "escaping (HTML and backslash escaping" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     if (zmpl.find("escaping")) |template| {
@@ -274,7 +275,7 @@ test "escaping (HTML and backslash escaping" {
 }
 
 test "references combined with markdown" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var object = try data.object();
@@ -296,7 +297,7 @@ test "references combined with markdown" {
 }
 
 test "partial arg type coercion" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var object = try data.object();
@@ -318,7 +319,7 @@ test "partial arg type coercion" {
 }
 
 test "inheritance" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     if (zmpl.find("inheritance_child")) |template| {
@@ -347,7 +348,7 @@ test "inheritance" {
 }
 
 test "root init" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -390,7 +391,7 @@ test "root init" {
 }
 
 test "reference stripping" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -409,7 +410,7 @@ test "reference stripping" {
 }
 
 test "inferred type in put/append" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     const TestEnum = enum { field_a, field_b };
@@ -457,7 +458,7 @@ test "inferred type in put/append" {
 }
 
 test "getT(.array, ...) and getT(.object, ...)" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
     var root = try data.root(.object);
     var obj = try data.object();
@@ -478,7 +479,7 @@ test "getT(.array, ...) and getT(.object, ...)" {
 }
 
 test "object.remove(...)" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
     var obj = try data.object();
 
@@ -491,7 +492,7 @@ test "object.remove(...)" {
 }
 
 test "getStruct from object" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
     var root = try data.root(.object);
     var obj = try data.object();
@@ -532,7 +533,7 @@ test "getStruct from object" {
 }
 
 test "Array.items()" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
     var array = try data.array();
     try array.append("foo");
@@ -544,7 +545,7 @@ test "Array.items()" {
 }
 
 test "Object.items()" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
     var object = try data.object();
     try object.put("foo", "bar");
@@ -561,7 +562,7 @@ test "Object.items()" {
 }
 
 test "toJson()" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
     var object = try data.object();
     try object.put("foo", "bar");
@@ -576,12 +577,12 @@ test "toJson()" {
 }
 
 test "put slice" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
     var root = try data.root(.object);
 
     const T = struct { foo: []const u8, bar: []const u8 };
-    var array = std.array_list.Managed(T).init(std.testing.allocator);
+    var array = ArrayList(T).init(std.testing.allocator);
     try array.append(.{ .foo = "abc", .bar = "def" });
     try array.append(.{ .foo = "ghi", .bar = "jkl" });
 
@@ -597,7 +598,7 @@ test "put slice" {
 }
 
 test "iteration" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -647,7 +648,7 @@ test "iteration" {
 }
 
 test "datetime format" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -672,7 +673,7 @@ test "datetime format" {
 }
 
 test "datetime" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -683,7 +684,7 @@ test "datetime" {
 }
 
 test "for with partial" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -708,7 +709,7 @@ test "for with partial" {
 }
 
 test "error union" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -718,7 +719,7 @@ test "error union" {
 }
 
 test "xss sanitization/raw formatter" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -737,7 +738,7 @@ test "xss sanitization/raw formatter" {
 }
 
 test "if/else" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -787,7 +788,7 @@ test "if/else" {
 }
 
 test "for with zmpl value" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -815,7 +816,7 @@ test "for with zmpl value" {
 }
 
 test "comments" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     if (zmpl.find("comments")) |template| {
@@ -832,7 +833,7 @@ test "comments" {
 }
 
 test "for with if" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.object();
@@ -876,7 +877,7 @@ test "for with if" {
 }
 
 test "mix mardown and zig" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.object();
@@ -907,7 +908,7 @@ test "nullable if" {
 
     // Test with null value - should be falsey
     {
-        var data = zmpl.Data.init(std.testing.allocator);
+        var data: zmpl.Data = .init(std.testing.allocator);
         defer data.deinit();
 
         var clip = try data.object();
@@ -926,7 +927,7 @@ test "nullable if" {
 
     // Test with non-null, non-empty string - should be truthy
     {
-        var data = zmpl.Data.init(std.testing.allocator);
+        var data: zmpl.Data = .init(std.testing.allocator);
         defer data.deinit();
 
         var clip = try data.object();
@@ -946,7 +947,7 @@ test "nullable if" {
 
     // Test with empty string - should be falsey like null
     {
-        var data = zmpl.Data.init(std.testing.allocator);
+        var data: zmpl.Data = .init(std.testing.allocator);
         defer data.deinit();
 
         var clip = try data.object();
@@ -965,7 +966,7 @@ test "nullable if" {
 }
 
 test "if statement with indented HTML - if branch" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -996,7 +997,7 @@ test "if statement with indented HTML - if branch" {
 }
 
 test "if statement with indented HTML - else branch" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -1020,29 +1021,27 @@ test "if statement with indented HTML - else branch" {
 }
 
 test "blocks" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
-    if (zmpl.find("blocks")) |template| {
-        const output = try template.render(
-            &data,
-            Context,
-            .{},
-            &.{},
-            .{ .layout = zmpl.find("blocks_layout") },
-        );
-        try std.testing.expectEqualStrings(
-            \\<html>
-            \\    <head>            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />    </head>
-            \\</html>
-        , output);
-    } else {
-        try std.testing.expect(false);
-    }
+    const template = zmpl.find("blocks") orelse
+        return std.testing.expect(false);
+    const output = try template.render(
+        &data,
+        Context,
+        .{},
+        &.{},
+        .{ .layout = zmpl.find("blocks_layout") },
+    );
+    try std.testing.expectEqualStrings(
+        \\<html>
+        \\    <head>            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />            <link rel="stylesheet" href="https://www.example.com/styles.css" />    </head>
+        \\</html>
+    , output);
 }
 
 test "append struct with []const []const u8 field" {
-    var data = zmpl.Data.init(std.testing.allocator);
+    var data: zmpl.Data = .init(std.testing.allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -1077,3 +1076,4 @@ test "append struct with []const []const u8 field" {
         try std.testing.expectEqual(expected_qux[index], item.integer.value);
     }
 }
+

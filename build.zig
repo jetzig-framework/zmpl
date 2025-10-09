@@ -1,35 +1,42 @@
 const std = @import("std");
+const Build = std.Build;
+const ArrayList = std.array_list.Managed;
+const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 
+pub const Data = @import("src/zmpl.zig").Data;
 const zmd = @import("zmd");
-
-pub const zmpl = @import("src/zmpl.zig");
-pub const Data = zmpl.Data;
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const use_llvm = b.option(bool, "use_llvm", "Use LLVM") orelse true;
 
+    const zmpl = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/zmpl.zig"),
+    });
+
     const lib = b.addLibrary(.{
         .name = "zmpl",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/zmpl.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
+        .linkage = .static,
         .use_llvm = use_llvm,
+        .root_module = zmpl,
+    });
+
+    const entry = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/main.zig"),
     });
 
     const exe = b.addExecutable(.{
         .name = "zmpl",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .optimize = optimize,
-            .target = target,
-        }),
         .use_llvm = use_llvm,
+        .root_module = entry,
     });
+
     const run_artifact = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run benchmarking");
     run_step.dependOn(&run_artifact.step);
@@ -46,8 +53,10 @@ pub fn build(b: *std.Build) !void {
     );
     zmpl_module.addOptions("build_options", build_options);
 
-    const zmd_dep = b.dependency("zmd", .{ .target = target, .optimize = optimize });
-    const zmd_module = zmd_dep.module("zmd");
+    const zmd_module = b.dependency("zmd", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("zmd");
     lib.root_module.addImport("zmd", zmd_module);
     zmpl_module.addImport("zmd", zmd_module);
 
@@ -95,14 +104,16 @@ pub fn build(b: *std.Build) !void {
     );
     const auto_build = if (zmpl_auto_build_option) |opt| opt else true;
 
+    const manifest = b.createModule(.{
+        .root_source_file = b.path("src/manifest/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const manifest_exe = b.addExecutable(.{
         .name = "manifest",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/manifest/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
         .use_llvm = use_llvm,
+        .root_module = manifest,
     });
 
     const options_files = b.addWriteFiles();
@@ -138,21 +149,21 @@ pub fn build(b: *std.Build) !void {
 
         const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match any filter") orelse &.{};
         const template_tests = b.addTest(.{
+            .filters = test_filters,
             .root_module = b.createModule(.{
                 .root_source_file = b.path(tests_path),
                 .target = target,
                 .optimize = optimize,
             }),
-            .filters = test_filters,
         });
 
         const zmpl_tests = b.addTest(.{
+            .filters = test_filters,
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/zmpl.zig"),
                 .target = target,
                 .optimize = optimize,
             }),
-            .filters = test_filters,
         });
 
         const manifest_tests = b.addTest(.{
@@ -208,8 +219,8 @@ const TemplatesPath = struct {
     path: []const []const u8,
 };
 
-pub fn templatesPaths(allocator: std.mem.Allocator, paths: []const TemplatesPath) ![]const []const u8 {
-    var buf = std.array_list.Managed([]const u8).init(allocator);
+pub fn templatesPaths(allocator: Allocator, paths: []const TemplatesPath) ![]const []const u8 {
+    var buf = ArrayList([]const u8).init(allocator);
     for (paths) |path| {
         const joined = try std.fs.path.join(allocator, path.path);
         defer allocator.free(joined);
@@ -228,10 +239,10 @@ pub fn templatesPaths(allocator: std.mem.Allocator, paths: []const TemplatesPath
         );
     }
 
-    return try buf.toOwnedSlice();
+    return buf.toOwnedSlice();
 }
 
-pub fn addTemplateConstants(b: *std.Build, comptime constants: type) ![]const u8 {
+pub fn addTemplateConstants(b: *Build, comptime constants: type) ![]const u8 {
     const fields = switch (@typeInfo(constants)) {
         .@"struct" => |info| info.fields,
         else => @panic("Expected struct, found: " ++ @typeName(constants)),
@@ -245,13 +256,13 @@ pub fn addTemplateConstants(b: *std.Build, comptime constants: type) ![]const u8
         );
     }
 
-    return try std.mem.join(b.allocator, "|", &array);
+    return std.mem.join(b.allocator, "|", &array);
 }
 
-fn findTemplates(b: *std.Build, templates_paths: []const []const u8) ![][]const u8 {
-    var templates = std.array_list.Managed([]const u8).init(b.allocator);
+fn findTemplates(b: *Build, templates_paths: []const []const u8) ![][]const u8 {
+    var templates = ArrayList([]const u8).init(b.allocator);
 
-    var templates_paths_buf = std.array_list.Managed([]const u8).init(b.allocator);
+    var templates_paths_buf = ArrayList([]const u8).init(b.allocator);
     defer templates_paths_buf.deinit();
     for (templates_paths) |syntax| {
         const prefix_end = std.mem.indexOf(u8, syntax, ",path=").?;
@@ -286,11 +297,11 @@ fn findTemplates(b: *std.Build, templates_paths: []const []const u8) ![][]const 
             try templates.append(try dir.realpathAlloc(b.allocator, entry.path));
         }
     }
-    return try templates.toOwnedSlice();
+    return templates.toOwnedSlice();
 }
 
 fn generateZmplOptions(
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     options_header_option: ?[]const u8,
     markdown_fragments: ?[]const u8,
     constants: ?[]const u8,
@@ -315,9 +326,9 @@ fn generateZmplOptions(
     , .{ options_header_option orelse "", constants_source, markdown_fragments orelse "", base64Header });
 }
 
-fn parseZmplConstants(allocator: std.mem.Allocator, constants_string: ?[]const u8) ![]const u8 {
+fn parseZmplConstants(allocator: Allocator, constants_string: ?[]const u8) ![]const u8 {
     if (constants_string) |string| {
-        var array = std.array_list.Managed(u8).init(allocator);
+        var array = ArrayList(u8).init(allocator);
         var pairs_it = std.mem.splitScalar(u8, string, '|');
         try array.appendSlice("pub const template_constants = struct {\n");
         while (pairs_it.next()) |pair| {
@@ -349,10 +360,11 @@ fn parseZmplConstants(allocator: std.mem.Allocator, constants_string: ?[]const u
     } else return "";
 }
 
-fn splitPath(allocator: std.mem.Allocator, path: []const u8) ![]const []const u8 {
+fn splitPath(allocator: Allocator, path: []const u8) ![]const []const u8 {
     var it = std.mem.tokenizeSequence(u8, path, std.fs.path.sep_str);
-    var buf = std.array_list.Managed([]const u8).init(allocator);
+    var buf = ArrayList([]const u8).init(allocator);
     while (it.next()) |segment| try buf.append(segment);
 
-    return try buf.toOwnedSlice();
+    return buf.toOwnedSlice();
 }
+

@@ -1,19 +1,13 @@
 const std = @import("std");
-const Writer = std.Io.Writer;
-const ArrayList = std.ArrayList;
-const Allocator = std.mem.Allocator;
-const SourceLocation = std.debug.SourceLocation;
-const StackTrace = std.builtin.StackTrace;
-const SelfInfo = std.debug.SelfInfo;
+const ArrayList = std.array_list.Managed;
 
-const builtin = @import("builtin");
 const colors = @import("colors.zig");
 const util = @import("util.zig");
 
 pub fn printSourceInfo(
-    allocator: Allocator,
+    allocator: std.mem.Allocator,
     err: anyerror,
-    stack_trace: *StackTrace,
+    stack_trace: *std.builtin.StackTrace,
 ) !void {
     const debug_info = std.debug.getSelfDebugInfo() catch return err;
     const source_location = (zmplSourceLocation(debug_info, stack_trace, err) catch
@@ -24,10 +18,11 @@ pub fn printSourceInfo(
 }
 
 fn zmplSourceLocation(
-    debug_info: *SelfInfo,
-    stack_trace: *StackTrace,
+    debug_info: *std.debug.SelfInfo,
+    stack_trace: *std.builtin.StackTrace,
     err: anyerror,
-) !?SourceLocation {
+) !?std.debug.SourceLocation {
+    const builtin = @import("builtin");
     if (builtin.strip_debug_info) return error.MissingDebugInfo;
     var frame_index: usize = 0;
     var frames_left: usize = @min(stack_trace.index, stack_trace.instruction_addresses.len);
@@ -54,8 +49,8 @@ fn zmplSourceLocation(
 }
 
 fn debugSourceLocation(
-    allocator: Allocator,
-    source_location: SourceLocation,
+    allocator: std.mem.Allocator,
+    source_location: std.debug.SourceLocation,
 ) !void {
     const debug_line = try findDebugLine(allocator, source_location) orelse return;
     var it = std.mem.tokenizeScalar(u8, debug_line, ':');
@@ -108,8 +103,8 @@ fn debugSourceLocation(
 }
 
 fn findDebugLine(
-    allocator: Allocator,
-    source_location: SourceLocation,
+    allocator: std.mem.Allocator,
+    source_location: std.debug.SourceLocation,
 ) !?[]const u8 {
     const file = try std.fs.openFileAbsolute(source_location.file_name, .{});
     const stat = try file.stat();
@@ -135,9 +130,8 @@ fn findDebugLine(
 
     try file.seekTo(position);
     cursor = position;
-    var aw: Writer.Allocating = .init(allocator);
-    defer aw.deinit();
-    const debug_writer = aw.writer;
+    var debug_line_buf = ArrayList(u8).init(allocator);
+    const debug_writer = debug_line_buf.writer();
 
     outer: {
         while (cursor < size) {
@@ -164,8 +158,8 @@ fn findDebugLine(
             }
         }
     }
-    const debug_line_buf = try aw.toOwnedSlice();
-    //defer allocator.free(debug_line_buf);
-    if (debug_line_buf.len == 0) return null;
-    return debug_line_buf;
+
+    if (debug_line_buf.items.len == 0) return null;
+    return try debug_line_buf.toOwnedSlice();
 }
+
