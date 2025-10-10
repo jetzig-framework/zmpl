@@ -126,7 +126,6 @@ const Context = enum { initial, secondary };
 fn divFormatter(allocator: Allocator, node: ZmdNode) ![]const u8 {
     return std.fmt.allocPrint(
         allocator,
-        \\//manifest/Node.zig divFormatter
         \\<div>{s}</div>
     ,
         .{node.content},
@@ -1200,4 +1199,3 @@ fn isIdentifier(arg: []const u8) bool {
 fn debugPartialArgumentError(input: []const u8) void {
     std.debug.print("Error parsing partial arguments in: `{s}`\n", .{input});
 }
-

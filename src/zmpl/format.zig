@@ -1,13 +1,15 @@
 const std = @import("std");
-const Writer = std.Io.Writer;
+const Writer = std.io.Writer;
 
 const jetcommon = @import("jetcommon");
 
 const zmpl = @import("../zmpl.zig");
 
+writer: *Writer,
+
 const Format = @This();
 
-pub fn datetime(writer: *Writer, value: anytype, comptime fmt: []const u8) ![]const u8 {
+pub fn datetime(self: Format, value: anytype, comptime fmt: []const u8) ![]const u8 {
     const Type = switch (@typeInfo(@TypeOf(value))) {
         .pointer => |info| info.child,
         .optional => |info| switch (@typeInfo(info.child)) {
@@ -39,11 +41,11 @@ pub fn datetime(writer: *Writer, value: anytype, comptime fmt: []const u8) ![]co
         else => |T| @compileError(std.fmt.comptimePrint("Unsupported type: `{s}`", .{@typeName(T)})),
     };
 
-    try parsed_datetime.strftime(writer, fmt);
+    try parsed_datetime.strftime(self.writer, fmt);
     return ""; // We use the writer to output but Zmpl expects a string returned by `{{foo}}`
 }
 
-pub fn sanitize(writer: *Writer, value: anytype) ![]const u8 {
+pub fn sanitize(self: Format, value: anytype) ![]const u8 {
     for (try resolveString(value)) |char| {
         const output = switch (char) {
             '<' => "&lt;",
@@ -53,13 +55,13 @@ pub fn sanitize(writer: *Writer, value: anytype) ![]const u8 {
             '&' => "&amp;",
             else => &.{char},
         };
-        try writer.writeAll(output);
+        try self.writer.writeAll(output);
     }
     return "";
 }
 
-pub fn raw(writer: *Writer, value: anytype) ![]const u8 {
-    try writer.writeAll(try resolveString(value));
+pub fn raw(self: Format, value: anytype) ![]const u8 {
+    try self.writer.writeAll(try resolveString(value));
     return "";
 }
 
@@ -71,7 +73,7 @@ fn resolveString(value: anytype) ![]const u8 {
     };
 }
 
-pub fn json(writer: *Writer, value: anytype) ![]const u8 {
-    try std.json.stringify(value, .{}, writer);
+pub fn json(self: Format, value: anytype) ![]const u8 {
+    try std.json.stringify(value, .{}, self.writer);
     return "";
 }

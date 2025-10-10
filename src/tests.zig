@@ -1,12 +1,17 @@
 const std = @import("std");
 const ArrayList = std.array_list.Managed;
+const allocator = std.testing.allocator;
+const expect = std.testing.expect;
+const expectEqualStrings = std.testing.expectEqualStrings;
+
 const zmpl = @import("zmpl");
+const Data = zmpl.Data;
 const jetcommon = @import("jetcommon");
 
 const Context = struct { foo: []const u8 = "default" };
 
 test "readme example" {
-    var data: zmpl.Data = .init(std.testing.allocator);
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var body = try data.object();
@@ -19,37 +24,35 @@ test "readme example" {
     try body.put("user", user);
     try body.put("auth", auth);
 
-    if (zmpl.find("example")) |template| {
-        const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const template = zmpl.find("example") orelse
+        return expect(false);
 
-        try std.testing.expectEqualStrings(
-            \\<!-- Zig mode for template logic -->
-            \\    <span>Zmpl is simple!</span>
-            \\
-            \\<!-- Easy data lookup syntax -->
-            \\<div>Email: user@example.com</div>
-            \\<div>Token: abc123-456-def</div>
-            \\
-            \\<!-- Partials --><span>An example partial</span>
-            \\
-            \\<!-- Partials with positional args --><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
-            \\
-            \\<!-- Partials with keyword args --><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
-            \\
-            \\<!-- Partials with slots --><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
-            \\        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
-            \\
-            \\<div><h1>Built-in markdown support</h1>
-            \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
-            \\
-        , output);
-    } else {
-        try std.testing.expect(false);
-    }
+    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    try expectEqualStrings(
+        \\<!-- Zig mode for template logic -->
+        \\    <span>Zmpl is simple!</span>
+        \\
+        \\<!-- Easy data lookup syntax -->
+        \\<div>Email: user@example.com</div>
+        \\<div>Token: abc123-456-def</div>
+        \\
+        \\<!-- Partials --><span>An example partial</span>
+        \\
+        \\<!-- Partials with positional args --><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+        \\
+        \\<!-- Partials with keyword args --><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+        \\
+        \\<!-- Partials with slots --><a href="mailto:user@example.com?subject=Welcome to Jetzig!">user@example.com</a>
+        \\        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
+        \\
+        \\<div><h1>Built-in markdown support</h1>
+        \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
+        \\
+    , output);
 }
 
 test "object passing to partial" {
-    var data: zmpl.Data = .init(std.testing.allocator);
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -1076,4 +1079,3 @@ test "append struct with []const []const u8 field" {
         try std.testing.expectEqual(expected_qux[index], item.integer.value);
     }
 }
-

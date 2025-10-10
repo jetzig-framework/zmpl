@@ -40,7 +40,7 @@ pub fn sanitize(writer: anytype, input: []const u8) !void {
         return;
     }
 
-    const fmt = Format{ .writer = if (@TypeOf(writer) == *Data) &writer.output_aw.writer else writer };
+    const fmt = Format{ .writer = if (@TypeOf(writer) == *Data) &writer.output_buf.writer else writer };
     _ = try fmt.sanitize(input);
 }
 
@@ -88,4 +88,3 @@ pub fn refIsPresent(data: *Data, ref_key: []const u8) !bool {
 test {
     std.testing.refAllDecls(@This());
 }
-

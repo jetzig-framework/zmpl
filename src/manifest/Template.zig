@@ -636,13 +636,15 @@ fn renderFooter(self: Template, writer: anytype) !void {
     try writer.print(
         \\
         \\    if (__extend) |__capture| {{
-        \\        const __inner_content = try allocator.dupe(u8, zmpl.output_buf.items);
+        \\        const __inner_content = try allocator.dupe(u8, try zmpl.output_buf.toOwnedSlice());
         \\        zmpl.content = .{{ .data = zmpl.strip(__inner_content) }};
         \\        zmpl.output_buf.clearRetainingCapacity();
         \\        const __content = try __capture.render(zmpl, Context, context, {s}{s}, .{{}});
         \\        return __content;
         \\    }} else {{
-        \\        return zmpl.chomp(zmpl.output_buf.items);
+        \\        const output = try zmpl.output_buf.toOwnedSlice();
+        \\        defer allocator.free(output);
+        \\        return allocator.dupe(u8, zmpl.chomp(output));
         \\    }}
         \\}}
         \\
@@ -763,4 +765,3 @@ fn debugTree(node: *Node, level: usize, path: []const u8) void {
         debugTree(child_node, level + 1, path);
     }
 }
-
