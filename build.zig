@@ -367,4 +367,3 @@ fn splitPath(allocator: Allocator, path: []const u8) ![]const []const u8 {
 
     return buf.toOwnedSlice();
 }
-
