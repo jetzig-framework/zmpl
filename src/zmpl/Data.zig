@@ -1,3 +1,46 @@
+/// Output stream for writing values into a rendered template.
+const Data = @This();
+
+const std = @import("std");
+const ArrayList = std.ArrayList;
+const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
+const Writer = std.Io.Writer;
+const Stringify = std.json.Stringify;
+const StringHashMap = std.StringHashMapUnmanaged;
+
+const jetcommon = @import("jetcommon");
+const manifest = @import("zmpl.manifest").__Manifest;
+
+const zmpl = @import("../zmpl.zig");
+const util = zmpl.util;
+
+const zmd = @import("zmd");
+
+pub var log_errors = true;
+
+pub const LayoutContent = struct {
+    data: []const u8,
+
+    pub fn format(self: LayoutContent, writer: *Writer) !void {
+        try writer.writeAll(self.data);
+    }
+};
+
+pub const Slot = struct {
+    data: []const u8,
+
+    pub fn format(self: Slot, writer: *Writer) !void {
+        try writer.writeAll(self.data);
+    }
+};
+
+const buffer_size: u16 = 32768;
+
+const indent = "  ";
+
+const StackFallbackAllocator = std.heap.StackFallbackAllocator(buffer_size);
+
 /// Generic, JSON-compatible data type that can store a tree of values. The root value must be
 /// `Object` or `Array`, which can contain any of:
 /// `Object`, `Array`, 'NullType`, `String`, `Float`, `Integer`, `Boolean`.
@@ -32,55 +75,9 @@
 /// `data.value` is a `Data.Value` generic which can be used with `switch` to walk through the
 /// data tree (for Zmpl templates, use the `{.nested_object.key}` syntax to do this
 /// automatically.
-const std = @import("std");
-const Allocator = std.mem.Allocator;
-const ArenaAllocator = std.heap.ArenaAllocator;
-const ArrayList = std.array_list.Managed;
-const Writer = std.Io.Writer;
-
-const jetcommon = @import("jetcommon");
-
-const manifest = @import("zmpl.manifest").__Manifest;
-const zmpl = @import("../zmpl.zig");
-const util = zmpl.util;
-
-const zmd = @import("zmd");
-
-/// Output stream for writing values into a rendered template.
-const Data = @This();
-
-pub var log_errors = true;
-
-pub const LayoutContent = struct {
-    data: []const u8,
-
-    pub fn format(self: LayoutContent, actual_fmt: []const u8, options: anytype, writer: anytype) !void {
-        _ = options;
-        _ = actual_fmt;
-        try writer.writeAll(self.data);
-    }
-};
-
-pub const Slot = struct {
-    data: []const u8,
-
-    pub fn format(self: Slot, actual_fmt: []const u8, options: anytype, writer: anytype) !void {
-        _ = options;
-        _ = actual_fmt;
-        try writer.writeAll(self.data);
-    }
-};
-
-const buffer_size: u16 = 32768;
-
-const StackFallbackAllocator = std.heap.StackFallbackAllocator(buffer_size);
-
-parent_allocator: Allocator,
-arena: *ArenaAllocator,
 allocator: Allocator,
-json_buf: ArrayList(u8),
 output_buf: *Writer.Allocating,
-//output_writer: *IoWriter,
+output_writer: *Writer,
 value: ?*Value = null,
 partial: bool = false,
 content: LayoutContent = .{ .data = "" },
@@ -89,43 +86,33 @@ template_decls: std.StringHashMap(*Value),
 slots: ?[]const String = null,
 fmt: zmpl.Format,
 
-const indent = "  ";
-
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
-pub fn init(allocator: Allocator) Data {
-    const json_buf = ArrayList(u8).init(allocator);
-    const arena = allocator.create(ArenaAllocator) catch @panic("OOM");
-    arena.* = .init(allocator);
-    const output_buf = allocator.create(Writer.Allocating) catch @panic("OOM");
-    output_buf.* = .init(allocator);
+pub fn init(arena: Allocator) Data {
+    const output_buf = arena.create(Writer.Allocating) catch unreachable;
+    output_buf.* = .init(arena);
 
     return .{
-        .parent_allocator = allocator,
-        .arena = arena,
-        .allocator = arena.allocator(),
-        .json_buf = json_buf,
+        .allocator = arena,
         .output_buf = output_buf,
-        // .output_writer = &output_buf.writer,
-        .template_decls = .init(allocator),
+        .output_writer = &output_buf.writer,
+        .template_decls = .init(arena),
         .fmt = .{ .writer = &output_buf.writer },
     };
 }
 
 /// Frees all resources used by this `Data` instance.
 pub fn deinit(self: *Data) void {
-    self.arena.deinit();
-    self.parent_allocator.destroy(self.arena);
+    self.output_buf.clearRetainingCapacity();
     self.output_buf.deinit();
-    self.json_buf.deinit();
-    self.parent_allocator.destroy(self.output_buf);
+    self.allocator.destroy(self.output_buf);
 }
 
 /// Chomps output buffer.
 pub fn chompOutputBuffer(self: *Data) void {
-    if (std.mem.endsWith(u8, self.output_buf.writer.buffered(), "\r"))
-        self.output_buf.writer.undo(1);
-    if (std.mem.endsWith(u8, self.output_buf.writer.buffered(), "\n"))
-        self.output_buf.writer.undo(1);
+    if (std.mem.endsWith(u8, self.output_writer.buffered(), "\n"))
+        self.output_writer.undo(1);
+    if (std.mem.endsWith(u8, self.output_writer.buffered(), "\r"))
+        self.output_writer.undo(1);
 }
 
 /// Convenience wrapper for `util.strip` to be used by compiled templates.
@@ -349,13 +336,13 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
     const arena = self.allocator;
 
     return switch (formatter) {
-        .default => std.fmt.allocPrint(arena, "{any}", .{value}),
-        .optional_default => std.fmt.allocPrint(arena, "{?}", .{value}),
-        .string => std.fmt.allocPrint(arena, "{s}", .{value}),
-        .optional_string => std.fmt.allocPrint(arena, "{?s}", .{value}),
-        .string_array => std.mem.join(arena, "\n", value),
-        .float => std.fmt.allocPrint(arena, "{d}", .{value}),
-        .zmpl => value.toString(),
+        .default => try std.fmt.allocPrint(arena, "{any}", .{value}),
+        .optional_default => try std.fmt.allocPrint(arena, "{?}", .{value}),
+        .string => try std.fmt.allocPrint(arena, "{s}", .{value}),
+        .optional_string => try std.fmt.allocPrint(arena, "{?s}", .{value}),
+        .string_array => try std.mem.join(arena, "\n", value),
+        .float => try std.fmt.allocPrint(arena, "{d}", .{value}),
+        .zmpl => try value.toString(),
         .zmpl_union => switch (value) {
             inline else => |capture| capture.toString(),
         },
@@ -415,12 +402,11 @@ pub fn addConst(self: *Data, name: []const u8, value: *Value) !void {
 /// Retrieves a typed value from template decls. Errors if value is not found, i.e. all expected
 /// values **must** be assigned before rendering a template.
 pub fn getConst(self: *Data, T: type, name: []const u8) !T {
-    const value = self.template_decls.get(name) orelse
-        return zmplError(
-            .constant,
-            "Undefined constant: " ++ zmpl.colors.red("{s}") ++ " must call `Data.addConst(...)` before rendering.",
-            .{name},
-        );
+    const value = self.template_decls.get(name) orelse return zmplError(
+        .constant,
+        "Undefined constant: " ++ zmpl.colors.red("{s}") ++ " must call `Data.addConst(...)` before rendering.",
+        .{name},
+    );
     return switch (T) {
         i128 => value.integer.value,
         f128 => value.float.value,
@@ -524,11 +510,9 @@ pub fn chainRefT(self: *Data, T: type, ref_key: []const u8) !T {
 
 /// Resets the current `Data` object, allowing it to be re-initialized with a new root value.
 pub fn reset(self: *Data) void {
-    if (self.value) |*ptr| {
+    if (self.value) |*ptr|
         ptr.*.deinit();
-    }
-    self.output_buf.clearAndFree();
-    self.json_buf.clearAndFree();
+    self.output_buf.clearRetainingCapacity();
     self.value = null;
 }
 
@@ -542,19 +526,19 @@ pub fn noop(self: Data, T: type, value: T) void {
 /// Set or retrieve the root value. Must be `array` or `object`. Raise an error if root value
 /// already present and not matching requested value type.
 pub fn root(self: *Data, root_type: enum { object, array }) !*Value {
-    const value = self.value orelse {
-        self.value = switch (root_type) {
-            .object => try createObject(self.allocator),
-            .array => try createArray(self.allocator),
-        };
-        return self.value.?;
-    };
-    switch (value.*) {
-        .object => if (root_type != .object) return error.ZmplIncompatibleRootObject,
-        .array => if (root_type != .array) return error.ZmplIncompatibleRootObject,
-        else => unreachable,
+    if (self.value) |value| {
+        switch (value.*) {
+            .object => if (root_type != .object) return error.ZmplIncompatibleRootObject,
+            .array => if (root_type != .array) return error.ZmplIncompatibleRootObject,
+            else => unreachable,
+        }
+        return value;
     }
-    return value;
+    self.value = switch (root_type) {
+        .object => try createObject(self.allocator),
+        .array => try createArray(self.allocator),
+    };
+    return self.value.?;
 }
 
 /// Creates a new `Object`. The first call to `array()` or `object()` sets the root value.
@@ -565,18 +549,16 @@ pub fn root(self: *Data, root_type: enum { object, array }) !*Value {
 /// try nested_object = try data.object(); // <-- creates a new, detached object.
 /// try object.put("nested", nested_object); // <-- adds a nested object to the root object.
 pub fn object(self: *Data) !*Value {
-    if (self.value) |_| {
-        return try createObject(self.allocator);
-    } else {
-        self.value = try createObject(self.allocator);
-        return self.value.?;
-    }
+    if (self.value) |_|
+        return createObject(self.allocator);
+    self.value = try createObject(self.allocator);
+    return self.value.?;
 }
 
-pub fn createObject(alloc: std.mem.Allocator) !*Value {
-    const obj = Object.init(alloc);
+pub fn createObject(alloc: Allocator) !*Value {
+    const obj: Object = .init(alloc);
     const ptr = try alloc.create(Value);
-    ptr.* = Value{ .object = obj };
+    ptr.* = .{ .object = obj };
     return ptr;
 }
 
@@ -588,19 +570,17 @@ pub fn createObject(alloc: std.mem.Allocator) !*Value {
 /// try nested_array = try data.array(); // <-- creates a new, detached array.
 /// try array.append(nested_array); // <-- adds a nested array to the root array.
 pub fn array(self: *Data) !*Value {
-    if (self.value) |_| {
-        return try createArray(self.allocator);
-    } else {
-        self.value = try createArray(self.allocator);
-        return self.value.?;
-    }
+    if (self.value) |_|
+        return createArray(self.allocator);
+    self.value = try createArray(self.allocator);
+    return self.value.?;
 }
 
 /// Creates a new `Array`. For most use cases, use `array()` instead.
-pub fn createArray(alloc: std.mem.Allocator) !*Value {
-    const arr = Array.init(alloc);
+pub fn createArray(alloc: Allocator) !*Value {
+    const arr: Array = .init(alloc);
     const ptr = try alloc.create(Value);
-    ptr.* = Value{ .array = arr };
+    ptr.* = .{ .array = arr };
     return ptr;
 }
 
@@ -646,7 +626,7 @@ pub fn datetime(self: *Data, value: jetcommon.types.DateTime) *Value {
 }
 
 /// Create a new `Value` representing a `null` value. Public, but for internal use only.
-pub fn _null(arena: std.mem.Allocator) *Value {
+pub fn _null(arena: Allocator) *Value {
     const val = arena.create(Value) catch @panic("Out of memory");
     val.* = .{ .null = NullType{ .allocator = arena } };
     return val;
@@ -691,8 +671,8 @@ pub fn getT(self: *const Data, comptime T: ValueType, key: []const u8) ?switch (
     };
 }
 
-pub fn getStruct(self: *const Data, Struct: type, key: []const u8) !?Struct {
-    const obj = self.getT(.object, key) orelse return null;
+pub fn getStruct(self: *const Data, Struct: type, key: []const u8) ?Struct {
+    const obj: *Object = self.getT(.object, key) orelse return null;
     return obj.getStruct(Struct);
 }
 
@@ -701,7 +681,6 @@ pub fn getStruct(self: *const Data, Struct: type, key: []const u8) !?Struct {
 /// (e.g. `.string` returns `[]const u8`).
 pub fn getPresence(self: *const Data, key: []const u8) bool {
     const value = self.get(key) orelse return false;
-
     return value.isPresent();
 }
 
@@ -713,23 +692,19 @@ pub fn refPresence(self: *const Data, ref_key: []const u8) bool {
 /// Receives an array of keys and recursively gets each key from nested objects, returning `null`
 /// if a key is not found, or `*Value` if all keys are found.
 pub fn chain(self: *Data, keys: []const []const u8) ?*Value {
-    if (self.value == null) return null;
-
-    return self.value.?.chain(keys);
+    const value = self.value orelse return null;
+    return value.chain(keys);
 }
 
 /// Gets a value from the data tree using reference lookup syntax (e.g. `.foo.bar.baz`).
 /// Used internally by templates.
 pub fn _get(self: Data, key: []const u8) !*Value {
-    return if (self.ref(key)) |value|
-        value
-    else
-        unknownRef(key);
+    return self.ref(key) orelse unknownRef(key);
 }
 
 /// Returns the entire `Data` tree as a JSON string.
 pub fn toJson(self: *Data) ![]const u8 {
-    return try self.toJsonOptions(.{});
+    return self.toJsonOptions(.{});
 }
 
 const ToJsonOptions = struct {
@@ -739,22 +714,21 @@ const ToJsonOptions = struct {
 
 /// Returns the entire `Data` tree as a pretty-printed JSON string.
 pub fn toJsonOptions(self: *Data, comptime options: ToJsonOptions) ![]const u8 {
-    if (self.value) |_| {} else return "";
-
+    const value = self.value orelse return "";
     var buf: Writer.Allocating = .init(self.allocator);
     defer buf.deinit();
-    try self.value.?._toJson(&buf.writer, options, 0);
+    try value._toJson(&buf.writer, options, 0);
     try buf.writer.writeByte('\n');
-    return self.allocator.dupe(u8, try buf.toOwnedSlice());
+    return buf.toOwnedSlice();
 }
 
 /// Parses a JSON string and returns a `!*Data.Value`
 /// Inverse of `toJson`
 pub fn parseJsonSlice(self: *Data, json: []const u8) !*Value {
     const alloc = self.allocator;
-    var json_stream: std.io.Reader = .fixed(json);
-    var reader: std.json.Reader = .init(alloc, &json_stream);
-    var container_stack = ArrayList(*Value).init(alloc);
+    var json_stream: std.Io.Reader = .fixed(json);
+    var reader: std.json.Reader = .init(self.allocator, &json_stream);
+    var container_stack: ArrayList(*Value) = .empty;
     var current_container: ?*Value = null;
     var current_key: ?[]const u8 = null;
 
@@ -774,7 +748,7 @@ pub fn parseJsonSlice(self: *Data, json: []const u8) !*Value {
                     }
                 }
                 current_container = obj;
-                try container_stack.append(obj);
+                try container_stack.append(alloc, obj);
             },
             .array_begin => {
                 const arr = try createArray(alloc);
@@ -789,7 +763,7 @@ pub fn parseJsonSlice(self: *Data, json: []const u8) !*Value {
                     }
                 }
                 current_container = arr;
-                try container_stack.append(arr);
+                try container_stack.append(alloc, arr);
             },
             .object_end, .array_end => {
                 _ = container_stack.pop();
@@ -1267,13 +1241,13 @@ pub const Value = union(ValueType) {
 
     /// Get an instance of `Struct` from `key` if present.
     pub fn getStruct(self: *const Value, Struct: type, key: []const u8) !?Struct {
-        const obj = self.getT(.object, key) orelse return null;
+        const obj: *Object = self.getT(.object, key) orelse return null;
         return obj.getStruct(Struct);
     }
 
     /// Detect presence of a value, use for truthiness testing.
     pub fn isPresent(self: *const Value) bool {
-        const result = switch (self.*) {
+        return switch (self.*) {
             .null => false,
             .string => |capture| capture.value.len > 0,
             .boolean => |capture| capture.value,
@@ -1281,7 +1255,6 @@ pub const Value = union(ValueType) {
             .float => |capture| capture.value > 0,
             .object, .array, .datetime => true,
         };
-        return result;
     }
 
     /// Receives an array of keys and recursively gets each key from nested objects, returning
@@ -1346,10 +1319,10 @@ pub const Value = union(ValueType) {
         const arena = switch (self.*) {
             inline else => |capture| capture.allocator,
         };
-        var buf = ArrayList(u8).init(arena);
-        const writer = buf.writer();
+        var buf: Writer.Allocating = .init(arena);
+        const writer = &buf.writer;
         try self._toJson(writer, .{}, 0);
-        return try buf.toOwnedSlice();
+        return buf.toOwnedSlice();
     }
 
     /// Generates a JSON string representing the complete data tree.
@@ -1533,7 +1506,7 @@ pub const Value = union(ValueType) {
 };
 
 pub const NullType = struct {
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
 
     pub fn toJson(self: NullType, writer: *Writer, comptime options: ToJsonOptions) !void {
         _ = self;
@@ -1554,7 +1527,7 @@ pub const NullType = struct {
 
 pub const Float = struct {
     value: f128,
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
 
     pub fn eql(self: Float, other: Float) bool {
         return self.value == other.value;
@@ -1571,7 +1544,7 @@ pub const Float = struct {
 
 pub const Integer = struct {
     value: i128,
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
 
     pub fn eql(self: Integer, other: Integer) bool {
         return self.value == other.value;
@@ -1588,7 +1561,7 @@ pub const Integer = struct {
 
 pub const Boolean = struct {
     value: bool,
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
 
     pub fn eql(self: Boolean, other: Boolean) bool {
         return self.value == other.value;
@@ -1605,7 +1578,7 @@ pub const Boolean = struct {
 
 pub const String = struct {
     value: []const u8,
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
 
     pub fn eql(self: String, other: String) bool {
         return std.mem.eql(u8, self.value, other.value);
@@ -1614,7 +1587,7 @@ pub const String = struct {
     pub fn toJson(self: String, writer: *Writer, comptime options: ToJsonOptions) !void {
         var buf: Writer.Allocating = .init(self.allocator);
         defer buf.deinit();
-        try std.json.Stringify.value(self.value, .{}, &buf.writer);
+        try Stringify.value(self.value, .{}, &buf.writer);
         try highlight(
             writer,
             .string,
@@ -1630,17 +1603,13 @@ pub const String = struct {
 
 pub const DateTime = struct {
     value: jetcommon.types.DateTime,
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
 
     pub fn eql(self: DateTime, other: DateTime) bool {
         return self.value.eql(other.value);
     }
 
-    pub fn toJson(
-        self: DateTime,
-        writer: *Writer,
-        comptime options: ToJsonOptions,
-    ) !void {
+    pub fn toJson(self: DateTime, writer: *Writer, comptime options: ToJsonOptions) !void {
         var buf: Writer.Allocating = .init(self.allocator);
         defer buf.deinit();
         try self.value.toJson(&buf.writer);
@@ -1654,8 +1623,8 @@ pub const DateTime = struct {
 
     pub fn toString(self: DateTime) ![]const u8 {
         var buf: Writer.Allocating = .init(self.allocator);
-        defer buf.deinit();
-        try self.value.toString(&buf.writer);
+        const writer = &buf.writer;
+        try self.value.toString(writer);
         return buf.toOwnedSlice();
     }
 };
@@ -1892,11 +1861,12 @@ pub const Object = struct {
     }
 
     pub fn items(self: Object) []const Item {
-        var items_array = ArrayList(Item).init(self.allocator);
+        var items_array: ArrayList(Item) = .empty;
+        defer items_array.deinit(self.allocator);
         for (self.hashmap.keys(), self.hashmap.values()) |key, value| {
-            items_array.append(.{ .key = key, .value = value }) catch @panic("OOM");
+            items_array.append(self.allocator, .{ .key = key, .value = value }) catch @panic("OOM");
         }
-        return items_array.toOwnedSlice() catch @panic("OOM");
+        return items_array.toOwnedSlice(self.allocator) catch @panic("OOM");
     }
 
     pub fn toJson(
@@ -1936,12 +1906,12 @@ pub const Object = struct {
 };
 
 pub const Array = struct {
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     array: ArrayList(*Value),
     it: Iterator = undefined,
 
-    pub fn init(arena: std.mem.Allocator) Array {
-        return .{ .array = ArrayList(*Value).init(arena), .allocator = arena };
+    pub fn init(arena: Allocator) Array {
+        return .{ .array = .empty, .allocator = arena };
     }
 
     pub fn deinit(self: *Array) void {
@@ -1977,7 +1947,7 @@ pub const Array = struct {
 
     pub fn append(self: *Array, value: anytype) !PutAppend(@TypeOf(value)) {
         const zmpl_value = try zmplValue(value, self.allocator);
-        try self.array.append(zmpl_value);
+        try self.array.append(self.allocator, zmpl_value);
         if (PutAppend(@TypeOf(value)) != void) return zmpl_value;
     }
 
@@ -1994,12 +1964,18 @@ pub const Array = struct {
         try highlight(writer, .open_array, .{}, options.color);
         if (options.pretty) try writer.writeByte('\n');
         for (self.array.items, 0..) |*item, index| {
-            if (options.pretty) try writer.writeBytesNTimes(indent, level + 1);
+            if (options.pretty) {
+                for (0..level + 1) |_| _ = try writer.writeAll(indent);
+                // try writer.writeBytesNTimes(indent, level + 1);
+            }
             try item.*._toJson(writer, options, level + 1);
             if (index < self.array.items.len - 1) try writer.writeAll(",");
             if (options.pretty) try writer.writeByte('\n');
         }
-        if (options.pretty) try writer.writeBytesNTimes(indent, level);
+        if (options.pretty) {
+            for (0..level) |_| _ = try writer.writeAll(indent);
+            // try writer.writeBytesNTimes(indent, level);
+        }
         try highlight(writer, .close_array, .{}, options.color);
     }
 
@@ -2141,7 +2117,7 @@ fn highlight(writer: anytype, comptime syntax: Syntax, args: anytype, comptime c
     try writer.print(template, args);
 }
 
-pub fn zmplValue(value: anytype, alloc: std.mem.Allocator) !*Value {
+pub fn zmplValue(value: anytype, alloc: Allocator) !*Value {
     const is_enum_literal = comptime @TypeOf(value) == @TypeOf(.enum_literal);
     if (comptime is_enum_literal and value == .object) {
         return try createObject(alloc);
@@ -2229,12 +2205,12 @@ fn structToValue(value: anytype, alloc: std.mem.Allocator) !Value {
 
 const Field = struct {
     value: []const u8,
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
 
     pub fn toJson(self: Field, writer: *Writer, comptime options: ToJsonOptions) !void {
         var buf: Writer.Allocating = .init(self.allocator);
         defer buf.deinit();
-        try std.json.Stringify.value(self.value, .{}, &buf.writer);
+        try Stringify.value(self.value, .{}, &buf.writer);
         try highlight(
             writer,
             .field,
@@ -2519,7 +2495,10 @@ test "Value.compareT array" {
 }
 
 test "append/put array/object" {
-    var data: Data = .init(std.testing.allocator);
+    var arena: ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var data = Data.init(arena.allocator());
     defer data.deinit();
 
     var array1 = try data.root(.array);
@@ -2568,7 +2547,10 @@ test "coerce boolean" {
 }
 
 test "array pop" {
-    var data: Data = .init(std.testing.allocator);
+    var arena: ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var data = Data.init(arena.allocator());
     defer data.deinit();
 
     var array1 = try data.root(.array);
@@ -2588,7 +2570,10 @@ test "array pop" {
 }
 
 test "getT(.null, ...)" {
-    var data: Data = .init(std.testing.allocator);
+    var arena: ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var data = Data.init(arena.allocator());
     defer data.deinit();
 
     var obj = try data.root(.object);
@@ -2599,7 +2584,10 @@ test "getT(.null, ...)" {
 }
 
 test "parseJsonSlice" {
-    var data: Data = .init(std.testing.allocator);
+    var arena: ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var data = Data.init(arena.allocator());
     defer data.deinit();
 
     const string_value = try data.parseJsonSlice(

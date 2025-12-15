@@ -1,7 +1,7 @@
 const std = @import("std");
+const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
-const ArrayList = std.array_list.Managed;
-const Writer = std.io.Writer;
+const Writer = std.Io.Writer;
 
 /// The first non-whitespace character of a given input (line).
 pub fn firstMeaningfulChar(input: []const u8) ?u8 {
@@ -137,10 +137,16 @@ pub fn generateVariableNameAlloc(allocator: Allocator) ![]const u8 {
     return buf;
 }
 
-// Normalize input by swapping DOS linebreaks for Unix linebreaks and ensuring that the input is
-// closed by a `\n`.
+// Normalize input by swapping DOS linebreaks for Unix linebreaks and ensuring
+// that the input is closed by a `\n`.
 pub fn normalizeInput(allocator: Allocator, input: []const u8) []const u8 {
-    const normalized = std.mem.replaceOwned(u8, allocator, input, "\r\n", "\n") catch @panic("OOM");
+    const normalized = std.mem.replaceOwned(
+        u8,
+        allocator,
+        input,
+        "\r\n",
+        "\n",
+    ) catch @panic("OOM");
     if (std.mem.endsWith(u8, normalized, "\n")) return normalized;
 
     defer allocator.free(normalized);
@@ -204,12 +210,12 @@ pub fn templatePathFetch(allocator: Allocator, path: []const u8, partial: bool) 
 }
 
 pub fn normalizePathPosix(allocator: Allocator, path: []const u8) ![]const u8 {
-    var buf = ArrayList([]const u8).init(allocator);
-    defer buf.deinit();
+    var buf: ArrayList([]const u8) = .empty;
+    defer buf.deinit(allocator);
     var it = std.mem.tokenizeSequence(u8, path, std.fs.path.sep_str);
-    while (it.next()) |segment| try buf.append(segment);
+    while (it.next()) |segment| try buf.append(allocator, segment);
 
-    return try std.mem.join(allocator, "/", buf.items);
+    return std.mem.join(allocator, "/", buf.items);
 }
 
 /// Try to read a file and return content, output a helpful error on failure.
@@ -229,13 +235,12 @@ pub fn readFile(allocator: Allocator, dir: std.fs.Dir, path: []const u8) ![]cons
 
 /// Output an escaped string suitable for use in generated Zig code.
 pub fn zigStringEscape(allocator: Allocator, input: ?[]const u8) ![]const u8 {
-    if (input) |string| {
-        var buf: Writer.Allocating = .init(allocator);
-        defer buf.deinit();
-        try buf.writer.writeByte('"');
-        try std.zig.stringEscape(string, &buf.writer);
-        try buf.writer.writeByte('"');
-        return buf.toOwnedSlice();
-    } else return allocator.dupe(u8, "null");
+    const string = input orelse return allocator.dupe(u8, "null");
+    var buf: Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+    const writer = &buf.writer;
+    try writer.writeByte('"');
+    try std.zig.stringEscape(string, writer);
+    try writer.writeByte('"');
+    return buf.toOwnedSlice();
 }
-

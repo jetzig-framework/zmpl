@@ -1,12 +1,15 @@
 const std = @import("std");
+const ArenaAllocator = std.heap.ArenaAllocator;
+const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
 
 const zmpl = @import("zmpl");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: GeneralPurposeAllocator(.{}) = .init;
     const allocator = gpa.allocator();
+    var arena: ArenaAllocator = .init(allocator);
 
-    var data = zmpl.Data.init(allocator);
+    var data = zmpl.Data.init(arena.allocator());
     const stat = try std.fs.cwd().statFile("large-file.json");
     const json = try std.fs.cwd().readFileAlloc(allocator, "large-file.json", stat.size);
 

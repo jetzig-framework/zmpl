@@ -1,11 +1,12 @@
 const std = @import("std");
-const ArrayList = std.array_list.Managed;
+const Writer = std.Io.Writer;
+const Allocator = std.mem.Allocator;
 
 const colors = @import("colors.zig");
 const util = @import("util.zig");
 
 pub fn printSourceInfo(
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     err: anyerror,
     stack_trace: *std.builtin.StackTrace,
 ) !void {
@@ -49,7 +50,7 @@ fn zmplSourceLocation(
 }
 
 fn debugSourceLocation(
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     source_location: std.debug.SourceLocation,
 ) !void {
     const debug_line = try findDebugLine(allocator, source_location) orelse return;
@@ -103,7 +104,7 @@ fn debugSourceLocation(
 }
 
 fn findDebugLine(
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     source_location: std.debug.SourceLocation,
 ) !?[]const u8 {
     const file = try std.fs.openFileAbsolute(source_location.file_name, .{});
@@ -130,8 +131,8 @@ fn findDebugLine(
 
     try file.seekTo(position);
     cursor = position;
-    var debug_line_buf = ArrayList(u8).init(allocator);
-    const debug_writer = debug_line_buf.writer();
+    var debug_line_buf: Writer.Allocating = .init(allocator);
+    const debug_writer = &debug_line_buf.writer;
 
     outer: {
         while (cursor < size) {
@@ -159,7 +160,6 @@ fn findDebugLine(
         }
     }
 
-    if (debug_line_buf.items.len == 0) return null;
+    if (debug_line_buf.writer.buffered().len == 0) return null;
     return try debug_line_buf.toOwnedSlice();
 }
-

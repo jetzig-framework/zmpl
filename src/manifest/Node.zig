@@ -1,15 +1,17 @@
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
-const ArrayList = std.array_list.Managed;
+const ArrayList = std.ArrayList;
+const Allocator = std.mem.Allocator;
+const StringHashMap = std.StringHashMapUnmanaged;
 
 const zmd = @import("zmd");
 const ZmdNode = zmd.Node;
 const Formatters = zmd.Formatters;
 
-const Token = @import("Template.zig").Token;
-const Mode = @import("Template.zig").Mode;
-const TemplateMap = @import("Template.zig").TemplateMap;
+const Template = @import("Template.zig");
+const Token = Template.Token;
+const Mode = Template.Mode;
+const TemplateMap = Template.TemplateMap;
 const util = @import("util.zig");
 const IfStatement = @import("IfStatement.zig");
 
@@ -17,14 +19,14 @@ token: Token,
 children: ArrayList(*Node),
 parent: ?*const Node,
 generated_template_name: []const u8,
-allocator: std.mem.Allocator,
-template_map: std.StringHashMap(TemplateMap),
-templates_paths_map: std.StringHashMap([]const u8),
+allocator: Allocator,
+template_map: StringHashMap(TemplateMap),
+templates_paths_map: StringHashMap([]const u8),
 templates_path: []const u8,
 template_prefix: []const u8,
 template_func_name: []const u8,
 block_writer: Writer,
-block_map: *std.StringHashMap(ArrayList(Block)),
+block_map: *StringHashMap(ArrayList(Block)),
 
 const else_token = "@else";
 
@@ -43,34 +45,40 @@ pub const Block = struct {
 /// In non-debug builds, debug tokens are omitted as a stack trace is required for them to be
 /// useful.
 pub const Writer = struct {
+    allocator: Allocator,
     buf: *ArrayList(u8),
     token: Token,
 
     pub fn print(self: Writer, comptime input: []const u8, args: anytype) !void {
-        if (builtin.mode == .Debug) {
-            try self.buf.writer().print(input, args);
-            try self.writeDebug();
-        } else {
-            try self.buf.writer().print(input, args);
-        }
+        var buf: std.Io.Writer.Allocating = .fromArrayList(self.allocator, self.buf);
+        defer buf.deinit();
+        try buf.writer.print(input, args);
+        if (builtin.mode == .Debug) try self.writeDebug(&buf.writer);
+        self.buf.* = buf.toArrayList();
     }
 
     pub fn writeAll(self: Writer, input: []const u8) !void {
+        var buf: std.Io.Writer.Allocating = .fromArrayList(self.allocator, self.buf);
+        defer buf.deinit();
         if (builtin.mode == .Debug) {
             var it = std.mem.tokenizeScalar(u8, input, '\n');
             while (it.next()) |line| {
-                try self.buf.writer().writeAll(line);
-                try self.writeDebug();
+                try buf.writer.writeAll(line);
+                try self.writeDebug(&buf.writer);
             }
-        } else try self.buf.writer().writeAll(input);
+        } else try buf.writer.writeAll(input);
+        self.buf.* = buf.toArrayList();
     }
 
     pub fn writeByte(self: Writer, byte: u8) !void {
-        try self.buf.writer().writeByte(byte);
+        var buf: std.Io.Writer.Allocating = .fromArrayList(self.allocator, self.buf);
+        defer buf.deinit();
+        try buf.writer.writeByte(byte);
+        self.buf.* = buf.toArrayList();
     }
 
-    fn writeDebug(self: Writer) !void {
-        try self.buf.writer().print(
+    fn writeDebug(self: Writer, writer: *std.Io.Writer) !void {
+        try writer.print(
             \\
             \\//zmpl:debug:{}:{}:{s}
             \\
@@ -123,6 +131,7 @@ pub fn compile(self: Node, input: []const u8, writer: Writer, options: type) !vo
 }
 
 const Context = enum { initial, secondary };
+
 fn divFormatter(allocator: Allocator, node: ZmdNode) ![]const u8 {
     return std.fmt.allocPrint(
         allocator,
@@ -176,13 +185,14 @@ fn renderMode(self: Node, mode: Mode, context: Context, content: []const u8, for
 fn stripComments(self: Node, content: []const u8) ![]const u8 {
     const comment_token = "@//";
 
-    var buf = ArrayList(u8).init(self.allocator);
+    var buf: ArrayList(u8) = .empty;
+    defer buf.deinit(self.allocator);
     var it = util.tokenizeRetainToken(content, "\n");
     while (it.next()) |line| {
         if (util.startsWithIgnoringWhitespace(line, comment_token)) continue;
-        try buf.appendSlice(line);
+        try buf.appendSlice(self.allocator, line);
     }
-    return try buf.toOwnedSlice();
+    return buf.toOwnedSlice(self.allocator);
 }
 
 fn renderClose(self: Node, writer: anytype) !void {
@@ -217,11 +227,11 @@ fn hasBlockParent(self: Node) bool {
 }
 
 const HtmlIterator = struct {
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     content: []const u8,
     index: usize = 0,
 
-    pub fn init(allocator: std.mem.Allocator, content: []const u8) HtmlIterator {
+    pub fn init(allocator: Allocator, content: []const u8) HtmlIterator {
         return .{ .allocator = allocator, .content = content };
     }
 
@@ -296,7 +306,7 @@ const HtmlIterator = struct {
 };
 
 fn htmlIterator(self: Node, content: []const u8) HtmlIterator {
-    return HtmlIterator.init(self.allocator, content);
+    return .init(self.allocator, content);
 }
 fn getHtmlLineMode(line: []const u8) enum { html, zig } {
     return if (util.startsWithIgnoringWhitespace(line, Syntax.tag_open))
@@ -307,6 +317,7 @@ fn getHtmlLineMode(line: []const u8) enum { html, zig } {
         .zig;
 }
 
+// returns allocated string
 fn renderMarkdown(self: Node, content: []const u8, formatters: Formatters) ![]const u8 {
     return zmd.parse(self.allocator, content, formatters);
 }
@@ -326,8 +337,10 @@ fn renderHtml(
 ) !void {
     var index: usize = 0;
 
-    var ref_buf = ArrayList(u8).init(self.allocator);
-    var html_buf = ArrayList(u8).init(self.allocator);
+    var ref_buf: ArrayList(u8) = .empty;
+    defer ref_buf.deinit(self.allocator);
+    var html_buf: ArrayList(u8) = .empty;
+    defer html_buf.deinit(self.allocator);
     var ref_open = false;
     var escaped = false;
 
@@ -336,27 +349,27 @@ fn renderHtml(
 
         if (std.mem.startsWith(u8, content[index..], Syntax.ref_open)) {
             try self.renderWrite(html_buf.items, writer_options, writer);
-            html_buf.clearAndFree();
+            html_buf.clearAndFree(self.allocator);
             index += Syntax.ref_open.len - 1;
             ref_open = true;
         } else if (ref_open and std.mem.startsWith(u8, content[index..], Syntax.ref_close)) {
             index += Syntax.ref_close.len - 1;
             ref_open = false;
             try self.renderRef(ref_buf.items, writer_options, writer);
-            ref_buf.clearAndFree();
+            ref_buf.clearAndFree(self.allocator);
         } else if (ref_open) {
-            try ref_buf.append(char);
+            try ref_buf.append(self.allocator, char);
         } else if (char == '\\' and !escaped) {
             escaped = true;
         } else {
             escaped = false;
-            try html_buf.append(char);
+            try html_buf.append(self.allocator, char);
         }
     }
 
     if (html_buf.items.len > 0) {
         if (std.mem.eql(u8, writer_options.zmpl_writer, "zmpl.*.output_writer")) {
-            try html_buf.append('\n');
+            try html_buf.append(self.allocator, '\n');
         }
         try self.renderWrite(html_buf.items, writer_options, writer);
     }
@@ -407,14 +420,14 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
 
     const expected_partial_args = try self.getPartialArgsSignature(prefix, partial_name);
 
-    var reordered_args = ArrayList(Arg).init(self.allocator);
-    defer reordered_args.deinit();
+    var reordered_args: ArrayList(Arg) = .empty;
+    defer reordered_args.deinit(self.allocator);
 
     outer: for (expected_partial_args, 0..) |expected_arg, expected_arg_index| {
         for (partial_args, 0..) |actual_arg, actual_arg_index| {
             if (actual_arg.name == null) {
                 if (actual_arg_index == expected_arg_index) {
-                    try reordered_args.append(actual_arg);
+                    try reordered_args.append(self.allocator, actual_arg);
                     continue :outer;
                 } else continue;
             }
@@ -423,7 +436,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
                 return error.ZmplSyntaxError;
             }
             if (std.mem.eql(u8, actual_arg.name.?, expected_arg.name.?)) {
-                try reordered_args.append(actual_arg);
+                try reordered_args.append(self.allocator, actual_arg);
             }
         }
     }
@@ -431,6 +444,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
     for (expected_partial_args, 0..) |expected_arg, index| {
         if (index + 1 > reordered_args.items.len) {
             if (expected_arg.default) |default| try reordered_args.append(
+                self.allocator,
                 .{ .name = expected_arg.name, .value = default },
             );
         }
@@ -465,8 +479,8 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
 
     const slots = try self.generateSlots(content);
 
-    var args_buf = ArrayList([]const u8).init(self.allocator);
-    defer args_buf.deinit();
+    var args_buf: ArrayList([]const u8) = .empty;
+    defer args_buf.deinit(self.allocator);
 
     for (reordered_args.items, expected_partial_args, 0..) |arg, expected_arg, index| {
         if (std.mem.startsWith(u8, arg.value, ".") or std.mem.startsWith(u8, arg.value, "$.")) {
@@ -477,7 +491,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
             ,
                 .{ expected_arg.value, arg.value[1..] },
             );
-            try args_buf.append(value);
+            try args_buf.append(self.allocator, value);
         } else {
             var it = std.mem.tokenizeScalar(u8, arg.value, '.');
             const maybe_root = it.next();
@@ -485,68 +499,64 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
                 if (isIdentifier(root) and it.rest().len > 0) {
                     const chain = try std.fmt.allocPrint(
                         self.allocator,
-                        \\if (comptime __zmpl.isZmplValue(@TypeOf({0s})))
-                        \\    try {0s}.chainRefT(@typeInfo(@TypeOf({2s}_renderPartial)).@"fn".params[{3}].type.?, "{1s}",)
+                        \\if (comptime __zmpl.isZmplValue(@TypeOf({[root]s})))
+                        \\    try {[root]s}.chainRefT(@typeInfo(@TypeOf({[name]s}_renderPartial)).@"fn".params[{[index]}].type.?, "{[remainder]s}",)
                         \\else
-                        \\    {0s}{4s}{5s}
+                        \\    {[root]s}{[separator]s}{[remainder2]s}
                     ,
                         .{
-                            root,
-                            it.rest(),
-                            generated_partial_name.?,
+                            .root = root,
+                            .remainder = it.rest(),
+                            .name = generated_partial_name.?,
                             // index + 4 to offset `data`, `Context`, `context`, `slots`, and
                             // `blocks` args:
-                            index + 5,
-                            if (it.rest().len == 0) "" else ".",
-                            it.rest(),
+                            .index = index + 5,
+                            .separator = if (it.rest().len == 0) "" else ".",
+                            .remainder2 = it.rest(),
                         },
                     );
-                    try args_buf.append(chain);
+                    try args_buf.append(self.allocator, chain);
                 } else if (isIdentifier(root)) {
                     try args_buf.append(
-                        try std.fmt.allocPrint(
-                            self.allocator,
-                            \\if (comptime __zmpl.isZmplValue(@TypeOf({0s})))
-                            \\    try {0s}.coerce(@typeInfo(@TypeOf({1s}_renderPartial)).@"fn".params[{2}].type.?)
+                        self.allocator,
+                        try std.fmt.allocPrint(self.allocator,
+                            \\if (comptime __zmpl.isZmplValue(@TypeOf({[root]s})))
+                            \\    try {0s}.coerce(@typeInfo(@TypeOf({[name]s}_renderPartial)).@"fn".params[{[index]}].type.?)
                             \\else
-                            \\   {0s}
-                        ,
-                            .{
-                                root,
-                                generated_partial_name.?,
-                                // index + 5 to offset `data`, `Context`, `context`, and `slots` args:
-                                index + 5,
-                            },
-                        ),
+                            \\   {[root]s}
+                        , .{
+                            .root = root,
+                            .name = generated_partial_name.?,
+                            // index + 5 to offset `data`, `Context`, `context`, and `slots` args:
+                            .index = index + 5,
+                        }),
                     );
-                } else try args_buf.append(arg.value);
-            } else {
-                try args_buf.append(arg.value);
-            }
+                } else try args_buf.append(self.allocator, arg.value);
+            } else try args_buf.append(self.allocator, arg.value);
         }
     }
 
     const template =
         \\{{
-        \\{0s}
+        \\{[generators]s}
         \\        const __slots = [_]__zmpl.Data.Slot{{
-        \\{1s}
+        \\{[items]s}
         \\        }};
-        \\        var __partial_data = __zmpl.Data.init(allocator);
+        \\        var __partial_data: __zmpl.Data = .init(allocator);
         \\        __partial_data.template_decls = zmpl.template_decls;
         \\        defer __partial_data.deinit();
         \\
-        \\    const __partial_output = try {2s}_renderPartial(&__partial_data, Context, context, &__slots, &.{{}}, {3s});
+        \\    const __partial_output = try {[name]s}_renderPartial(&__partial_data, Context, context, &__slots, &.{{}}, {[content]s});
         \\    defer allocator.free(__partial_output);
         \\    try zmpl.write(__partial_output);
         \\}}
         \\
     ;
     try writer.print(template, .{
-        slots.content_generators,
-        slots.items,
-        generated_partial_name.?,
-        try std.mem.join(self.allocator, ", ", args_buf.items),
+        .generators = slots.content_generators,
+        .items = slots.items,
+        .name = generated_partial_name.?,
+        .content = try std.mem.join(self.allocator, ", ", args_buf.items),
     });
 }
 
@@ -556,11 +566,11 @@ const Slots = struct {
 };
 
 fn generateSlots(self: Node, content: []const u8) !Slots {
-    var slots_buf = ArrayList(u8).init(self.allocator);
-    defer slots_buf.deinit();
+    var slots_buf: ArrayList(u8) = .empty;
+    defer slots_buf.deinit(self.allocator);
 
-    var slots_content_buf = ArrayList(u8).init(self.allocator);
-    defer slots_content_buf.deinit();
+    var slots_content_buf: ArrayList(u8) = .empty;
+    defer slots_content_buf.deinit(self.allocator);
 
     var slots_it = std.mem.splitScalar(u8, content, '\n');
     while (slots_it.next()) |slot| {
@@ -570,21 +580,26 @@ fn generateSlots(self: Node, content: []const u8) !Slots {
         const slot_writer = try std.fmt.allocPrint(self.allocator, "{s}_writer", .{slot_name});
 
         try slots_content_buf.appendSlice(
+            self.allocator,
             try std.fmt.allocPrint(self.allocator,
-                \\var {0s}_buf: std.io.Writer.Allocating = .init(allocator);
+                \\var {0s}_buf: std.Io.Writer.Allocating = .init(allocator);
+                \\defer {0s}_buf.deinit();
                 \\const {0s}_writer = &{0s}_buf.writer;
                 \\
             , .{
                 slot_name,
             }),
         );
+        var aw: std.Io.Writer.Allocating = .fromArrayList(self.allocator, &slots_content_buf);
+        defer aw.deinit();
         try self.renderHtml(
             util.strip(slot),
             .{ .zmpl_writer = slot_writer },
-            slots_content_buf.writer(),
+            &aw.writer,
         );
+        slots_content_buf = aw.toArrayList();
 
-        try slots_buf.appendSlice(try std.fmt.allocPrint(
+        try slots_buf.appendSlice(self.allocator, try std.fmt.allocPrint(
             self.allocator,
             \\    __zmpl.Data.Slot{{ .data = try {s}_buf.toOwnedSlice() }},
             \\
@@ -594,8 +609,8 @@ fn generateSlots(self: Node, content: []const u8) !Slots {
     }
 
     return Slots{
-        .content_generators = try slots_content_buf.toOwnedSlice(),
-        .items = try slots_buf.toOwnedSlice(),
+        .content_generators = try slots_content_buf.toOwnedSlice(self.allocator),
+        .items = try slots_buf.toOwnedSlice(self.allocator),
     };
 }
 
@@ -667,8 +682,8 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
 
     const block_args = util.strip(rest[block_args_start.? + 1 .. block_args_end.? + 1]);
 
-    var for_args_joined = ArrayList(u8).init(self.allocator);
-    var for_args_writer = for_args_joined.writer();
+    var for_args_joined: std.Io.Writer.Allocating = .init(self.allocator);
+    var for_args_writer = &for_args_joined.writer;
     var for_args_it = std.mem.tokenizeScalar(u8, for_args, ',');
     while (for_args_it.next()) |arg| {
         if (std.mem.startsWith(u8, arg, ".") or std.mem.startsWith(u8, arg, "$.")) {
@@ -707,8 +722,9 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
 }
 
 fn parseZmpl(self: Node, content: []const u8) ![]const u8 {
-    var buf = ArrayList(u8).init(self.allocator);
-    const writer = buf.writer();
+    var buf: std.Io.Writer.Allocating = .init(self.allocator);
+    defer buf.deinit();
+    const writer = &buf.writer;
     var single_quoted = false;
     var double_quoted = false;
     var zmpl = false;
@@ -756,16 +772,10 @@ fn parseZmpl(self: Node, content: []const u8) ![]const u8 {
             },
         }
     }
-    return try buf.toOwnedSlice();
+    return buf.toOwnedSlice();
 }
 
-fn renderIf(
-    self: Node,
-    context: Context,
-    content: []const u8,
-    writer: anytype,
-    formatters: Formatters,
-) !void {
+fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype, formatters: Formatters) !void {
     if (context == .initial) {
         // When we render nodes, we render child nodes that exist within their bounds as we work
         // through each node. We only want to render the initial `if` statement defined by this
@@ -854,7 +864,8 @@ fn ifStatement(self: Node, input: []const u8) !IfStatement {
     if (ast.errors.len > 0) {
         for (ast.errors) |err| {
             var buf: [1024]u8 = undefined;
-            var writer: std.io.Writer = .fixed(&buf);
+            var writer: std.Io.Writer = .fixed(&buf);
+            // var stream = std.Io.fixedBufferStream(&buf);
             try ast.renderError(err, &writer);
             std.log.err("Error parsing `@if` conditions: {s}", .{writer.buffered()});
         }
@@ -866,12 +877,7 @@ fn ifStatement(self: Node, input: []const u8) !IfStatement {
 
 // Write a `@block` definition - note that we write to a different output buffer here - each
 // block is compiled into a separate function which is written after the main manifest body.
-fn writeBlock(
-    self: Node,
-    context: Context,
-    content: []const u8,
-    formatters: Formatters,
-) !void {
+fn writeBlock(self: Node, context: Context, content: []const u8, formatters: Formatters) !void {
     if (context == .initial) {
         const args = self.token.args orelse {
             std.log.err("Missing argument to `@block` mode: `{s}`", .{self.token.mode_line});
@@ -894,9 +900,9 @@ fn writeBlock(
             \\
         , .{function_name});
 
-        const result = try self.block_map.getOrPut(block_name);
-        if (!result.found_existing) result.value_ptr.* = ArrayList(Block).init(self.allocator);
-        try result.value_ptr.append(.{ .func = function_name, .name = block_name });
+        const result = try self.block_map.getOrPut(self.allocator, block_name);
+        if (!result.found_existing) result.value_ptr.* = .empty;
+        try result.value_ptr.append(self.allocator, .{ .func = function_name, .name = block_name });
     }
 
     const writer = self.block_writer;
@@ -946,19 +952,20 @@ const Arg = struct {
 };
 
 pub fn parsePartialArgs(self: Node, input: []const u8) ![]Arg {
-    var args = ArrayList(Arg).init(self.allocator);
+    var args: ArrayList(Arg) = .empty;
+    defer args.deinit(self.allocator);
 
     const first_token = std.mem.indexOfScalar(u8, input, '(');
     const last_token = std.mem.lastIndexOfScalar(u8, input, ')');
-    if (first_token == null or last_token == null) return try args.toOwnedSlice();
-    if (first_token.? + 1 >= last_token.?) return try args.toOwnedSlice();
+    if (first_token == null or last_token == null) return args.toOwnedSlice(self.allocator);
+    if (first_token.? + 1 >= last_token.?) return args.toOwnedSlice(self.allocator);
 
-    var chunks = ArrayList([]const u8).init(self.allocator);
-    defer chunks.deinit();
+    var chunks: ArrayList([]const u8) = .empty;
+    defer chunks.deinit(self.allocator);
     defer for (chunks.items) |chunk| self.allocator.free(chunk);
 
-    var chunk_buf = ArrayList(u8).init(self.allocator);
-    defer chunk_buf.deinit();
+    var chunk_buf: ArrayList(u8) = .empty;
+    defer chunk_buf.deinit(self.allocator);
 
     var quote_open = false;
     var escape = false;
@@ -967,25 +974,25 @@ pub fn parsePartialArgs(self: Node, input: []const u8) ![]Arg {
         if (char == '\\' and !escape) {
             escape = true;
         } else if (escape) {
-            try chunk_buf.append('\\');
-            try chunk_buf.append(char);
+            try chunk_buf.append(self.allocator, '\\');
+            try chunk_buf.append(self.allocator, char);
             escape = false;
         } else if (char == '"' and !quote_open) {
             quote_open = true;
-            try chunk_buf.append(char);
+            try chunk_buf.append(self.allocator, char);
         } else if (char == '"' and quote_open) {
             quote_open = false;
-            try chunk_buf.append(char);
+            try chunk_buf.append(self.allocator, char);
         } else if (char == ',' and !quote_open) {
-            try chunks.append(try self.allocator.dupe(u8, util.strip(chunk_buf.items)));
-            chunk_buf.clearAndFree();
+            try chunks.append(self.allocator, try self.allocator.dupe(u8, util.strip(chunk_buf.items)));
+            chunk_buf.clearAndFree(self.allocator);
         } else {
-            try chunk_buf.append(char);
+            try chunk_buf.append(self.allocator, char);
         }
     }
 
     if (util.strip(chunk_buf.items).len > 0) {
-        try chunks.append(try self.allocator.dupe(u8, util.strip(chunk_buf.items)));
+        try chunks.append(self.allocator, try self.allocator.dupe(u8, util.strip(chunk_buf.items)));
     }
 
     for (chunks.items) |chunk| {
@@ -1015,14 +1022,14 @@ pub fn parsePartialArgs(self: Node, input: []const u8) ![]Arg {
             value = util.strip(chunk);
         }
 
-        try args.append(.{
+        try args.append(self.allocator, .{
             .name = if (name) |capture| try self.allocator.dupe(u8, capture) else null,
             .value = try self.allocator.dupe(u8, value),
             .default = if (default) |capture| try self.allocator.dupe(u8, capture) else null,
         });
     }
 
-    return args.toOwnedSlice();
+    return args.toOwnedSlice(self.allocator);
 }
 
 fn renderWrite(
