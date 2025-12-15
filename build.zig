@@ -293,22 +293,22 @@ pub fn templatesPaths(allocator: Allocator, paths: []const TemplatesPath) ![]con
     return buf.toOwnedSlice(allocator);
 }
 
-// pub fn addTemplateConstants(b: *Build, comptime constants: type) ![]const u8 {
-//     const fields = switch (@typeInfo(constants)) {
-//         .@"struct" => |info| info.fields,
-//         else => @panic("Expected struct, found: " ++ @typeName(constants)),
-//     };
-//     var array: [fields.len][]const u8 = undefined;
-//
-//     inline for (fields, 0..) |field, index| {
-//         array[index] = std.fmt.comptimePrint(
-//             "{s}#{s}",
-//             .{ field.name, @typeName(field.type) },
-//         );
-//     }
-//
-//     return std.mem.join(b.allocator, "|", &array);
-// }
+pub fn addTemplateConstants(b: *Build, comptime constants: type) ![]const u8 {
+    const fields = switch (@typeInfo(constants)) {
+        .@"struct" => |info| info.fields,
+        else => @panic("Expected struct, found: " ++ @typeName(constants)),
+    };
+    var array: [fields.len][]const u8 = undefined;
+
+    inline for (fields, 0..) |field, index| {
+        array[index] = std.fmt.comptimePrint(
+            "{s}#{s}",
+            .{ field.name, @typeName(field.type) },
+        );
+    }
+
+    return std.mem.join(b.allocator, "|", &array);
+}
 
 fn findTemplates(b: *Build, templates_paths: []const []const u8) ![][]const u8 {
     var templates: ArrayList([]const u8) = .empty;
