@@ -12,7 +12,6 @@ const builtin = @import("builtin");
 const util = @import("util.zig");
 const Node = @import("Node.zig");
 const Template = @import("Template.zig");
-const Options = @import("Options.zig");
 
 template_paths: []const TemplatePath,
 templates_paths: []const TemplatePath,

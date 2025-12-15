@@ -54,7 +54,7 @@ const StackFallbackAllocator = std.heap.StackFallbackAllocator(buffer_size);
 /// generate these values.
 ///
 /// ```
-/// var data = Data.init(allocator);
+/// var data: Data = .init(allocator);
 /// var root = try data.object(); // First call to `object()` or `array()` sets root value type.
 /// try root.put("foo", data.string("a string"));
 /// try root.put("bar", data.float(123.45));
@@ -137,11 +137,9 @@ const MarkdownNode = struct {
 
 /// Evaluate equality of two Data trees, recursively comparing all values.
 pub fn eql(self: *const Data, other: *const Data) bool {
-    if (self.value != null and other.value != null) {
+    if (self.value != null and other.value != null)
         return self.value.?.eql(other.value.?);
-    } else if (self.value == null and other.value == null) {
-        return true;
-    } else return false;
+    return self.value == null and other.value == null;
 }
 
 /// Takes a string such as `foo.bar.baz` and translates into a path into the data tree to return
@@ -159,48 +157,44 @@ pub fn ref(self: Data, key: []const u8) ?*Value {
         ".",
     );
 
-    if (self.value) |val| {
-        var tokens = std.mem.splitScalar(u8, trimmed_key, '.');
-        var current_value = val;
+    const val = self.value orelse return null;
+    var tokens = std.mem.splitScalar(u8, trimmed_key, '.');
+    var current_value = val;
 
-        while (tokens.next()) |token| {
-            switch (current_value.*) {
-                .object => |*capture| {
-                    var capt = capture.*;
-                    current_value = capt.get(token) orelse return null;
-                },
-                .array => |*capture| {
-                    var capt = capture.*;
-                    const index = std.fmt.parseInt(usize, token, 10) catch |err| {
-                        switch (err) {
-                            error.InvalidCharacter => return null,
-                            else => return null,
-                        }
-                    };
-                    current_value = capt.get(index) orelse return null;
-                },
-                else => |*capture| {
-                    return capture;
-                },
-            }
+    while (tokens.next()) |token| {
+        switch (current_value.*) {
+            .object => |*capture| {
+                var capt = capture.*;
+                current_value = capt.get(token) orelse return null;
+            },
+            .array => |*capture| {
+                var capt = capture.*;
+                const index = std.fmt.parseInt(usize, token, 10) catch |err| {
+                    switch (err) {
+                        error.InvalidCharacter => return null,
+                        else => return null,
+                    }
+                };
+                current_value = capt.get(index) orelse return null;
+            },
+            else => |*capture| {
+                return capture;
+            },
         }
-        return current_value;
-    } else return null;
+    }
+    return current_value;
 }
 
 /// Converts any `Value` in a root `Object` to a string. Returns an empty string if no match or
 /// no compatible data type.
 pub fn getValueString(self: *Data, key: []const u8) ![]const u8 {
-    if (self.ref(key)) |val| {
-        switch (val.*) {
-            .object, .array => return "", // No sense in trying to convert an object/array to a string
-            else => |*capture| {
-                var v = capture.*;
-                return try v.toString();
-            },
-        }
-    } else {
-        return unknownRef(key);
+    const val = self.ref(key) orelse return unknownRef(key);
+    switch (val.*) {
+        .object, .array => return "", // No sense in trying to convert an object/array to a string
+        else => |*capture| {
+            var v = capture.*;
+            return v.toString();
+        },
     }
 }
 
@@ -211,7 +205,10 @@ const Item = struct {
 
 const IteratorSelector = enum { array, object };
 
-pub fn items(self: *Data, comptime selector: IteratorSelector) []switch (selector) {
+pub fn items(
+    self: *Data,
+    comptime selector: IteratorSelector,
+) []switch (selector) {
     .array => *Value,
     .object => Item,
 } {
@@ -347,7 +344,7 @@ pub fn coerceString(self: *Data, value: anytype) ![]const u8 {
         .float => try std.fmt.allocPrint(arena, "{d}", .{value}),
         .zmpl => try value.toString(),
         .zmpl_union => switch (value) {
-            inline else => |capture| try capture.toString(),
+            inline else => |capture| capture.toString(),
         },
         .none => "",
     };
@@ -369,7 +366,7 @@ pub fn maybeRef(self: *Data, value: anytype, key: []const u8) ![]const u8 {
     _ = self;
     return switch (resolveValue(value)) {
         .object => |*ptr| if (ptr.chainRef(key)) |capture|
-            try capture.toString()
+            capture.toString()
         else
             unknownRef(key),
         else => |tag| zmplError(
@@ -492,7 +489,6 @@ pub fn getCoerce(self: Data, T: type, name: []const u8) !T {
 /// Same as `chain` but expects a string of `.foo.bar.baz` references.
 pub fn chainRef(self: *Data, ref_key: []const u8) ?*Value {
     const value = self.value orelse return null;
-
     return switch (value.*) {
         .object => |*capture| capture.chainRef(ref_key),
         else => null,
@@ -502,12 +498,12 @@ pub fn chainRef(self: *Data, ref_key: []const u8) ?*Value {
 /// Same as `chainRef` but coerces a Value to the given type.
 pub fn chainRefT(self: *Data, T: type, ref_key: []const u8) !T {
     const value = self.value orelse return unknownRef(ref_key);
-
     return switch (value.*) {
-        .object => |*capture| if (capture.chainRef(ref_key)) |val|
-            try val.coerce(T)
-        else
-            unknownRef(ref_key),
+        .object => |*capture| blk: {
+            const val = capture.chainRef(ref_key) orelse
+                return unknownRef(ref_key);
+            break :blk val.coerce(T);
+        },
         else => null,
     };
 }
@@ -548,7 +544,7 @@ pub fn root(self: *Data, root_type: enum { object, array }) !*Value {
 /// Creates a new `Object`. The first call to `array()` or `object()` sets the root value.
 /// Subsequent calls create a new `Object` without setting the root value. e.g.:
 ///
-/// var data = Data.init(allocator);
+/// var data: Data = .init(allocator);
 /// var object = try data.object(); // <-- the root value is now an object.
 /// try nested_object = try data.object(); // <-- creates a new, detached object.
 /// try object.put("nested", nested_object); // <-- adds a nested object to the root object.
@@ -569,7 +565,7 @@ pub fn createObject(alloc: Allocator) !*Value {
 /// Creates a new `Array`. The first call to `array()` or `object()` sets the root value.
 /// Subsequent calls create a new `Array` without setting the root value. e.g.:
 ///
-/// var data = Data.init(allocator);
+/// var data: Data = .init(allocator);
 /// var array = try data.array(); // <-- the root value is now an array.
 /// try nested_array = try data.array(); // <-- creates a new, detached array.
 /// try array.append(nested_array); // <-- adds a nested array to the root array.
@@ -640,7 +636,7 @@ pub fn _null(arena: Allocator) *Value {
 /// present. Used by compiled Zmpl templates.
 pub fn write(self: *Data, maybe_err_slice: anytype) !void {
     const slice = try self.resolveSlice(maybe_err_slice);
-    try (self.output_writer).writeAll(slice);
+    try self.output_buf.writer.writeAll(slice);
 }
 
 /// Get a value from the data tree using an exact key. Returns `null` if key not found or if

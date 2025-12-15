@@ -40,7 +40,7 @@ pub fn sanitize(writer: anytype, input: []const u8) !void {
         return;
     }
 
-    const fmt = Format{ .writer = if (@TypeOf(writer) == *Data) writer.output_writer else writer };
+    const fmt = Format{ .writer = if (@TypeOf(writer) == *Data) &writer.output_buf.writer else writer };
     _ = try fmt.sanitize(input);
 }
 

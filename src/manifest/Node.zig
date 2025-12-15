@@ -872,7 +872,7 @@ fn ifStatement(self: Node, input: []const u8) !IfStatement {
         return error.ZmplSyntaxError;
     }
 
-    return IfStatement.init(ast);
+    return .init(ast);
 }
 
 // Write a `@block` definition - note that we write to a different output buffer here - each

@@ -6,7 +6,6 @@ const Writer = std.Io.Writer;
 const builtin = @import("builtin");
 const Encoder = std.base64.standard.Encoder;
 const Data = @import("src/zmpl.zig").Data;
-
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
