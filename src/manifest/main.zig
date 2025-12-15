@@ -1,4 +1,8 @@
 const std = @import("std");
+const ArrayList = std.ArrayList;
+const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
+const assert = std.debug.assert;
 
 const Manifest = @import("Manifest.zig");
 const Template = @import("Template.zig");
@@ -25,12 +29,12 @@ pub fn main() !void {
         }
     }
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer std.debug.assert(gpa.deinit() == .ok);
+    var gpa: GeneralPurposeAllocator(.{}) = .init;
+    defer assert(gpa.deinit() == .ok);
 
     const gpa_allocator = gpa.allocator();
 
-    var arena = std.heap.ArenaAllocator.init(gpa_allocator);
+    var arena: ArenaAllocator = .init(gpa_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
@@ -38,7 +42,8 @@ pub fn main() !void {
 
     const manifest_path = args[1];
 
-    var templates_paths = std.ArrayList(Manifest.TemplatePath).init(allocator);
+    var templates_paths: ArrayList(Manifest.TemplatePath) = .empty;
+    defer templates_paths.deinit(allocator);
 
     var it = std.mem.tokenizeSequence(u8, args[2], ";");
     while (it.next()) |syntax| {
@@ -48,33 +53,40 @@ pub fn main() !void {
         const prefix = syntax[prefix_start..prefix_end];
         const path = syntax[path_start..];
         const present = !std.mem.eql(u8, path, "_");
-        try templates_paths.append(.{
+        try templates_paths.append(allocator, .{
             .prefix = prefix,
             .path = if (present) try std.fs.realpathAlloc(allocator, path) else "_",
             .present = present,
         });
     }
 
-    const template_paths = args[3..];
+    var template_paths_buf: ArrayList(Manifest.TemplatePath) = .empty;
+    defer template_paths_buf.deinit(allocator);
 
-    var template_paths_buf = std.ArrayList(Manifest.TemplatePath).init(allocator);
-    for (template_paths) |path| {
-        const templates_path = for (templates_paths.items) |templates_path| {
-            if (std.mem.startsWith(u8, path, templates_path.path)) break templates_path;
-        } else unreachable;
-        try template_paths_buf.append(.{
-            .path = path,
-            .prefix = templates_path.prefix,
-            .present = templates_path.present,
-        });
+    // for each template path
+    path_loop: for (args[3..]) |path| {
+        for (templates_paths.items) |template_path| {
+            if (!std.mem.startsWith(u8, path, template_path.path)) continue;
+            try template_paths_buf.append(allocator, .{
+                .path = path,
+                .prefix = template_path.prefix,
+                .present = template_path.present,
+            });
+            continue :path_loop;
+        }
+        @panic("template not found");
     }
 
-    var manifest = Manifest.init(allocator, templates_paths.items, template_paths_buf.items);
-
-    const content = try manifest.compile(Template, zmpl_options);
+    var manifest: Manifest = .init(templates_paths.items, template_paths_buf.items);
 
     const file = try std.fs.cwd().createFile(manifest_path, .{ .truncate = true });
-    try file.writeAll(content);
+    var buffer: [1024]u8 = undefined;
+    var writer = file.writerStreaming(&buffer);
+    try manifest.compile(
+        allocator,
+        &writer.interface,
+        zmpl_options,
+    );
     file.close();
 }
 

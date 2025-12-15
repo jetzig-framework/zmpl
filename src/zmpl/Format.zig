@@ -1,10 +1,13 @@
 const std = @import("std");
+const Stringify = std.json.Stringify;
+const Writer = std.Io.Writer;
 
 const jetcommon = @import("jetcommon");
+const DateTime = jetcommon.DateTime;
 
 const zmpl = @import("../zmpl.zig");
 
-writer: zmpl.Data.Writer,
+writer: *Writer,
 
 const Format = @This();
 
@@ -29,7 +32,7 @@ pub fn datetime(self: Format, value: anytype, comptime fmt: []const u8) ![]const
 
     const parsed_datetime = switch (Type) {
         zmpl.Data.Value => switch (resolved_value) {
-            .string => |val| try jetcommon.types.DateTime.parse(val.value),
+            .string => |val| try DateTime.parse(val.value),
             .datetime => |val| val.value,
             inline else => return zmpl.Data.zmplError(
                 .type,
@@ -73,6 +76,6 @@ fn resolveString(value: anytype) ![]const u8 {
 }
 
 pub fn json(self: Format, value: anytype) ![]const u8 {
-    try std.json.stringify(value, .{}, self.writer);
+    try Stringify.value(value, .{}, self.writer);
     return "";
 }

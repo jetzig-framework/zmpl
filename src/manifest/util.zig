@@ -1,4 +1,7 @@
 const std = @import("std");
+const ArrayList = std.ArrayList;
+const Allocator = std.mem.Allocator;
+const Writer = std.Io.Writer;
 
 /// The first non-whitespace character of a given input (line).
 pub fn firstMeaningfulChar(input: []const u8) ?u8 {
@@ -128,16 +131,22 @@ pub fn generateVariableName(buf: *[32]u8) void {
 }
 
 /// Same as `generateVariableName` but allocates memory.
-pub fn generateVariableNameAlloc(allocator: std.mem.Allocator) ![]const u8 {
+pub fn generateVariableNameAlloc(allocator: Allocator) ![]const u8 {
     const buf = try allocator.create([32]u8);
     generateVariableName(buf);
     return buf;
 }
 
-// Normalize input by swapping DOS linebreaks for Unix linebreaks and ensuring that the input is
-// closed by a `\n`.
-pub fn normalizeInput(allocator: std.mem.Allocator, input: []const u8) []const u8 {
-    const normalized = std.mem.replaceOwned(u8, allocator, input, "\r\n", "\n") catch @panic("OOM");
+// Normalize input by swapping DOS linebreaks for Unix linebreaks and ensuring
+// that the input is closed by a `\n`.
+pub fn normalizeInput(allocator: Allocator, input: []const u8) []const u8 {
+    const normalized = std.mem.replaceOwned(
+        u8,
+        allocator,
+        input,
+        "\r\n",
+        "\n",
+    ) catch @panic("OOM");
     if (std.mem.endsWith(u8, normalized, "\n")) return normalized;
 
     defer allocator.free(normalized);
@@ -168,7 +177,7 @@ pub fn chomp(input: []const u8) []const u8 {
 
 /// Normalize a template path for storing in a template lookup map.
 /// Strips root template path, forces posix-style path separators, and strips extension.
-pub fn templatePathStore(allocator: std.mem.Allocator, root: []const u8, path: []const u8) ![]const u8 {
+pub fn templatePathStore(allocator: Allocator, root: []const u8, path: []const u8) ![]const u8 {
     const relative = try std.fs.path.relative(allocator, root, path);
     defer allocator.free(relative);
 
@@ -185,7 +194,7 @@ pub fn templatePathStore(allocator: std.mem.Allocator, root: []const u8, path: [
 
 /// Normalize a template path for fetching from a lookup map.
 /// Assumes posix-style path separators, prefixes basename with `_` for partials.
-pub fn templatePathFetch(allocator: std.mem.Allocator, path: []const u8, partial: bool) ![]u8 {
+pub fn templatePathFetch(allocator: Allocator, path: []const u8, partial: bool) ![]u8 {
     const dirname = std.fs.path.dirnamePosix(path);
     const basename = std.fs.path.basenamePosix(path);
     const prefixed = if (partial)
@@ -200,17 +209,17 @@ pub fn templatePathFetch(allocator: std.mem.Allocator, path: []const u8, partial
     return try std.mem.concat(allocator, u8, &[_][]const u8{ dirname.?, "/", prefixed });
 }
 
-pub fn normalizePathPosix(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
-    var buf = std.ArrayList([]const u8).init(allocator);
-    defer buf.deinit();
+pub fn normalizePathPosix(allocator: Allocator, path: []const u8) ![]const u8 {
+    var buf: ArrayList([]const u8) = .empty;
+    defer buf.deinit(allocator);
     var it = std.mem.tokenizeSequence(u8, path, std.fs.path.sep_str);
-    while (it.next()) |segment| try buf.append(segment);
+    while (it.next()) |segment| try buf.append(allocator, segment);
 
-    return try std.mem.join(allocator, "/", buf.items);
+    return std.mem.join(allocator, "/", buf.items);
 }
 
 /// Try to read a file and return content, output a helpful error on failure.
-pub fn readFile(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8) ![]const u8 {
+pub fn readFile(allocator: Allocator, dir: std.fs.Dir, path: []const u8) ![]const u8 {
     const stat = dir.statFile(path) catch |err| {
         switch (err) {
             error.FileNotFound => {
@@ -225,15 +234,13 @@ pub fn readFile(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
 }
 
 /// Output an escaped string suitable for use in generated Zig code.
-pub fn zigStringEscape(allocator: std.mem.Allocator, input: ?[]const u8) ![]const u8 {
-    if (input) |string| {
-        var buf = std.ArrayList(u8).init(allocator);
-        const writer = buf.writer();
-        try writer.writeByte('"');
-        try std.zig.stringEscape(string, "", .{}, writer);
-        try writer.writeByte('"');
-        return try buf.toOwnedSlice();
-    } else {
-        return try allocator.dupe(u8, "null");
-    }
+pub fn zigStringEscape(allocator: Allocator, input: ?[]const u8) ![]const u8 {
+    const string = input orelse return allocator.dupe(u8, "null");
+    var buf: Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+    const writer = &buf.writer;
+    try writer.writeByte('"');
+    try std.zig.stringEscape(string, writer);
+    try writer.writeByte('"');
+    return buf.toOwnedSlice();
 }
