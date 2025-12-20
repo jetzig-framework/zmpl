@@ -1,6 +1,8 @@
 const std = @import("std");
 const ArenaAllocator = std.heap.ArenaAllocator;
 const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
+const Writer = std.Io.Writer;
+const Allocator = std.mem.Allocator;
 
 const zmpl = @import("zmpl");
 
@@ -10,20 +12,23 @@ pub fn main() !void {
     var arena: ArenaAllocator = .init(allocator);
 
     var data = zmpl.Data.init(arena.allocator());
+    // https://github.com/json-iterator/test-data/blob/master/large-file.json
     const stat = try std.fs.cwd().statFile("large-file.json");
     const json = try std.fs.cwd().readFileAlloc(allocator, "large-file.json", stat.size);
 
     // Time to beat: Duration: 1.28s
-    try benchmark(zmpl.Data.fromJson, .{ &data, json });
+    try benchmark(allocator, zmpl.Data.fromJson, .{ &data, json });
 
     // Time to beat: Duration: 946.734ms
-    _ = try benchmark(zmpl.Data.toJson, .{&data});
+    _ = try benchmark(allocator, zmpl.Data.toJson, .{&data});
 }
 
-fn benchmark(func: anytype, args: anytype) @typeInfo(@TypeOf(func)).@"fn".return_type.? {
-    const start = std.time.nanoTimestamp();
-    const result = try @call(.auto, func, args);
-    const end = std.time.nanoTimestamp();
-    std.debug.print("Duration: {}\n", .{std.fmt.fmtDuration(@intCast(end - start))});
-    return result;
+fn benchmark(allocator: Allocator, func: anytype, args: anytype) !void {
+    const start = std.time.microTimestamp();
+    _ = try @call(.auto, func, args);
+    const end = std.time.microTimestamp();
+    var buf: Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+    try buf.writer.printDuration((end - start) * 1000, .{});
+    std.debug.print("Duration: {s}\n", .{try buf.toOwnedSlice()});
 }
