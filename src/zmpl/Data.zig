@@ -1640,8 +1640,9 @@ pub const Object = struct {
     pub fn deinit(self: *Object) void {
         var it = self.hashmap.iterator();
         while (it.next()) |entry| {
-            self.allocator.destroy(entry.key_ptr);
-            self.allocator.destroy(entry.value_ptr);
+            entry.value_ptr.*.deinit();
+            self.allocator.destroy(entry.value_ptr.*);
+            self.allocator.free(entry.key_ptr.*);
         }
         self.hashmap.clearAndFree();
     }
@@ -1897,11 +1898,13 @@ pub const Object = struct {
     /// Return `true` if value was removed and `false` otherwise.
     pub fn remove(self: *Object, key: []const u8) bool {
         if (self.hashmap.getEntry(key)) |entry| {
-            self.allocator.destroy(entry.value_ptr);
-            self.allocator.destroy(entry.key_ptr);
-        } else return false;
-
-        return self.hashmap.swapRemove(key);
+            entry.value_ptr.*.deinit();
+            self.allocator.destroy(entry.value_ptr.*);
+            self.allocator.free(entry.key_ptr.*);
+            _ = self.hashmap.swapRemove(key);
+            return true;
+        }
+        return false;
     }
 };
 
