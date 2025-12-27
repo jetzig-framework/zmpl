@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.15.1",
     .dependencies = .{
         .jetcommon = .{
-            .url = "https://github.com/jetzig-framework/jetcommon/archive/ed326c74b98fae893acd89d2e84c0d894a200df3.tar.gz",
-            .hash = "jetcommon-0.1.0-jPY_DbNIAAA0utNExN3zMeqXA4fhZXQ6LDDP1eg8vodj",
+            .url = "https://github.com/jetzig-framework/jetcommon/archive/6916e0e955da5016c64eab83c3cd80461db964bf.tar.gz",
+            .hash = "jetcommon-0.1.0-jPY_DWpFAACYWOJ1k9T-KcwU38iLqYIlqGuZh0aDSzIc",
         },
         .zmd = .{
             .url = "https://github.com/jetzig-framework/zmd/archive/87b1c46b517f47b3384eba7ce98d197c463a9d5e.tar.gz",
@@ -24,4 +24,3 @@
         "README.md",
     },
 }
-
