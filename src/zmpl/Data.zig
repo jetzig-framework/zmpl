@@ -1915,7 +1915,7 @@ pub const Array = struct {
     }
 
     pub fn deinit(self: *Array) void {
-        self.array.clearAndFree();
+        self.array.clearAndFree(self.allocator);
     }
 
     // Compares equality of all items in an array. Order must be identical.
