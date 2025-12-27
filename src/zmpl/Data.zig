@@ -2,6 +2,7 @@
 const Data = @This();
 
 const std = @import("std");
+const testing = std.testing;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
@@ -75,7 +76,9 @@ const StackFallbackAllocator = std.heap.StackFallbackAllocator(buffer_size);
 /// `data.value` is a `Data.Value` generic which can be used with `switch` to walk through the
 /// data tree (for Zmpl templates, use the `{.nested_object.key}` syntax to do this
 /// automatically.
+arena: *ArenaAllocator,
 allocator: Allocator,
+parent_allocator: Allocator,
 output_buf: *Writer.Allocating,
 output_writer: *Writer,
 value: ?*Value = null,
@@ -87,24 +90,38 @@ slots: ?[]const String = null,
 fmt: zmpl.Format,
 
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
-pub fn init(arena: Allocator) Data {
-    const output_buf = arena.create(Writer.Allocating) catch unreachable;
-    output_buf.* = .init(arena);
+pub fn init(gpa: Allocator) Data {
+    const arena = gpa.create(ArenaAllocator) catch unreachable;
+    arena.* = .init(gpa);
 
-    return .{
-        .allocator = arena,
-        .output_buf = output_buf,
-        .output_writer = &output_buf.writer,
-        .template_decls = .init(arena),
-        .fmt = .{ .writer = &output_buf.writer },
-    };
+    const arena_allocator = arena.allocator();
+
+    var output_buf = arena_allocator.create(Writer.Allocating) catch unreachable;
+    output_buf.* = .init(arena_allocator);
+    _ = &output_buf;
+
+    var data: Data = undefined;
+    data.parent_allocator = gpa;
+    data.arena = arena;
+    data.allocator = arena_allocator;
+    data.output_buf = output_buf;
+    data.output_writer = &data.output_buf.writer;
+    data.value = null;
+    data.partial = false;
+    data.content = .{ .data = "" };
+    data.partial_data = null;
+    data.template_decls = .init(data.allocator);
+    data.slots = null;
+    data.fmt = .{ .writer = &data.output_buf.writer };
+    return data;
 }
 
 /// Frees all resources used by this `Data` instance.
 pub fn deinit(self: *Data) void {
     self.output_buf.clearRetainingCapacity();
     self.output_buf.deinit();
-    self.allocator.destroy(self.output_buf);
+    self.arena.deinit();
+    self.parent_allocator.destroy(self.arena);
 }
 
 /// Chomps output buffer.
@@ -1641,8 +1658,6 @@ pub const Object = struct {
         var it = self.hashmap.iterator();
         while (it.next()) |entry| {
             entry.value_ptr.*.deinit();
-            self.allocator.destroy(entry.value_ptr.*);
-            self.allocator.free(entry.key_ptr.*);
         }
         self.hashmap.clearAndFree();
     }
@@ -1899,8 +1914,6 @@ pub const Object = struct {
     pub fn remove(self: *Object, key: []const u8) bool {
         if (self.hashmap.getEntry(key)) |entry| {
             entry.value_ptr.*.deinit();
-            self.allocator.destroy(entry.value_ptr.*);
-            self.allocator.free(entry.key_ptr.*);
             _ = self.hashmap.swapRemove(key);
             return true;
         }
@@ -2296,56 +2309,56 @@ test "Value.compare integer" {
     const a = Value{ .integer = .{ .allocator = undefined, .value = 1 } };
     const b = Value{ .integer = .{ .allocator = undefined, .value = 2 } };
     const c = Value{ .integer = .{ .allocator = undefined, .value = 2 } };
-    try std.testing.expect(!try a.compare(.equal, b));
-    try std.testing.expect(try b.compare(.equal, c));
-    try std.testing.expect(try a.compare(.less_than, b));
-    try std.testing.expect(try a.compare(.less_or_equal, b));
-    try std.testing.expect(try b.compare(.less_or_equal, c));
-    try std.testing.expect(try c.compare(.greater_than, a));
-    try std.testing.expect(try c.compare(.greater_or_equal, a));
-    try std.testing.expect(try c.compare(.greater_or_equal, b));
+    try testing.expect(!try a.compare(.equal, b));
+    try testing.expect(try b.compare(.equal, c));
+    try testing.expect(try a.compare(.less_than, b));
+    try testing.expect(try a.compare(.less_or_equal, b));
+    try testing.expect(try b.compare(.less_or_equal, c));
+    try testing.expect(try c.compare(.greater_than, a));
+    try testing.expect(try c.compare(.greater_or_equal, a));
+    try testing.expect(try c.compare(.greater_or_equal, b));
 }
 
 test "Value.compare float" {
     const a = Value{ .float = .{ .allocator = undefined, .value = 1.0 } };
     const b = Value{ .float = .{ .allocator = undefined, .value = 1.2 } };
     const c = Value{ .float = .{ .allocator = undefined, .value = 1.2 } };
-    try std.testing.expect(!try a.compare(.equal, b));
-    try std.testing.expect(try b.compare(.equal, c));
-    try std.testing.expect(try a.compare(.less_than, b));
-    try std.testing.expect(try a.compare(.less_or_equal, b));
-    try std.testing.expect(try b.compare(.less_or_equal, c));
-    try std.testing.expect(try c.compare(.greater_than, a));
-    try std.testing.expect(try c.compare(.greater_or_equal, a));
-    try std.testing.expect(try c.compare(.greater_or_equal, b));
+    try testing.expect(!try a.compare(.equal, b));
+    try testing.expect(try b.compare(.equal, c));
+    try testing.expect(try a.compare(.less_than, b));
+    try testing.expect(try a.compare(.less_or_equal, b));
+    try testing.expect(try b.compare(.less_or_equal, c));
+    try testing.expect(try c.compare(.greater_than, a));
+    try testing.expect(try c.compare(.greater_or_equal, a));
+    try testing.expect(try c.compare(.greater_or_equal, b));
 }
 
 test "Value.compare boolean" {
     const a = Value{ .boolean = .{ .allocator = undefined, .value = false } };
     const b = Value{ .boolean = .{ .allocator = undefined, .value = true } };
     const c = Value{ .boolean = .{ .allocator = undefined, .value = true } };
-    try std.testing.expect(!try a.compare(.equal, b));
-    try std.testing.expect(try b.compare(.equal, c));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
-    try std.testing.expectError(error.ZmplCompareError, b.compare(.less_or_equal, c));
-    try std.testing.expectError(error.ZmplCompareError, c.compare(.greater_than, a));
-    try std.testing.expectError(error.ZmplCompareError, c.compare(.greater_or_equal, a));
-    try std.testing.expectError(error.ZmplCompareError, c.compare(.greater_or_equal, b));
+    try testing.expect(!try a.compare(.equal, b));
+    try testing.expect(try b.compare(.equal, c));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, b.compare(.less_or_equal, c));
+    try testing.expectError(error.ZmplCompareError, c.compare(.greater_than, a));
+    try testing.expectError(error.ZmplCompareError, c.compare(.greater_or_equal, a));
+    try testing.expectError(error.ZmplCompareError, c.compare(.greater_or_equal, b));
 }
 
 test "Value.compare string" {
     const a = Value{ .string = .{ .allocator = undefined, .value = "foo" } };
     const b = Value{ .string = .{ .allocator = undefined, .value = "bar" } };
     const c = Value{ .string = .{ .allocator = undefined, .value = "bar" } };
-    try std.testing.expect(!try a.compare(.equal, b));
-    try std.testing.expect(try b.compare(.equal, c));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
-    try std.testing.expectError(error.ZmplCompareError, b.compare(.less_or_equal, c));
-    try std.testing.expectError(error.ZmplCompareError, c.compare(.greater_than, a));
-    try std.testing.expectError(error.ZmplCompareError, c.compare(.greater_or_equal, a));
-    try std.testing.expectError(error.ZmplCompareError, c.compare(.greater_or_equal, b));
+    try testing.expect(!try a.compare(.equal, b));
+    try testing.expect(try b.compare(.equal, c));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, b.compare(.less_or_equal, c));
+    try testing.expectError(error.ZmplCompareError, c.compare(.greater_than, a));
+    try testing.expectError(error.ZmplCompareError, c.compare(.greater_or_equal, a));
+    try testing.expectError(error.ZmplCompareError, c.compare(.greater_or_equal, b));
 }
 
 test "Value.compare datetime" {
@@ -2367,73 +2380,73 @@ test "Value.compare datetime" {
             .value = try jetcommon.types.DateTime.fromUnix(1731834128, .seconds),
         },
     };
-    try std.testing.expect(!try a.compare(.equal, b));
-    try std.testing.expect(try b.compare(.equal, c));
-    try std.testing.expect(try a.compare(.less_than, b));
-    try std.testing.expect(try a.compare(.less_or_equal, b));
-    try std.testing.expect(try b.compare(.less_or_equal, c));
-    try std.testing.expect(try c.compare(.greater_than, a));
-    try std.testing.expect(try c.compare(.greater_or_equal, a));
-    try std.testing.expect(try c.compare(.greater_or_equal, b));
+    try testing.expect(!try a.compare(.equal, b));
+    try testing.expect(try b.compare(.equal, c));
+    try testing.expect(try a.compare(.less_than, b));
+    try testing.expect(try a.compare(.less_or_equal, b));
+    try testing.expect(try b.compare(.less_or_equal, c));
+    try testing.expect(try c.compare(.greater_than, a));
+    try testing.expect(try c.compare(.greater_or_equal, a));
+    try testing.expect(try c.compare(.greater_or_equal, b));
 }
 
 test "Value.compare object" {
     const a = Value{ .object = undefined };
     const b = Value{ .object = undefined };
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.equal, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_than, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.greater_than, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
 }
 
 test "Value.compare array" {
     const a = Value{ .array = undefined };
     const b = Value{ .array = undefined };
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.equal, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_than, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.greater_than, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
 }
 
 test "Value.compare different types" {
     const a = Value{ .integer = undefined };
     const b = Value{ .float = undefined };
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.equal, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_than, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
-    try std.testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_than, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.less_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.greater_than, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
+    try testing.expectError(error.ZmplCompareError, a.compare(.greater_or_equal, b));
 }
 
 test "Value.compareT string" {
     const a = Value{ .string = .{ .allocator = undefined, .value = "foo" } };
-    try std.testing.expect(try a.compareT(.equal, []const u8, "foo"));
-    try std.testing.expect(try a.compareT(.equal, [:0]const u8, @as([:0]const u8, "foo")));
-    try std.testing.expectError(error.ZmplCompareError, a.compareT(.less_than, []const u8, "foo"));
-    try std.testing.expectError(error.ZmplCoerceError, a.compareT(.equal, usize, 123));
+    try testing.expect(try a.compareT(.equal, []const u8, "foo"));
+    try testing.expect(try a.compareT(.equal, [:0]const u8, @as([:0]const u8, "foo")));
+    try testing.expectError(error.ZmplCompareError, a.compareT(.less_than, []const u8, "foo"));
+    try testing.expectError(error.ZmplCoerceError, a.compareT(.equal, usize, 123));
 }
 
 test "Value.compareT integer" {
     const a = Value{ .integer = .{ .allocator = undefined, .value = 1 } };
-    try std.testing.expect(try a.compareT(.equal, usize, 1));
-    try std.testing.expect(try a.compareT(.equal, u16, 1));
-    try std.testing.expect(try a.compareT(.equal, u8, 1));
-    try std.testing.expect(!try a.compareT(.equal, u8, 2));
-    try std.testing.expect(try a.compareT(.less_than, usize, 2));
-    try std.testing.expect(try a.compareT(.less_or_equal, usize, 2));
-    try std.testing.expect(try a.compareT(.less_or_equal, usize, 1));
-    try std.testing.expect(try a.compareT(.greater_than, usize, 0));
-    try std.testing.expect(try a.compareT(.greater_or_equal, usize, 0));
-    try std.testing.expect(try a.compareT(.greater_or_equal, usize, 1));
-    try std.testing.expectError(
+    try testing.expect(try a.compareT(.equal, usize, 1));
+    try testing.expect(try a.compareT(.equal, u16, 1));
+    try testing.expect(try a.compareT(.equal, u8, 1));
+    try testing.expect(!try a.compareT(.equal, u8, 2));
+    try testing.expect(try a.compareT(.less_than, usize, 2));
+    try testing.expect(try a.compareT(.less_or_equal, usize, 2));
+    try testing.expect(try a.compareT(.less_or_equal, usize, 1));
+    try testing.expect(try a.compareT(.greater_than, usize, 0));
+    try testing.expect(try a.compareT(.greater_or_equal, usize, 0));
+    try testing.expect(try a.compareT(.greater_or_equal, usize, 1));
+    try testing.expectError(
         error.ZmplCompareError,
         a.compareT(.equal, []const u8, "1"),
     );
@@ -2441,17 +2454,17 @@ test "Value.compareT integer" {
 
 test "Value.compareT float" {
     const a = Value{ .float = .{ .allocator = undefined, .value = 1.0 } };
-    try std.testing.expect(try a.compareT(.equal, f128, 1.0));
-    try std.testing.expect(try a.compareT(.equal, f64, 1.0));
-    try std.testing.expect(try a.compareT(.equal, f32, 1.0));
-    try std.testing.expect(!try a.compareT(.equal, f64, 1.1));
-    try std.testing.expect(try a.compareT(.less_than, f64, 1.1));
-    try std.testing.expect(try a.compareT(.less_or_equal, f64, 1.1));
-    try std.testing.expect(try a.compareT(.less_or_equal, f64, 1.0));
-    try std.testing.expect(try a.compareT(.greater_than, f64, 0.9));
-    try std.testing.expect(try a.compareT(.greater_or_equal, f64, 0.9));
-    try std.testing.expect(try a.compareT(.greater_or_equal, f64, 1.0));
-    try std.testing.expectError(
+    try testing.expect(try a.compareT(.equal, f128, 1.0));
+    try testing.expect(try a.compareT(.equal, f64, 1.0));
+    try testing.expect(try a.compareT(.equal, f32, 1.0));
+    try testing.expect(!try a.compareT(.equal, f64, 1.1));
+    try testing.expect(try a.compareT(.less_than, f64, 1.1));
+    try testing.expect(try a.compareT(.less_or_equal, f64, 1.1));
+    try testing.expect(try a.compareT(.less_or_equal, f64, 1.0));
+    try testing.expect(try a.compareT(.greater_than, f64, 0.9));
+    try testing.expect(try a.compareT(.greater_or_equal, f64, 0.9));
+    try testing.expect(try a.compareT(.greater_or_equal, f64, 1.0));
+    try testing.expectError(
         error.ZmplCompareError,
         a.compareT(.equal, []const u8, "1.0"),
     );
@@ -2464,18 +2477,18 @@ test "Value.compareT datetime" {
             .value = try jetcommon.types.DateTime.fromUnix(1731834128, .seconds),
         },
     };
-    try std.testing.expect(try a.compareT(.equal, u64, 1731834128 * 1_000_000));
-    try std.testing.expect(try a.compareT(.equal, u128, 1731834128 * 1_000_000));
-    try std.testing.expect(!try a.compareT(.equal, u64, 1731834127 * 1_000_000));
-    try std.testing.expect(!try a.compareT(.equal, i64, 1731834127 * 1_000_000));
-    try std.testing.expect(!try a.compareT(.equal, i128, 1731834127 * 1_000_000));
-    try std.testing.expect(try a.compareT(.less_than, u64, 1731834129 * 1_000_000));
-    try std.testing.expect(try a.compareT(.less_or_equal, u64, 1731834129 * 1_000_000));
-    try std.testing.expect(try a.compareT(.less_or_equal, u64, 1731834128 * 1_000_000));
-    try std.testing.expect(try a.compareT(.greater_than, u64, 1731834127 * 1_000_000));
-    try std.testing.expect(try a.compareT(.greater_or_equal, u64, 1731834127 * 1_000_000));
-    try std.testing.expect(try a.compareT(.greater_or_equal, u64, 1731834128 * 1_000_000));
-    try std.testing.expectError(
+    try testing.expect(try a.compareT(.equal, u64, 1731834128 * 1_000_000));
+    try testing.expect(try a.compareT(.equal, u128, 1731834128 * 1_000_000));
+    try testing.expect(!try a.compareT(.equal, u64, 1731834127 * 1_000_000));
+    try testing.expect(!try a.compareT(.equal, i64, 1731834127 * 1_000_000));
+    try testing.expect(!try a.compareT(.equal, i128, 1731834127 * 1_000_000));
+    try testing.expect(try a.compareT(.less_than, u64, 1731834129 * 1_000_000));
+    try testing.expect(try a.compareT(.less_or_equal, u64, 1731834129 * 1_000_000));
+    try testing.expect(try a.compareT(.less_or_equal, u64, 1731834128 * 1_000_000));
+    try testing.expect(try a.compareT(.greater_than, u64, 1731834127 * 1_000_000));
+    try testing.expect(try a.compareT(.greater_or_equal, u64, 1731834127 * 1_000_000));
+    try testing.expect(try a.compareT(.greater_or_equal, u64, 1731834128 * 1_000_000));
+    try testing.expectError(
         error.ZmplCompareError,
         a.compareT(.equal, []const u8, "1731834128"),
     );
@@ -2483,7 +2496,7 @@ test "Value.compareT datetime" {
 
 test "Value.compareT object" {
     const a = Value{ .object = undefined };
-    try std.testing.expectError(
+    try testing.expectError(
         error.ZmplCompareError,
         a.compareT(.equal, []const u8, "foo"),
     );
@@ -2491,17 +2504,14 @@ test "Value.compareT object" {
 
 test "Value.compareT array" {
     const a = Value{ .array = undefined };
-    try std.testing.expectError(
+    try testing.expectError(
         error.ZmplCompareError,
         a.compareT(.equal, []const u8, "foo"),
     );
 }
 
 test "append/put array/object" {
-    var arena: ArenaAllocator = .init(std.testing.allocator);
-    defer arena.deinit();
-
-    var data = Data.init(arena.allocator());
+    var data: Data = .init(testing.allocator);
     defer data.deinit();
 
     var array1 = try data.root(.array);
@@ -2517,7 +2527,7 @@ test "append/put array/object" {
     try object2.put("garply", "waldo");
     try array4.append("fred");
 
-    try std.testing.expectEqualStrings(
+    try testing.expectEqualStrings(
         \\[[["foo"],"bar"],"baz",{"qux":"quux","corge":{"garply":"waldo"},"grault":["fred"]}]
         \\
     ,
@@ -2530,8 +2540,8 @@ test "coerce enum" {
     const E = enum { foo, bar };
     const e1: E = .foo;
     const e2: E = .bar;
-    try std.testing.expect(e1 == try value.coerce(E));
-    try std.testing.expect(e2 != try value.coerce(E));
+    try testing.expect(e1 == try value.coerce(E));
+    try testing.expect(e2 != try value.coerce(E));
 }
 
 test "coerce boolean" {
@@ -2541,19 +2551,16 @@ test "coerce boolean" {
     const value4 = Value{ .string = .{ .allocator = undefined, .value = "random" } };
     const value5 = Value{ .boolean = .{ .allocator = undefined, .value = true } };
     const value6 = Value{ .boolean = .{ .allocator = undefined, .value = false } };
-    try std.testing.expect(try value1.coerce(bool));
-    try std.testing.expect(!try value2.coerce(bool));
-    try std.testing.expect(try value3.coerce(bool));
-    try std.testing.expect(!try value4.coerce(bool));
-    try std.testing.expect(try value5.coerce(bool));
-    try std.testing.expect(!try value6.coerce(bool));
+    try testing.expect(try value1.coerce(bool));
+    try testing.expect(!try value2.coerce(bool));
+    try testing.expect(try value3.coerce(bool));
+    try testing.expect(!try value4.coerce(bool));
+    try testing.expect(try value5.coerce(bool));
+    try testing.expect(!try value6.coerce(bool));
 }
 
 test "array pop" {
-    var arena: ArenaAllocator = .init(std.testing.allocator);
-    defer arena.deinit();
-
-    var data = Data.init(arena.allocator());
+    var data: Data = .init(testing.allocator);
     defer data.deinit();
 
     var array1 = try data.root(.array);
@@ -2561,65 +2568,59 @@ test "array pop" {
     try array1.append(2);
     try array1.append(3);
 
-    try std.testing.expect(array1.count() == 3);
+    try testing.expect(array1.count() == 3);
 
     const vals: [3]u8 = .{ 3, 2, 1 };
     for (vals) |val| {
         const popped = array1.pop().?;
-        try std.testing.expect(try popped.compareT(.equal, u8, val));
+        try testing.expect(try popped.compareT(.equal, u8, val));
     }
 
-    try std.testing.expect(array1.count() == 0);
+    try testing.expect(array1.count() == 0);
 }
 
 test "getT(.null, ...)" {
-    var arena: ArenaAllocator = .init(std.testing.allocator);
-    defer arena.deinit();
-
-    var data = Data.init(arena.allocator());
+    var data: Data = .init(testing.allocator);
     defer data.deinit();
 
     var obj = try data.root(.object);
     try obj.put("foo", null);
 
-    try std.testing.expectEqual(obj.getT(.null, "foo"), true);
-    try std.testing.expectEqual(obj.getT(.null, "bar"), false);
+    try testing.expectEqual(obj.getT(.null, "foo"), true);
+    try testing.expectEqual(obj.getT(.null, "bar"), false);
 }
 
 test "parseJsonSlice" {
-    var arena: ArenaAllocator = .init(std.testing.allocator);
-    defer arena.deinit();
-
-    var data = Data.init(arena.allocator());
+    var data: Data = .init(testing.allocator);
     defer data.deinit();
 
     const string_value = try data.parseJsonSlice(
         \\"foo"
     );
-    try std.testing.expectEqualStrings("foo", string_value.*.string.value);
+    try testing.expectEqualStrings("foo", string_value.*.string.value);
 
     const boolean_value = try data.parseJsonSlice(
         \\true
     );
-    try std.testing.expectEqual(true, boolean_value.*.boolean.value);
+    try testing.expectEqual(true, boolean_value.*.boolean.value);
 
     const integer_value = try data.parseJsonSlice(
         \\100
     );
-    try std.testing.expectEqual(100, integer_value.*.integer.value);
+    try testing.expectEqual(100, integer_value.*.integer.value);
 
     const float_value = try data.parseJsonSlice(
         \\100.1
     );
-    try std.testing.expectEqual(100.1, float_value.*.float.value);
+    try testing.expectEqual(100.1, float_value.*.float.value);
 
     const object_value = try data.parseJsonSlice(
         \\{"foo": "bar"}
     );
-    try std.testing.expectEqualStrings("bar", object_value.get("foo").?.string.value);
+    try testing.expectEqualStrings("bar", object_value.get("foo").?.string.value);
 
     const array_value = try data.parseJsonSlice(
         \\["foo", "bar"]
     );
-    try std.testing.expectEqualStrings("bar", array_value.items(.array)[1].string.value);
+    try testing.expectEqualStrings("bar", array_value.items(.array)[1].string.value);
 }

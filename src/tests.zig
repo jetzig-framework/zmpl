@@ -1,5 +1,4 @@
 const std = @import("std");
-const zmpl = @import("zmpl");
 const allocator = std.testing.allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const ArrayList = std.ArrayList;
@@ -7,15 +6,15 @@ const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
 
+const zmpl = @import("zmpl");
+const Data = zmpl.Data;
+
 const jetcommon = @import("jetcommon");
 
 const Context = struct { foo: []const u8 = "default" };
 
 test "readme example" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var body = try data.object();
@@ -55,10 +54,7 @@ test "readme example" {
 }
 
 test "object passing to partial" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -81,10 +77,7 @@ test "object passing to partial" {
 }
 
 test "complex example" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var body = try data.object();
@@ -155,10 +148,7 @@ test "complex example" {
 }
 
 test "direct rendering of slots (render [][]const u8 as line-separated string)" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     const template = zmpl.find("slots") orelse return expect(false);
@@ -175,10 +165,7 @@ test "direct rendering of slots (render [][]const u8 as line-separated string)" 
 }
 
 test "javascript" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     const template = zmpl.find("javascript") orelse return expect(false);
@@ -196,10 +183,7 @@ test "javascript" {
 }
 
 test "partials without blocks" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     const template = zmpl.find("partials_without_blocks") orelse return expect(false);
@@ -212,10 +196,7 @@ test "partials without blocks" {
 }
 
 test "custom delimiters" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     const template = zmpl.find("custom_delimiters") orelse return expect(false);
@@ -234,10 +215,7 @@ test "custom delimiters" {
 }
 
 test ".md.zmpl extension" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     const template = zmpl.find("markdown_extension") orelse return expect(false);
@@ -249,10 +227,7 @@ test ".md.zmpl extension" {
 }
 
 test "default partial arguments" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     const template = zmpl.find("default_partial_arguments") orelse return expect(false);
@@ -264,10 +239,7 @@ test "default partial arguments" {
 }
 
 test "escaping (HTML and backslash escaping" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     const template = zmpl.find("escaping") orelse return expect(false);
@@ -281,10 +253,7 @@ test "escaping (HTML and backslash escaping" {
 }
 
 test "references combined with markdown" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var object = try data.object();
@@ -303,10 +272,7 @@ test "references combined with markdown" {
 }
 
 test "partial arg type coercion" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var object = try data.object();
@@ -325,10 +291,7 @@ test "partial arg type coercion" {
 }
 
 test "inheritance" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     const template = zmpl.find("inheritance_child") orelse return expect(false);
@@ -354,10 +317,7 @@ test "inheritance" {
 }
 
 test "root init" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -397,10 +357,7 @@ test "root init" {
 }
 
 test "reference stripping" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -416,10 +373,7 @@ test "reference stripping" {
 }
 
 test "inferred type in put/append" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     const TestEnum = enum { field_a, field_b };
@@ -464,10 +418,7 @@ test "inferred type in put/append" {
 }
 
 test "getT(.array, ...) and getT(.object, ...)" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -489,10 +440,7 @@ test "getT(.array, ...) and getT(.object, ...)" {
 }
 
 test "object.remove(...)" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var obj = try data.object();
@@ -506,10 +454,7 @@ test "object.remove(...)" {
 }
 
 test "getStruct from object" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -551,10 +496,7 @@ test "getStruct from object" {
 }
 
 test "Array.items()" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var array = try data.array();
@@ -567,10 +509,7 @@ test "Array.items()" {
 }
 
 test "Object.items()" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var object = try data.object();
@@ -588,10 +527,7 @@ test "Object.items()" {
 }
 
 test "toJson()" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var object = try data.object();
@@ -607,10 +543,7 @@ test "toJson()" {
 }
 
 test "put slice" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -633,10 +566,7 @@ test "put slice" {
 }
 
 test "iteration" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -683,10 +613,7 @@ test "iteration" {
 }
 
 test "datetime format" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -708,10 +635,7 @@ test "datetime format" {
 }
 
 test "datetime" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -722,10 +646,7 @@ test "datetime" {
 }
 
 test "for with partial" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -747,10 +668,7 @@ test "for with partial" {
 }
 
 test "error union" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -760,10 +678,7 @@ test "error union" {
 }
 
 test "xss sanitization/raw formatter" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -779,10 +694,7 @@ test "xss sanitization/raw formatter" {
 }
 
 test "if/else" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -829,10 +741,7 @@ test "if/else" {
 }
 
 test "for with zmpl value" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -857,10 +766,7 @@ test "for with zmpl value" {
 }
 
 test "comments" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     const template = zmpl.find("comments") orelse return expect(false);
@@ -874,10 +780,7 @@ test "comments" {
 }
 
 test "for with if" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.object();
@@ -918,10 +821,7 @@ test "for with if" {
 }
 
 test "mix mardown and zig" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.object();
@@ -949,10 +849,7 @@ test "nullable if" {
 
     // Test with null value - should be falsey
     {
-        var arena: ArenaAllocator = .init(allocator);
-        defer arena.deinit();
-
-        var data: zmpl.Data = .init(arena.allocator());
+        var data: Data = .init(allocator);
         defer data.deinit();
 
         var clip = try data.object();
@@ -968,10 +865,7 @@ test "nullable if" {
 
     // Test with non-null, non-empty string - should be truthy
     {
-        var arena: ArenaAllocator = .init(allocator);
-        defer arena.deinit();
-
-        var data: zmpl.Data = .init(arena.allocator());
+        var data: Data = .init(allocator);
         defer data.deinit();
 
         var clip = try data.object();
@@ -988,10 +882,7 @@ test "nullable if" {
 
     // Test with empty string - should be falsey like null
     {
-        var arena: ArenaAllocator = .init(allocator);
-        defer arena.deinit();
-
-        var data: zmpl.Data = .init(arena.allocator());
+        var data: Data = .init(allocator);
         defer data.deinit();
 
         var clip = try data.object();
@@ -1007,10 +898,7 @@ test "nullable if" {
 }
 
 test "if statement with indented HTML - if branch" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -1038,10 +926,7 @@ test "if statement with indented HTML - if branch" {
 }
 
 test "if statement with indented HTML - else branch" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -1062,10 +947,7 @@ test "if statement with indented HTML - else branch" {
 }
 
 test "blocks" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     const template = zmpl.find("blocks") orelse return expect(false);
@@ -1084,10 +966,7 @@ test "blocks" {
 }
 
 test "append struct with []const []const u8 field" {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-
-    var data: zmpl.Data = .init(arena.allocator());
+    var data: Data = .init(allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -1107,9 +986,8 @@ test "append struct with []const []const u8 field" {
 
     const expected_baz: []const []const u8 = &.{ "baz", "qux" };
 
-    for (baz_items, 0..) |item, index| {
+    for (baz_items, 0..) |item, index|
         try expectEqualStrings(expected_baz[index], item.string.value);
-    }
 
     const qux = foo.get("qux").?;
     const qux_items = qux.items(.array);
@@ -1118,7 +996,6 @@ test "append struct with []const []const u8 field" {
 
     const expected_qux: []const usize = &.{ 1, 2, 3 };
 
-    for (qux_items, 0..) |item, index| {
+    for (qux_items, 0..) |item, index|
         try expectEqual(expected_qux[index], item.integer.value);
-    }
 }
