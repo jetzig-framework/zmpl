@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) !void {
         bool,
         "use_llvm",
         "Use LLVM",
-    ) orelse true;
+    );
 
     const test_filters = b.option(
         []const []const u8,
