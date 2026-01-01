@@ -22,7 +22,7 @@ pub fn main() !void {
             if (std.mem.eql(u8, permitted_field, field.name)) break;
         } else {
             std.debug.print(
-                "[zmpl] Unrecgonized option: `{s}: {s}`\n",
+                "[zmpl] Unrecognized option: `{s}: {s}`\n",
                 .{ field.name, @typeName(field.type) },
             );
             std.process.exit(1);
