@@ -5,7 +5,7 @@ const Writer = std.Io.Writer;
 
 /// The first non-whitespace character of a given input (line).
 pub fn firstMeaningfulChar(input: []const u8) ?u8 {
-    const stripped = std.mem.trimLeft(u8, input, &std.ascii.whitespace);
+    const stripped = std.mem.trimStart(u8, input, &std.ascii.whitespace);
 
     if (stripped.len == 0) return null;
 
@@ -14,7 +14,7 @@ pub fn firstMeaningfulChar(input: []const u8) ?u8 {
 
 /// Detect if a given input string begins with a given value, ignoring leading whitespace.
 pub fn startsWithIgnoringWhitespace(haystack: []const u8, needle: []const u8) bool {
-    const stripped = std.mem.trimLeft(u8, haystack, &std.ascii.whitespace);
+    const stripped = std.mem.trimStart(u8, haystack, &std.ascii.whitespace);
 
     return std.mem.startsWith(u8, stripped, needle);
 }
@@ -22,7 +22,7 @@ pub fn startsWithIgnoringWhitespace(haystack: []const u8, needle: []const u8) bo
 /// Detect if a given input string begins with a given value, ignoring leading whitespace.
 pub fn indexOfIgnoringWhitespace(haystack: []const u8, needle: []const u8) ?usize {
     // FIXME: This function makes no sense.
-    const trimmed = std.mem.trimLeft(u8, haystack, &std.ascii.whitespace);
+    const trimmed = std.mem.trimStart(u8, haystack, &std.ascii.whitespace);
     if (std.mem.indexOf(u8, trimmed, needle)) |index| {
         return (haystack.len - trimmed.len) + index;
     } else {
@@ -160,7 +160,7 @@ pub inline fn strip(input: []const u8) []const u8 {
 
 /// Strip surrounding parentheses from a []const u8: `(foobar)` becomes `foobar`.
 pub inline fn trimParentheses(input: []const u8) []const u8 {
-    return std.mem.trimRight(u8, std.mem.trimLeft(u8, input, "("), ")");
+    return std.mem.trimEnd(u8, std.mem.trimStart(u8, input, "("), ")");
 }
 
 /// Strip all leading and trailing `\n` except one.
@@ -219,8 +219,8 @@ pub fn normalizePathPosix(allocator: Allocator, path: []const u8) ![]const u8 {
 }
 
 /// Try to read a file and return content, output a helpful error on failure.
-pub fn readFile(allocator: Allocator, dir: std.fs.Dir, path: []const u8) ![]const u8 {
-    const stat = dir.statFile(path) catch |err| {
+pub fn readFile(io: std.Io, allocator: Allocator, dir: std.Io.Dir, path: []const u8) ![]const u8 {
+    const stat = dir.statFile(io, path, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => {
                 std.debug.print("[zmpl] File not found: {s}\n", .{path});
@@ -229,8 +229,7 @@ pub fn readFile(allocator: Allocator, dir: std.fs.Dir, path: []const u8) ![]cons
             else => return err,
         }
     };
-    const content = std.fs.cwd().readFileAlloc(allocator, path, @intCast(stat.size));
-    return content;
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(stat.size + 1));
 }
 
 /// Output an escaped string suitable for use in generated Zig code.

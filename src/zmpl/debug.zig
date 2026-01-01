@@ -6,19 +6,21 @@ const colors = @import("colors.zig");
 const util = @import("util.zig");
 
 pub fn printSourceInfo(
+    io: std.Io,
     allocator: Allocator,
     err: anyerror,
     stack_trace: *std.builtin.StackTrace,
 ) !void {
     const debug_info = std.debug.getSelfDebugInfo() catch return err;
-    const source_location = (zmplSourceLocation(debug_info, stack_trace, err) catch
+    const source_location = (zmplSourceLocation(io, allocator, debug_info, stack_trace, err) catch
         return err) orelse
         return err;
-    defer debug_info.allocator.free(source_location.file_name);
-    try debugSourceLocation(allocator, source_location);
+    try debugSourceLocation(io, allocator, source_location);
 }
 
 fn zmplSourceLocation(
+    io: std.Io,
+    allocator: Allocator,
     debug_info: *std.debug.SelfInfo,
     stack_trace: *std.builtin.StackTrace,
     err: anyerror,
@@ -34,10 +36,8 @@ fn zmplSourceLocation(
     }) {
         const return_address = stack_trace.instruction_addresses[frame_index];
         const address = return_address - 1;
-        const module = debug_info.getModuleForAddress(address) catch return err;
 
-        const symbol_info = module.getSymbolAtAddress(debug_info.allocator, address) catch
-            return err;
+        const symbol_info = debug_info.getSymbol(allocator, io, address) catch return err;
 
         if (symbol_info.source_location) |source_location| {
             if (std.mem.endsWith(u8, source_location.file_name, "zmpl.manifest.zig")) {
@@ -50,10 +50,11 @@ fn zmplSourceLocation(
 }
 
 fn debugSourceLocation(
+    io: std.Io,
     allocator: Allocator,
     source_location: std.debug.SourceLocation,
 ) !void {
-    const debug_line = try findDebugLine(allocator, source_location) orelse return;
+    const debug_line = try findDebugLine(io, allocator, source_location) orelse return;
     var it = std.mem.tokenizeScalar(u8, debug_line, ':');
     _ = it.next();
     _ = it.next();
@@ -65,11 +66,13 @@ fn debugSourceLocation(
     const from_position = try std.fmt.parseInt(usize, from.?, 10);
     const to_position = try std.fmt.parseInt(usize, to.?, 10);
 
-    const source_file = try std.fs.openFileAbsolute(filename, .{});
+    const source_file_handle = try std.Io.Dir.openFileAbsolute(io, filename, .{});
 
+    var read_buffer: [256]u8 = undefined;
     const content = try allocator.alloc(u8, to_position - from_position + 1);
+    var source_file = source_file_handle.reader(io, &read_buffer);
     try source_file.seekTo(from_position);
-    _ = try source_file.readAll(content);
+    try source_file.interface.readSliceAll(content);
 
     var cursor: usize = 0;
     var buf: [std.heap.pageSize()]u8 = undefined;
@@ -77,7 +80,7 @@ fn debugSourceLocation(
     const source_line_number = outer: {
         while (cursor < from_position) {
             var line_count: usize = 1;
-            const bytes_read = try source_file.readAll(buf[0..]);
+            const bytes_read = try source_file.interface.readSliceShort(buf[0..]);
             if (bytes_read == 0) return;
             for (buf[0..bytes_read]) |char| {
                 if (cursor >= from_position) break :outer line_count;
@@ -104,11 +107,12 @@ fn debugSourceLocation(
 }
 
 fn findDebugLine(
+    io: std.Io,
     allocator: Allocator,
     source_location: std.debug.SourceLocation,
 ) !?[]const u8 {
-    const file = try std.fs.openFileAbsolute(source_location.file_name, .{});
-    const stat = try file.stat();
+    const file_handle = try std.Io.Dir.openFileAbsolute(io, source_location.file_name, .{});
+    const stat = try file_handle.stat(io);
     const size = stat.size;
 
     var cursor: usize = 0;
@@ -116,8 +120,11 @@ fn findDebugLine(
     var buf: [std.heap.pageSize()]u8 = undefined;
     var position: usize = 0;
 
+    var read_buffer: [256]u8 = undefined;
+    var file = file_handle.reader(io, &read_buffer);
+
     while (cursor < size) outer: {
-        const bytes_read = try file.readAll(buf[0..]);
+        const bytes_read = try file.interface.readSliceShort(buf[0..]);
         if (bytes_read == 0) return null;
         for (buf) |char| {
             if (char == '\n') line += 1;
@@ -136,7 +143,7 @@ fn findDebugLine(
 
     outer: {
         while (cursor < size) {
-            const bytes_read = try file.readAll(buf[0..]);
+            const bytes_read = try file.interface.readSliceShort(buf[0..]);
             if (bytes_read == 0) return null;
             cursor += bytes_read;
             if (std.mem.indexOf(u8, buf[0..bytes_read], "//zmpl:debug")) |index| {
@@ -146,7 +153,7 @@ fn findDebugLine(
                 } else {
                     try debug_writer.writeAll(buf[0..bytes_read]);
                     while (cursor < size) {
-                        const line_bytes_read = try file.read(buf[0..]);
+                        const line_bytes_read = try file.interface.readSliceShort(buf[0..]);
                         if (std.mem.indexOf(u8, buf[0..line_bytes_read], "\n")) |line_index| {
                             try debug_writer.writeAll(buf[0..line_index]);
                             break :outer;

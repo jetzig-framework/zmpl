@@ -38,6 +38,9 @@ pub fn main() !void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
+    var threaded = std.Io.Threaded.init_single_threaded;
+    const io = threaded.io();
+
     const args = try std.process.argsAlloc(allocator);
 
     const manifest_path = args[1];
@@ -55,7 +58,7 @@ pub fn main() !void {
         const present = !std.mem.eql(u8, path, "_");
         try templates_paths.append(allocator, .{
             .prefix = prefix,
-            .path = if (present) try std.fs.realpathAlloc(allocator, path) else "_",
+            .path = if (present) try std.Io.Dir.cwd().realPathFileAlloc(io, path, allocator) else "_",
             .present = present,
         });
     }
@@ -79,15 +82,16 @@ pub fn main() !void {
 
     var manifest: Manifest = .init(templates_paths.items, template_paths_buf.items);
 
-    const file = try std.fs.cwd().createFile(manifest_path, .{ .truncate = true });
+    const file = try std.Io.Dir.cwd().createFile(io, manifest_path, .{ .truncate = true });
     var buffer: [1024]u8 = undefined;
-    var writer = file.writerStreaming(&buffer);
+    var writer = file.writerStreaming(io, &buffer);
     try manifest.compile(
+        io,
         allocator,
         &writer.interface,
         zmpl_options,
     );
-    file.close();
+    file.close(io);
 }
 
 test {

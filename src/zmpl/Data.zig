@@ -78,6 +78,7 @@ const StackFallbackAllocator = std.heap.StackFallbackAllocator(buffer_size);
 /// automatically.
 arena: *ArenaAllocator,
 allocator: Allocator,
+io: std.Io,
 parent_allocator: Allocator,
 output_buf: *Writer.Allocating,
 output_writer: *Writer,
@@ -90,7 +91,7 @@ slots: ?[]const String = null,
 fmt: zmpl.Format,
 
 /// Creates a new `Data` instance which can then be used to store any tree of `Value`.
-pub fn init(gpa: Allocator) Data {
+pub fn init(io: std.Io, gpa: Allocator) Data {
     const arena = gpa.create(ArenaAllocator) catch unreachable;
     arena.* = .init(gpa);
 
@@ -113,6 +114,7 @@ pub fn init(gpa: Allocator) Data {
     data.template_decls = .init(data.allocator);
     data.slots = null;
     data.fmt = .{ .writer = &data.output_buf.writer };
+    data.io = io;
     return data;
 }
 
@@ -168,7 +170,7 @@ pub fn ref(self: Data, key: []const u8) ?*Value {
     }
 
     // We still support old-style refs without the preceding `$`.
-    const trimmed_key = std.mem.trimLeft(
+    const trimmed_key = std.mem.trimStart(
         u8,
         if (std.mem.startsWith(u8, key, "$")) key[1..] else key,
         ".",
@@ -1033,7 +1035,7 @@ pub const Value = union(ValueType) {
                 .{@tagName(operator)},
             ),
             .datetime => |capture| capture.value.compare(
-                std.enums.nameCast(jetcommon.Operator, operator),
+                @field(jetcommon.Operator, @tagName(operator)),
                 other.datetime.value,
             ),
             .null => true, // If both sides are `Null` then this can only be true.
@@ -2511,7 +2513,7 @@ test "Value.compareT array" {
 }
 
 test "append/put array/object" {
-    var data: Data = .init(testing.allocator);
+    var data: Data = .init(testing.io, testing.allocator);
     defer data.deinit();
 
     var array1 = try data.root(.array);
@@ -2560,7 +2562,7 @@ test "coerce boolean" {
 }
 
 test "array pop" {
-    var data: Data = .init(testing.allocator);
+    var data: Data = .init(testing.io, testing.allocator);
     defer data.deinit();
 
     var array1 = try data.root(.array);
@@ -2580,7 +2582,7 @@ test "array pop" {
 }
 
 test "getT(.null, ...)" {
-    var data: Data = .init(testing.allocator);
+    var data: Data = .init(testing.io, testing.allocator);
     defer data.deinit();
 
     var obj = try data.root(.object);
@@ -2591,7 +2593,7 @@ test "getT(.null, ...)" {
 }
 
 test "parseJsonSlice" {
-    var data: Data = .init(testing.allocator);
+    var data: Data = .init(testing.io, testing.allocator);
     defer data.deinit();
 
     const string_value = try data.parseJsonSlice(

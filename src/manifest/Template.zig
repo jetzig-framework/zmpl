@@ -104,7 +104,7 @@ pub fn deinit(self: *Template) void {
 }
 
 /// Compile a template into a Zig code which can then be written out and compiled by Zig.
-pub fn compile(self: *Template, comptime options: type) ![]const u8 {
+pub fn compile(self: *Template, io: std.Io, comptime options: type) ![]const u8 {
     if (self.state != .initial) unreachable;
 
     try self.tokenize();
@@ -115,7 +115,7 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
 
     const writer = Node.Writer{ .allocator = self.allocator, .buf = &buf, .token = self.tokens.items[0] };
     try self.renderHeader(writer, options);
-    try self.root_node.compile(self.input, writer, options);
+    try self.root_node.compile(io, self.input, writer, options);
 
     try self.renderFooter(writer);
 
@@ -259,8 +259,8 @@ fn appendToken(self: *Template, context: Context, end: usize, depth: usize) !voi
         var args = std.mem.trim(u8, mode_line, &std.ascii.whitespace);
         args = switch (context.delimiter) {
             .none, .eof => args,
-            .string => |delimiter_string| std.mem.trimRight(u8, args, delimiter_string),
-            .brace => std.mem.trimRight(u8, args, "}"),
+            .string => |delimiter_string| std.mem.trimEnd(u8, args, delimiter_string),
+            .brace => std.mem.trimEnd(u8, args, "}"),
         };
         const args_start = @tagName(context.mode).len + 1;
         args = if (args_start <= args.len)
@@ -647,7 +647,7 @@ fn renderFooter(self: Template, writer: anytype) !void {
         \\        const __inner_content = try allocator.dupe(u8, try zmpl.output_buf.toOwnedSlice());
         \\        zmpl.content = .{{ .data = zmpl.strip(__inner_content) }};
         \\        zmpl.output_buf.clearRetainingCapacity();
-        \\        const __content = try __capture.render(zmpl, Context, context, {s}{s}, .{{}});
+        \\        const __content = try __capture.render(zmpl.io, zmpl, Context, context, {s}{s}, .{{}});
         \\        return __content;
         \\    }} else {{
         \\        const output = try zmpl.output_buf.toOwnedSlice();
@@ -698,7 +698,7 @@ fn renderFooter(self: Template, writer: anytype) !void {
             \\    );
             \\    zmpl.content = .{{ .data = zmpl.strip(inner_content) }};
             \\    zmpl.output_buf.clearRetainingCapacity();
-            \\    const content = try layout.render(zmpl, Context, context, blocks, .{{}});
+            \\    const content = try layout.render(zmpl.io, zmpl, Context, context, blocks, .{{}});
             \\    return zmpl.strip(content);
             \\}}
             \\

@@ -5,6 +5,7 @@ const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
+const io = std.testing.io;
 
 const zmpl = @import("zmpl");
 const Data = zmpl.Data;
@@ -14,7 +15,7 @@ const jetcommon = @import("jetcommon");
 const Context = struct { foo: []const u8 = "default" };
 
 test "readme example" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var body = try data.object();
@@ -28,7 +29,7 @@ test "readme example" {
     try body.put("auth", auth);
 
     const template = zmpl.find("example") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
 
     try expectEqualStrings(
         \\<!-- Zig mode for template logic -->
@@ -54,7 +55,7 @@ test "readme example" {
 }
 
 test "object passing to partial" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -66,7 +67,7 @@ test "object passing to partial" {
     try root.put("user", user);
 
     const template = zmpl.find("object_root_layout") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
 
     try expectEqualStrings(
         \\<h1>User</h1>
@@ -77,7 +78,7 @@ test "object passing to partial" {
 }
 
 test "complex example" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var body = try data.object();
@@ -92,7 +93,7 @@ test "complex example" {
     try body.put("auth", auth);
 
     const template = zmpl.find("complex_example") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
 
     try expectEqualStrings(
         \\    <div>hello</div>    <span class="foo
@@ -148,11 +149,11 @@ test "complex example" {
 }
 
 test "direct rendering of slots (render [][]const u8 as line-separated string)" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     const template = zmpl.find("slots") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\<div>
         \\<h2>Slots:</h2>
@@ -165,11 +166,11 @@ test "direct rendering of slots (render [][]const u8 as line-separated string)" 
 }
 
 test "javascript" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     const template = zmpl.find("javascript") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\
         \\  <span>{ is my favorite character</span>
@@ -183,11 +184,11 @@ test "javascript" {
 }
 
 test "partials without blocks" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     const template = zmpl.find("partials_without_blocks") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\    <span>Blah partial content</span>
         \\      <div>bar</div>    <span>Blah partial content</span>
@@ -196,11 +197,11 @@ test "partials without blocks" {
 }
 
 test "custom delimiters" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     const template = zmpl.find("custom_delimiters") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\<div><h1>Built-in markdown support</h1>
         \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
@@ -215,11 +216,11 @@ test "custom delimiters" {
 }
 
 test ".md.zmpl extension" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     const template = zmpl.find("markdown_extension") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\<div><h1>Hello</h1>
         \\</div>
@@ -227,11 +228,11 @@ test ".md.zmpl extension" {
 }
 
 test "default partial arguments" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     const template = zmpl.find("default_partial_arguments") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\bar, default value
         \\
@@ -239,11 +240,11 @@ test "default partial arguments" {
 }
 
 test "escaping (HTML and backslash escaping" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     const template = zmpl.find("escaping") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\<div><pre class="language-html" style="font-family: Monospace;"><code>&lt;div&gt;
         \\  @partial foo("bar")
@@ -253,7 +254,7 @@ test "escaping (HTML and backslash escaping" {
 }
 
 test "references combined with markdown" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var object = try data.object();
@@ -261,7 +262,7 @@ test "references combined with markdown" {
     try object.put("title", data.string("jetzig.dev"));
 
     const template = zmpl.find("references_markdown") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\<div><h1>Test</h1>
         \\
@@ -272,7 +273,7 @@ test "references combined with markdown" {
 }
 
 test "partial arg type coercion" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var object = try data.object();
@@ -281,7 +282,7 @@ test "partial arg type coercion" {
     try object.put("baz", data.string("qux"));
 
     const template = zmpl.find("partial_arg_type_coercion") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\100
         \\123.456
@@ -291,11 +292,12 @@ test "partial arg type coercion" {
 }
 
 test "inheritance" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     const template = zmpl.find("inheritance_child") orelse return expect(false);
     const output = try template.render(
+        io,
         &data,
         Context,
         .{},
@@ -317,7 +319,7 @@ test "inheritance" {
 }
 
 test "root init" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -331,7 +333,7 @@ test "root init" {
     try root.put("auth", auth);
 
     const template = zmpl.find("example") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
 
     try expectEqualStrings(
         \\<!-- Zig mode for template logic -->
@@ -357,14 +359,14 @@ test "root init" {
 }
 
 test "reference stripping" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
     try root.put("message", data.string("hello"));
 
     const template = zmpl.find("reference_with_spaces") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
 
     try expectEqualStrings(
         \\<div>hello</div>
@@ -373,7 +375,7 @@ test "reference stripping" {
 }
 
 test "inferred type in put/append" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     const TestEnum = enum { field_a, field_b };
@@ -404,7 +406,7 @@ test "inferred type in put/append" {
     try root.put("optional", optional);
 
     const template = zmpl.find("basic") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
 
     try expectEqualStrings(
         \\hello
@@ -418,7 +420,7 @@ test "inferred type in put/append" {
 }
 
 test "getT(.array, ...) and getT(.object, ...)" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -440,7 +442,7 @@ test "getT(.array, ...) and getT(.object, ...)" {
 }
 
 test "object.remove(...)" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var obj = try data.object();
@@ -454,7 +456,7 @@ test "object.remove(...)" {
 }
 
 test "getStruct from object" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -496,7 +498,7 @@ test "getStruct from object" {
 }
 
 test "Array.items()" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var array = try data.array();
@@ -509,7 +511,7 @@ test "Array.items()" {
 }
 
 test "Object.items()" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var object = try data.object();
@@ -527,7 +529,7 @@ test "Object.items()" {
 }
 
 test "toJson()" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var object = try data.object();
@@ -543,7 +545,7 @@ test "toJson()" {
 }
 
 test "put slice" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -566,7 +568,7 @@ test "put slice" {
 }
 
 test "iteration" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -582,7 +584,7 @@ test "iteration" {
     try root.put("objects", objects);
 
     const template = zmpl.find("iteration") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\
         \\  <div>baz</div>
@@ -613,7 +615,7 @@ test "iteration" {
 }
 
 test "datetime format" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -624,7 +626,7 @@ test "datetime format" {
     try root.put("bar", bar);
 
     const template = zmpl.find("datetime_format") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\<div>Tue Sep 24 19:30:35 2024</div>
         \\<div>2024-09-24</div>
@@ -635,7 +637,7 @@ test "datetime format" {
 }
 
 test "datetime" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -646,7 +648,7 @@ test "datetime" {
 }
 
 test "for with partial" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -655,7 +657,7 @@ test "for with partial" {
     try array.append(.{ .foo = "foo2", .bar = "bar2" });
 
     const template = zmpl.find("for_with_partial") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\foo1: bar1
         \\<div>foo1</div>
@@ -668,7 +670,7 @@ test "for with partial" {
 }
 
 test "error union" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -678,14 +680,14 @@ test "error union" {
 }
 
 test "xss sanitization/raw formatter" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
     try root.put("foo", "<script>alert(':)');</script>");
 
     const template = zmpl.find("xss") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\&lt;script&gt;alert(&#039;:)&#039;);&lt;/script&gt;
         \\<script>alert(':)');</script>
@@ -694,7 +696,7 @@ test "xss sanitization/raw formatter" {
 }
 
 test "if/else" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -711,7 +713,7 @@ test "if/else" {
     try foo.put("falsey", false);
 
     const template = zmpl.find("if_else") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\
         \\    expected here
@@ -741,7 +743,7 @@ test "if/else" {
 }
 
 test "for with zmpl value" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -752,7 +754,7 @@ test "for with zmpl value" {
     try foo.append("qux");
 
     const template = zmpl.find("for_with_zmpl_value_main") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\
         \\    bar
@@ -766,11 +768,11 @@ test "for with zmpl value" {
 }
 
 test "comments" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     const template = zmpl.find("comments") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\
         \\
@@ -780,7 +782,7 @@ test "comments" {
 }
 
 test "for with if" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.object();
@@ -790,7 +792,7 @@ test "for with if" {
     try things.append(.{ .foo = "quux", .bar = "corge", .time = "2024-11-24T18:51:23Z" });
 
     const template = zmpl.find("for_with_if") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\<div>foo: bar
         \\   
@@ -821,7 +823,7 @@ test "for with if" {
 }
 
 test "mix mardown and zig" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.object();
@@ -834,7 +836,7 @@ test "mix mardown and zig" {
     // markdown (i.e. the parent's mode) but the list gets broken into three parts intsead of a
     // single list.
     const template = zmpl.find("mix_markdown_and_zig") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\<div><h1>Header</h1>
         \\<ul><li>list item 1</li><li>list item 2</li></ul></div><div><ul><li>qux</li><li>   </li></ul></div><div><ul><li>corge</li><li>   </li></ul></div><div><ul><li>last item</li><li>qux</li></ul></div>
@@ -849,7 +851,7 @@ test "nullable if" {
 
     // Test with null value - should be falsey
     {
-        var data: Data = .init(allocator);
+        var data: Data = .init(io, allocator);
         defer data.deinit();
 
         var clip = try data.object();
@@ -859,13 +861,13 @@ test "nullable if" {
         try root.put("clip", clip);
 
         const template = zmpl.find("nullable_if") orelse return expect(false);
-        const output = try template.render(&data, Context, .{}, &.{}, .{});
+        const output = try template.render(io, &data, Context, .{}, &.{}, .{});
         try expectEqualStrings("\nThe value is null\n", output);
     }
 
     // Test with non-null, non-empty string - should be truthy
     {
-        var data: Data = .init(allocator);
+        var data: Data = .init(io, allocator);
         defer data.deinit();
 
         var clip = try data.object();
@@ -875,14 +877,14 @@ test "nullable if" {
         try root.put("clip", clip);
 
         const template = zmpl.find("nullable_if") orelse return expect(false);
-        const output = try template.render(&data, Context, .{}, &.{}, .{});
+        const output = try template.render(io, &data, Context, .{}, &.{}, .{});
         // Non-empty string should correctly evaluate as truthy
         try expectEqualStrings("\nThe value is not null\n", output);
     }
 
     // Test with empty string - should be falsey like null
     {
-        var data: Data = .init(allocator);
+        var data: Data = .init(io, allocator);
         defer data.deinit();
 
         var clip = try data.object();
@@ -892,13 +894,13 @@ test "nullable if" {
         try root.put("clip", clip);
 
         const template = zmpl.find("nullable_if") orelse return expect(false);
-        const output = try template.render(&data, Context, .{}, &.{}, .{});
+        const output = try template.render(io, &data, Context, .{}, &.{}, .{});
         try expectEqualStrings("\nThe value is null\n", output);
     }
 }
 
 test "if statement with indented HTML - if branch" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -908,7 +910,7 @@ test "if statement with indented HTML - if branch" {
     try root.put("user", user);
 
     const template = zmpl.find("if_indented_html") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\
         \\                <div class="d-none d-md-block ms-2 dropdown">
@@ -926,7 +928,7 @@ test "if statement with indented HTML - if branch" {
 }
 
 test "if statement with indented HTML - else branch" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
@@ -935,7 +937,7 @@ test "if statement with indented HTML - else branch" {
     try root.put("user", user);
 
     const template = zmpl.find("if_indented_html") orelse return expect(false);
-    const output = try template.render(&data, Context, .{}, &.{}, .{});
+    const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\
         \\                <div class="d-none d-md-flex align-items-center ms-2">
@@ -947,11 +949,12 @@ test "if statement with indented HTML - else branch" {
 }
 
 test "blocks" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     const template = zmpl.find("blocks") orelse return expect(false);
     const output = try template.render(
+        std.testing.io,
         &data,
         Context,
         .{},
@@ -966,7 +969,7 @@ test "blocks" {
 }
 
 test "append struct with []const []const u8 field" {
-    var data: Data = .init(allocator);
+    var data: Data = .init(io, allocator);
     defer data.deinit();
 
     var root = try data.root(.object);
