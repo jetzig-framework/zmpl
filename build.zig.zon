@@ -9,8 +9,8 @@
             .hash = "zmd-0.1.0-H8YV7bvdAABAVFR2lherqOup7valUMg9UTEiiMFxlTjZ",
         },
         .jetcommon = .{
-            .url = "https://github.com/emneo-dev/jetcommon/archive/c4da8d68813ab6cd384323475753c07d18627656.tar.gz",
-            .hash = "jetcommon-0.1.0-jPY_DetFAAA8wBYM9TKN5HJ1TAH5qSioHzmZuRTg4H_Z",
+            .url = "https://github.com/jetzig-framework/jetcommon/archive/4b985fce2609615f6126e2ce402c99d16dac3cff.tar.gz",
+            .hash = "jetcommon-0.1.0-jPY_De9FAADel24f0Zpk3NTO8ss6fBLrQGdipiGOmi1K",
         },
     },
 
