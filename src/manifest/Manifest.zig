@@ -78,12 +78,21 @@ pub fn compile(
             break :blk result.value_ptr;
         };
 
-        const generated_name = try util.generateVariableNameAlloc(allocator);
         const key = try util.templatePathStore(
             allocator,
             templates_paths_map.get(template_path.prefix).?,
             template_path.path,
         );
+
+        // Read file content to generate deterministic variable name
+        var file = try std.fs.openFileAbsolute(template_path.path, .{});
+        defer file.close();
+        const size = (try file.stat()).size;
+        const content = try file.readToEndAlloc(allocator, @intCast(size));
+        defer allocator.free(content);
+
+        const generated_name = try util.generateVariableNameAlloc(allocator, key, content);
+
         if (map.get(key)) |_| {
             std.debug.print("[zmpl] Found duplicate template: {s}\n", .{template_path.path});
             std.debug.print("[zmpl] Template names must be uniquely identifiable. Exiting.\n", .{});
@@ -95,17 +104,6 @@ pub fn compile(
 
     // Second pass - compile all templates, some of which may reference templates in other prefix scopes
     for (self.templates_paths) |outer_path| {
-        // for (self.template_paths) |inner_path| {
-        //     if (!inner_path.present) continue;
-        //     if (!std.mem.eql(u8, inner_path.prefix, outer_path.prefix)) continue;
-        //     const key = try util.templatePathStore(
-        //         allocator,
-        //         templates_paths_map.get(inner_path.prefix) orelse @panic("wtf"),
-        //         inner_path.path,
-        //     );
-        //     const generated_name = template_map.get(inner_path.prefix).?.get(key).?;
-        //     var file = try std.fs.openFileAbsolute(inner_path.path, .{});
-        // }
         try self.compileTemplates(
             allocator,
             &template_defs,
@@ -116,7 +114,6 @@ pub fn compile(
         );
     }
     std.debug.print("[zmpl] Compiled {} template(s)\n", .{self.template_paths.len});
-    // placeholder
 
     for (template_defs.items) |template_def|
         try writer.print(

@@ -576,7 +576,7 @@ fn generateSlots(self: Node, content: []const u8) !Slots {
     while (slots_it.next()) |slot| {
         if (util.strip(slot).len == 0) continue;
 
-        const slot_name = try util.generateVariableNameAlloc(self.allocator);
+        const slot_name = try util.generateTempVariableNameAlloc(self.allocator);
         const slot_writer = try std.fmt.allocPrint(self.allocator, "{s}_writer", .{slot_name});
 
         try slots_content_buf.appendSlice(
@@ -893,7 +893,7 @@ fn writeBlock(self: Node, context: Context, content: []const u8, formatters: For
             &std.ascii.whitespace,
         );
 
-        const function_name = try util.generateVariableNameAlloc(self.allocator);
+        const function_name = try util.generateTempVariableNameAlloc(self.allocator);
         try self.block_writer.print(
             \\pub fn {s}(zmpl: *__zmpl.Data, Context: type, context: Context) !void {{
             \\  _ = zmpl.noop(Context, context);
@@ -1083,14 +1083,14 @@ fn renderValueRef(
     writer_options: WriterOptions,
     writer: anytype,
 ) !void {
-    var arg_name: [32]u8 = undefined;
-    util.generateVariableName(&arg_name);
-    var blk_label: [32]u8 = undefined;
-    util.generateVariableName(&blk_label);
-    var blk_arg: [32]u8 = undefined;
-    util.generateVariableName(&blk_arg);
-    var index_arg: [32]u8 = undefined;
-    util.generateVariableName(&index_arg);
+    var arg_name_buf: [32]u8 = undefined;
+    const arg_name = util.generateTempVariableName(&arg_name_buf);
+    var blk_label_buf: [32]u8 = undefined;
+    const blk_label = util.generateTempVariableName(&blk_label_buf);
+    var blk_arg_buf: [32]u8 = undefined;
+    const blk_arg = util.generateTempVariableName(&blk_arg_buf);
+    var index_arg_buf: [32]u8 = undefined;
+    const index_arg = util.generateTempVariableName(&index_arg_buf);
 
     if (std.mem.containsAtLeast(u8, input, 1, ".")) {
         const start = std.mem.indexOfScalar(u8, input, '.').?;

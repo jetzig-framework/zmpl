@@ -116,24 +116,67 @@ pub fn tokenizeRetainToken(input: []const u8, token: []const u8) RetainTokenIter
     return .{ .index = 0, .input = input, .token = token };
 }
 
-/// Generate a random variable name with enough entropy to be considered unique.
-pub fn generateVariableName(buf: *[32]u8) void {
-    const first_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const any_chars = "0123456789" ++ first_chars;
+/// Counter for generating unique temporary variable names
+var temp_var_counter: std.atomic.Value(u64) = std.atomic.Value(u64).init(0);
 
-    for (0..3) |index| {
-        buf[index] = first_chars[std.crypto.random.intRangeAtMost(u8, 0, first_chars.len - 1)];
-    }
-
-    for (3..32) |index| {
-        buf[index] = any_chars[std.crypto.random.intRangeAtMost(u8, 0, any_chars.len - 1)];
-    }
+/// Generate a unique temporary variable name for internal use.
+/// This is used for temporary variables in generated code, not for template names.
+/// Returns a slice of the buffer containing the generated name.
+pub fn generateTempVariableName(buf: []u8) []u8 {
+    const counter = temp_var_counter.fetchAdd(1, .monotonic);
+    buf[0] = 't';
+    buf[1] = '_';
+    _ = std.fmt.bufPrint(buf[2..], "{x:0>16}", .{counter}) catch unreachable;
+    return buf[0..18]; // Return only the valid portion
 }
 
-/// Same as `generateVariableName` but allocates memory.
-pub fn generateVariableNameAlloc(allocator: Allocator) ![]const u8 {
-    const buf = try allocator.create([32]u8);
-    generateVariableName(buf);
+/// Same as `generateTempVariableName` but allocates memory.
+pub fn generateTempVariableNameAlloc(allocator: Allocator) ![]const u8 {
+    const buf = try allocator.alloc(u8, 18); // "t_" + 16 hex chars
+    _ = generateTempVariableName(buf);
+    return buf;
+}
+
+/// Sanitize a key to create a valid Zig identifier.
+/// Replaces invalid characters with underscores.
+fn sanitizeKeyForIdentifier(allocator: Allocator, key: []const u8) ![]const u8 {
+    const result = try allocator.alloc(u8, key.len);
+    for (key, 0..) |c, i| {
+        result[i] = switch (c) {
+            'a'...'z', 'A'...'Z', '0'...'9' => c,
+            else => '_',
+        };
+    }
+    return result;
+}
+
+/// Generate a deterministic variable name based on template key and content.
+/// Format: key_hash where key is sanitized and hash is based on content.
+pub fn generateVariableName(buf: []u8, key: []const u8, content: []const u8) void {
+    // Hash the content for deterministic naming
+    var hasher = std.hash.Wyhash.init(0);
+    hasher.update(content);
+    const hash = hasher.final();
+
+    const hash_str_len = 16; // 16 hex chars for 64-bit hash
+    const key_len = @min(key.len, buf.len - hash_str_len - 1);
+
+    for (0..key_len) |i| {
+        buf[i] = switch (key[i]) {
+            'a'...'z', 'A'...'Z', '0'...'9' => key[i],
+            else => '_',
+        };
+    }
+    buf[key_len] = '_';
+    _ = std.fmt.bufPrint(buf[key_len + 1 ..], "{x:0>16}", .{hash}) catch unreachable;
+}
+
+pub fn generateVariableNameAlloc(allocator: Allocator, key: []const u8, content: []const u8) ![]const u8 {
+    const sanitized_key = try sanitizeKeyForIdentifier(allocator, key);
+    defer allocator.free(sanitized_key);
+
+    const buf = try allocator.alloc(u8, sanitized_key.len + 1 + 16); // key + "_" + 16 hex chars
+    generateVariableName(buf, key, content);
     return buf;
 }
 
