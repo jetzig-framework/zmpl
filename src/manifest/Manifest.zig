@@ -28,6 +28,7 @@ pub fn init(
 
 pub fn compile(
     self: *Manifest,
+    io: std.Io,
     allocator: Allocator,
     writer: *Writer,
     comptime options: type,
@@ -107,6 +108,7 @@ pub fn compile(
         //     var file = try std.fs.openFileAbsolute(inner_path.path, .{});
         // }
         try self.compileTemplates(
+            io,
             allocator,
             &template_defs,
             outer_path,
@@ -190,6 +192,7 @@ pub fn compile(
 
 fn compileTemplates(
     self: *Manifest,
+    io: std.Io,
     allocator: Allocator,
     array: *ArrayList(TemplateDef),
     templates_path: TemplatePath,
@@ -197,6 +200,7 @@ fn compileTemplates(
     template_map: *StringHashMap(Template.TemplateMap),
     comptime options: type,
 ) !void {
+    var read_buffer: [512]u8 = undefined;
     for (self.template_paths) |template_path| {
         if (!template_path.present) continue;
         if (!std.mem.eql(u8, template_path.prefix, templates_path.prefix)) continue;
@@ -204,9 +208,10 @@ fn compileTemplates(
         const key = try util.templatePathStore(allocator, templates_paths_map.get(template_path.prefix).?, template_path.path);
         const generated_name = template_map.get(template_path.prefix).?.get(key).?;
 
-        var file = try std.fs.openFileAbsolute(template_path.path, .{});
-        const size = (try file.stat()).size;
-        const content = try file.readToEndAlloc(allocator, @intCast(size));
+        var file = try std.Io.Dir.openFileAbsolute(io, template_path.path, .{});
+        const size = (try file.stat(io)).size;
+        var file_reader = file.reader(io, &read_buffer);
+        const content = try file_reader.interface.allocRemaining(allocator, .limited(size + 1));
         var template: Template = .init(
             allocator,
             generated_name,
@@ -217,7 +222,7 @@ fn compileTemplates(
             content,
             template_map.*,
         );
-        const output = try template.compile(options);
+        const output = try template.compile(io, options);
 
         const template_def: TemplateDef = .{
             .key = key,

@@ -4,13 +4,13 @@
     .fingerprint = 0xef2931206468149,
     .minimum_zig_version = "0.15.1",
     .dependencies = .{
-        .jetcommon = .{
-            .url = "https://github.com/jetzig-framework/jetcommon/archive/ed326c74b98fae893acd89d2e84c0d894a200df3.tar.gz",
-            .hash = "jetcommon-0.1.0-jPY_DbNIAAA0utNExN3zMeqXA4fhZXQ6LDDP1eg8vodj",
-        },
         .zmd = .{
             .url = "https://github.com/jetzig-framework/zmd/archive/87b1c46b517f47b3384eba7ce98d197c463a9d5e.tar.gz",
             .hash = "zmd-0.1.0-H8YV7bvdAABAVFR2lherqOup7valUMg9UTEiiMFxlTjZ",
+        },
+        .jetcommon = .{
+            .url = "https://github.com/emneo-dev/jetcommon/archive/c4da8d68813ab6cd384323475753c07d18627656.tar.gz",
+            .hash = "jetcommon-0.1.0-jPY_DetFAAA8wBYM9TKN5HJ1TAH5qSioHzmZuRTg4H_Z",
         },
     },
 
@@ -24,4 +24,3 @@
         "README.md",
     },
 }
-

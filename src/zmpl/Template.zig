@@ -29,6 +29,7 @@ pub const RenderOptions = struct {
 
 pub fn render(
     self: Template,
+    io: std.Io,
     data: *Data,
     Context: ?type,
     context: if (Context) |C| C else @TypeOf(null),
@@ -45,7 +46,7 @@ pub fn render(
                 const renderFn = @field(Manifest, template.name ++ "_renderWithLayout");
                 break :blk renderFn(layout, data, C, c, template.blocks) catch |err| {
                     if (@errorReturnTrace()) |stack_trace| {
-                        try debug.printSourceInfo(data.allocator, err, stack_trace);
+                        try debug.printSourceInfo(io, data.allocator, err, stack_trace);
                     }
                     break :blk err;
                 };
@@ -58,7 +59,7 @@ pub fn render(
                 const renderFn = @field(Manifest, template.name ++ "_render");
                 break :blk renderFn(data, C, c, blocks) catch |err| {
                     if (@errorReturnTrace()) |stack_trace| {
-                        try debug.printSourceInfo(data.allocator, err, stack_trace);
+                        try debug.printSourceInfo(io, data.allocator, err, stack_trace);
                     }
                     break :blk err;
                 };
