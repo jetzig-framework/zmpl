@@ -29,7 +29,7 @@ pub const find = Manifest.find;
 pub const findPrefixed = Manifest.findPrefixed;
 
 pub fn chomp(input: []const u8) []const u8 {
-    return std.mem.trimRight(u8, input, "\r\n");
+    return std.mem.trimEnd(u8, input, "\r\n");
 }
 
 /// Sanitize input. Used internally for rendering data refs. Use `zmpl.fmt.sanitize` to manually

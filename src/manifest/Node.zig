@@ -90,7 +90,7 @@ pub const Writer = struct {
     }
 };
 
-pub fn compile(self: Node, input: []const u8, writer: Writer, options: type) !void {
+pub fn compile(self: Node, io: std.Io, input: []const u8, writer: Writer, options: type) !void {
     var compile_writer = writer;
     compile_writer.token = self.token;
 
@@ -109,22 +109,22 @@ pub fn compile(self: Node, input: []const u8, writer: Writer, options: type) !vo
     for (self.children.items) |child_node| {
         if (start < child_node.token.start) {
             const content = input[start .. child_node.token.start - 1];
-            try self.render(if (initial) .initial else .secondary, content, options, compile_writer);
+            try self.render(io, if (initial) .initial else .secondary, content, options, compile_writer);
             initial = false;
         }
 
         start = child_node.token.end + 1;
-        try child_node.compile(input, compile_writer, options);
+        try child_node.compile(io, input, compile_writer, options);
     }
 
     if (self.children.items.len == 0) {
         const content = input[self.token.startOfContent()..self.token.endOfContent()];
-        try self.render(.initial, content, options, compile_writer);
+        try self.render(io, .initial, content, options, compile_writer);
     } else {
         const last_child = self.children.items[self.children.items.len - 1];
         if (last_child.token.end + 1 < self.token.endOfContent()) {
             const content = input[last_child.token.end + 1 .. self.token.endOfContent()];
-            try self.render(.secondary, content, options, compile_writer);
+            try self.render(io, .secondary, content, options, compile_writer);
         }
     }
     try self.renderClose(compile_writer);
@@ -143,6 +143,7 @@ fn divFormatter(allocator: Allocator, node: ZmdNode) ![]const u8 {
 
 fn render(
     self: Node,
+    io: std.Io,
     context: Context,
     content: []const u8,
     options: type,
@@ -155,6 +156,7 @@ fn render(
 
     const stripped_content = try self.stripComments(content);
     try self.renderMode(
+        io,
         self.token.mode,
         context,
         stripped_content,
@@ -163,7 +165,7 @@ fn render(
     );
 }
 
-fn renderMode(self: Node, mode: Mode, context: Context, content: []const u8, formatters: Formatters, writer: anytype) !void {
+fn renderMode(self: Node, io: std.Io, mode: Mode, context: Context, content: []const u8, formatters: Formatters, writer: anytype) !void {
     switch (mode) {
         .zig => try self.renderZig(content, writer),
         .html => try self.renderHtml(content, .{}, writer),
@@ -172,12 +174,12 @@ fn renderMode(self: Node, mode: Mode, context: Context, content: []const u8, for
             .{},
             writer,
         ),
-        .partial => try self.renderPartial(content, writer),
+        .partial => try self.renderPartial(io, content, writer),
         .args => try self.renderArgs(writer),
         .extend => try self.renderExtend(writer),
         .@"for" => try self.renderFor(context, content, writer, formatters),
         .@"if" => try self.renderIf(context, content, writer, formatters),
-        .block => try self.writeBlock(context, content, formatters),
+        .block => try self.writeBlock(io, context, content, formatters),
         .blocks => try self.writeBlocks(writer),
     }
 }
@@ -375,7 +377,7 @@ fn renderHtml(
     }
 }
 
-fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
+fn renderPartial(self: Node, io: std.Io, content: []const u8, writer: anytype) !void {
     if (self.token.args == null) {
         std.log.err(
             "Expected `@partial` with name, no name was given [{}->{}]: '{s}'",
@@ -418,7 +420,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
         return error.ZmplSyntaxError;
     }
 
-    const expected_partial_args = try self.getPartialArgsSignature(prefix, partial_name);
+    const expected_partial_args = try self.getPartialArgsSignature(io, prefix, partial_name);
 
     var reordered_args: ArrayList(Arg) = .empty;
     defer reordered_args.deinit(self.allocator);
@@ -542,7 +544,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
         \\        const __slots = [_]__zmpl.Data.Slot{{
         \\{[items]s}
         \\        }};
-        \\        var __partial_data: __zmpl.Data = .init(allocator);
+        \\        var __partial_data: __zmpl.Data = .init(zmpl.io, allocator);
         \\        __partial_data.template_decls = zmpl.template_decls;
         \\        defer __partial_data.deinit();
         \\
@@ -877,7 +879,7 @@ fn ifStatement(self: Node, input: []const u8) !IfStatement {
 
 // Write a `@block` definition - note that we write to a different output buffer here - each
 // block is compiled into a separate function which is written after the main manifest body.
-fn writeBlock(self: Node, context: Context, content: []const u8, formatters: Formatters) !void {
+fn writeBlock(self: Node, io: std.Io, context: Context, content: []const u8, formatters: Formatters) !void {
     if (context == .initial) {
         const args = self.token.args orelse {
             std.log.err("Missing argument to `@block` mode: `{s}`", .{self.token.mode_line});
@@ -915,12 +917,12 @@ fn writeBlock(self: Node, context: Context, content: []const u8, formatters: For
                 .{},
                 writer,
             ),
-            .partial => try self.renderPartial(content, writer),
+            .partial => try self.renderPartial(io, content, writer),
             .args => try self.renderArgs(writer),
             .extend => try self.renderExtend(writer),
             .@"for" => try self.renderFor(context, content, writer, formatters),
             .@"if" => try self.renderIf(context, content, writer, formatters),
-            .block => try self.writeBlock(context, content, formatters),
+            .block => try self.writeBlock(io, context, content, formatters),
             .blocks => try self.writeBlocks(writer),
         }
     } else {
@@ -1145,7 +1147,7 @@ fn renderZigLiteral(
 // Parse a target partial's `@args` pragma in order to re-order keyword args if needed.
 // We need to read direct from the file here because we can't guarantee that the target partial
 // has been parsed yet.
-fn getPartialArgsSignature(self: Node, prefix: []const u8, partial_name: []const u8) ![]Arg {
+fn getPartialArgsSignature(self: Node, io: std.Io, prefix: []const u8, partial_name: []const u8) ![]Arg {
     const fetch_name = try util.templatePathFetch(self.allocator, partial_name, true);
     std.mem.replaceScalar(u8, fetch_name, '/', std.fs.path.sep);
     const with_extension = try std.mem.concat(self.allocator, u8, &[_][]const u8{ fetch_name, ".zmpl" });
@@ -1159,7 +1161,7 @@ fn getPartialArgsSignature(self: Node, prefix: []const u8, partial_name: []const
     };
     const path = try std.fs.path.join(self.allocator, &[_][]const u8{ templates_path, with_extension });
     defer self.allocator.free(path);
-    const content = util.readFile(self.allocator, std.fs.cwd(), path) catch return &.{};
+    const content = try util.readFile(io, self.allocator, std.Io.Dir.cwd(), path);
     defer self.allocator.free(content);
     var it = std.mem.splitScalar(u8, content, '\n');
 

@@ -11,11 +11,17 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
     const options_files = b.addWriteFiles();
 
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    // This deinit is not necessary since it's stack allocated but it's ok to
+    // keep, in case we want to change the threaded initialization at some point
+    defer threaded.deinit();
+    const io = threaded.io();
+
     const use_llvm = b.option(
         bool,
         "use_llvm",
         "Use LLVM",
-    ) orelse true;
+    );
 
     const test_filters = b.option(
         []const []const u8,
@@ -58,6 +64,7 @@ pub fn build(b: *std.Build) !void {
         "zmpl_templates_paths",
         "Directories to search for .zmpl templates. Format: `prefix=...,path=...",
     ) orelse try templatesPaths(
+        io,
         b.allocator,
         &.{.{
             .prefix = "templates",
@@ -181,14 +188,14 @@ pub fn build(b: *std.Build) !void {
     const manifest_lazy_path = manifest_exe_run.addOutputFileArg("zmpl.manifest.zig");
 
     manifest_exe_run.setCwd(.{
-        .cwd_relative = try std.fs.cwd().realpathAlloc(b.allocator, "."),
+        .cwd_relative = try std.Io.Dir.cwd().realPathFileAlloc(io, ".", b.allocator),
     });
     manifest_exe_run.expectExitCode(0);
     manifest_exe_run.addArg(try std.mem.join(b.allocator, ";", templates_paths));
 
     lib.step.dependOn(&manifest_exe_run.step);
 
-    for (try findTemplates(b, templates_paths)) |path|
+    for (try findTemplates(b, io, templates_paths)) |path|
         manifest_exe_run.addFileArg(.{ .cwd_relative = path });
 
     const compile_step = b.step("compile", "Compile Zmpl templates");
@@ -264,7 +271,7 @@ const TemplatesPath = struct {
     path: []const []const u8,
 };
 
-pub fn templatesPaths(allocator: Allocator, paths: []const TemplatesPath) ![]const []const u8 {
+pub fn templatesPaths(io: std.Io, allocator: Allocator, paths: []const TemplatesPath) ![]const []const u8 {
     var buf: ArrayList([]const u8) = .empty;
     defer buf.deinit(allocator);
     for (paths) |path| {
@@ -274,7 +281,7 @@ pub fn templatesPaths(allocator: Allocator, paths: []const TemplatesPath) ![]con
         const absolute_path = if (std.fs.path.isAbsolute(joined))
             try allocator.dupe(u8, joined)
         else
-            std.fs.cwd().realpathAlloc(allocator, joined) catch |err|
+            std.Io.Dir.cwd().realPathFileAlloc(io, joined, allocator) catch |err|
                 switch (err) {
                     error.FileNotFound => "_",
                     else => return err,
@@ -310,7 +317,7 @@ pub fn addTemplateConstants(b: *Build, comptime constants: type) ![]const u8 {
     return std.mem.join(b.allocator, "|", &array);
 }
 
-fn findTemplates(b: *Build, templates_paths: []const []const u8) ![][]const u8 {
+fn findTemplates(b: *Build, io: std.Io, templates_paths: []const []const u8) ![][]const u8 {
     var templates: ArrayList([]const u8) = .empty;
     defer templates.deinit(b.allocator);
 
@@ -326,7 +333,8 @@ fn findTemplates(b: *Build, templates_paths: []const []const u8) ![][]const u8 {
     for (templates_paths_buf.items) |templates_path| {
         if (std.mem.eql(u8, templates_path, "_")) continue;
 
-        var dir = std.fs.cwd().openDir(
+        var dir = std.Io.Dir.cwd().openDir(
+            io,
             templates_path,
             .{ .iterate = true },
         ) catch |err| {
@@ -345,11 +353,11 @@ fn findTemplates(b: *Build, templates_paths: []const []const u8) ![][]const u8 {
         var walker = try dir.walk(b.allocator);
         defer walker.deinit();
 
-        while (try walker.next()) |entry| {
+        while (try walker.next(io)) |entry| {
             if (entry.kind != .file) continue;
             const extension = std.fs.path.extension(entry.path);
             if (!std.mem.eql(u8, extension, ".zmpl")) continue;
-            try templates.append(b.allocator, try dir.realpathAlloc(b.allocator, entry.path));
+            try templates.append(b.allocator, try dir.realPathFileAlloc(io, entry.path, b.allocator));
         }
     }
     return templates.toOwnedSlice(b.allocator);
