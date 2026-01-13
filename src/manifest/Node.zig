@@ -1,4 +1,5 @@
 const std = @import("std");
+const Writer = std.Io.Writer;
 const builtin = @import("builtin");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
@@ -25,7 +26,7 @@ templates_paths_map: StringHashMap([]const u8),
 templates_path: []const u8,
 template_prefix: []const u8,
 template_func_name: []const u8,
-block_writer: Writer,
+block_writer: *Writer,
 block_map: *StringHashMap(ArrayList(Block)),
 
 const else_token = "@else";
@@ -39,60 +40,8 @@ pub const Block = struct {
     func: []const u8,
 };
 
-/// Debugging writer - writes debug tokens after every print/write instruction. This requires
-/// that all print/write operations are line-based, otherwise the injected Zig comment will
-/// clobber any dangling output.
-/// In non-debug builds, debug tokens are omitted as a stack trace is required for them to be
-/// useful.
-pub const Writer = struct {
-    allocator: Allocator,
-    buf: *ArrayList(u8),
-    token: Token,
-
-    pub fn print(self: Writer, comptime input: []const u8, args: anytype) !void {
-        var buf: std.Io.Writer.Allocating = .fromArrayList(self.allocator, self.buf);
-        defer buf.deinit();
-        try buf.writer.print(input, args);
-        if (builtin.mode == .Debug) try self.writeDebug(&buf.writer);
-        self.buf.* = buf.toArrayList();
-    }
-
-    pub fn writeAll(self: Writer, input: []const u8) !void {
-        var buf: std.Io.Writer.Allocating = .fromArrayList(self.allocator, self.buf);
-        defer buf.deinit();
-        if (builtin.mode == .Debug) {
-            var it = std.mem.tokenizeScalar(u8, input, '\n');
-            while (it.next()) |line| {
-                try buf.writer.writeAll(line);
-                try self.writeDebug(&buf.writer);
-            }
-        } else try buf.writer.writeAll(input);
-        self.buf.* = buf.toArrayList();
-    }
-
-    pub fn writeByte(self: Writer, byte: u8) !void {
-        var buf: std.Io.Writer.Allocating = .fromArrayList(self.allocator, self.buf);
-        defer buf.deinit();
-        try buf.writer.writeByte(byte);
-        self.buf.* = buf.toArrayList();
-    }
-
-    fn writeDebug(self: Writer, writer: *std.Io.Writer) !void {
-        try writer.print(
-            \\
-            \\//zmpl:debug:{}:{}:{s}
-            \\
-        , .{
-            self.token.start,
-            self.token.end,
-            self.token.path,
-        });
-    }
-};
-
-pub fn compile(self: Node, input: []const u8, writer: Writer, options: type) !void {
-    var compile_writer = writer;
-    compile_writer.token = self.token;
+pub fn compile(self: Node, input: []const u8, writer: *Writer, options: type) !void {
+    const compile_writer = writer;
 
     if (self.token.mode == .partial and self.children.items.len > 0) {
         std.log.err(
@@ -500,7 +449,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
                     const chain = try std.fmt.allocPrint(
                         self.allocator,
                         \\if (comptime __zmpl.isZmplValue(@TypeOf({[root]s})))
-                        \\    try {[root]s}.chainRefT(@typeInfo(@TypeOf({[name]s}_renderPartial)).@"fn".params[{[index]}].type.?, "{[remainder]s}",)
+                        \\    try {[root]s}.chainRefT(@typeInfo(@TypeOf(@field(__Manifest, "{[name]s}").renderPartial)).@"fn".params[{[index]}].type.?, "{[remainder]s}",)
                         \\else
                         \\    {[root]s}{[separator]s}{[remainder2]s}
                     ,
@@ -521,7 +470,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
                         self.allocator,
                         try std.fmt.allocPrint(self.allocator,
                             \\if (comptime __zmpl.isZmplValue(@TypeOf({[root]s})))
-                            \\    try {0s}.coerce(@typeInfo(@TypeOf({[name]s}_renderPartial)).@"fn".params[{[index]}].type.?)
+                            \\    try {0s}.coerce(@typeInfo(@TypeOf(@field(__Manifest, "{[name]s}").renderPartial)).@"fn".params[{[index]}].type.?)
                             \\else
                             \\   {[root]s}
                         , .{
@@ -546,7 +495,7 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
         \\        __partial_data.template_decls = zmpl.template_decls;
         \\        defer __partial_data.deinit();
         \\
-        \\    const __partial_output = try {[name]s}_renderPartial(&__partial_data, Context, context, &__slots, &.{{}}, {[content]s});
+        \\    const __partial_output = try @field(__Manifest, "{[name]s}").renderPartial(&__partial_data, Context, context, &__slots, &.{{}}, {[content]s});
         \\    defer allocator.free(__partial_output);
         \\    try zmpl.write(__partial_output);
         \\}}

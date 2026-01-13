@@ -40,7 +40,7 @@ pub fn main() !void {
 
     const args = try std.process.argsAlloc(allocator);
 
-    const manifest_path = args[1];
+    const output_dir = args[1];
 
     var templates_paths: ArrayList(Manifest.TemplatePath) = .empty;
     defer templates_paths.deinit(allocator);
@@ -79,15 +79,11 @@ pub fn main() !void {
 
     var manifest: Manifest = .init(templates_paths.items, template_paths_buf.items);
 
-    const file = try std.fs.cwd().createFile(manifest_path, .{ .truncate = true });
-    var buffer: [1024]u8 = undefined;
-    var writer = file.writerStreaming(&buffer);
     try manifest.compile(
         allocator,
-        &writer.interface,
+        output_dir,
         zmpl_options,
     );
-    file.close();
 }
 
 test {

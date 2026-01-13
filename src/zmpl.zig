@@ -1,4 +1,5 @@
 const std = @import("std");
+const Writer = std.Io.Writer;
 
 const build_options = @import("build_options");
 
@@ -13,6 +14,7 @@ pub const zmpl = @This();
 pub const Data = @import("zmpl/Data.zig");
 pub const Template = @import("zmpl/Template.zig");
 pub const Manifest = Template.Manifest;
+pub const templates = Template.Manifest;
 pub const colors = @import("zmpl/colors.zig");
 pub const Format = @import("zmpl/Format.zig");
 pub const debug = @import("zmpl/debug.zig");

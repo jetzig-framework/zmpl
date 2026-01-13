@@ -40,28 +40,44 @@ pub fn render(
     const c = if (comptime Context == null) DefaultContext{} else context;
 
     return if (options.layout) |layout| blk: {
-        inline for (Manifest.templates) |template| {
-            if (std.mem.eql(u8, template.name, self.name)) {
-                const renderFn = @field(Manifest, template.name ++ "_renderWithLayout");
-                break :blk renderFn(layout, data, C, c, template.blocks) catch |err| {
-                    if (@errorReturnTrace()) |stack_trace| {
-                        try debug.printSourceInfo(data.allocator, err, stack_trace);
+        const type_info = @typeInfo(Manifest);
+        inline for (type_info.@"struct".decls) |decl| {
+            const field = @field(Manifest, decl.name);
+            const field_type = @TypeOf(field);
+            if (@typeInfo(field_type) == .@"type") {
+                if (@hasDecl(field, "__template_metadata")) {
+                    const metadata = field.__template_metadata;
+                    if (std.mem.eql(u8, metadata.name, self.name)) {
+                        const renderFn = field.renderWithLayout;
+                        break :blk renderFn(layout, data, C, c, metadata.blocks) catch |err| {
+                            if (@errorReturnTrace()) |stack_trace| {
+                                try debug.printSourceInfo(data.allocator, err, stack_trace);
+                            }
+                            break :blk err;
+                        };
                     }
-                    break :blk err;
-                };
+                }
             }
         }
         unreachable;
     } else blk: {
-        inline for (Manifest.templates) |template| {
-            if (std.mem.eql(u8, template.name, self.name)) {
-                const renderFn = @field(Manifest, template.name ++ "_render");
-                break :blk renderFn(data, C, c, blocks) catch |err| {
-                    if (@errorReturnTrace()) |stack_trace| {
-                        try debug.printSourceInfo(data.allocator, err, stack_trace);
+        const type_info = @typeInfo(Manifest);
+        inline for (type_info.@"struct".decls) |decl| {
+            const field = @field(Manifest, decl.name);
+            const field_type = @TypeOf(field);
+            if (@typeInfo(field_type) == .@"type") {
+                if (@hasDecl(field, "__template_metadata")) {
+                    const metadata = field.__template_metadata;
+                    if (std.mem.eql(u8, metadata.name, self.name)) {
+                        const renderFn = field.render;
+                        break :blk renderFn(data, C, c, blocks) catch |err| {
+                            if (@errorReturnTrace()) |stack_trace| {
+                                try debug.printSourceInfo(data.allocator, err, stack_trace);
+                            }
+                            break :blk err;
+                        };
                     }
-                    break :blk err;
-                };
+                }
             }
         }
         unreachable;

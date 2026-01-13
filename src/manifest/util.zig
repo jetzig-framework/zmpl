@@ -139,7 +139,7 @@ pub fn generateTempVariableNameAlloc(allocator: Allocator) ![]const u8 {
 
 /// Sanitize a key to create a valid Zig identifier.
 /// Replaces invalid characters with underscores.
-fn sanitizeKeyForIdentifier(allocator: Allocator, key: []const u8) ![]const u8 {
+pub fn sanitizeKeyForZigIdentifier(allocator: Allocator, key: []const u8) ![]const u8 {
     const result = try allocator.alloc(u8, key.len);
     for (key, 0..) |c, i| {
         result[i] = switch (c) {
@@ -172,7 +172,7 @@ pub fn generateVariableName(buf: []u8, key: []const u8, content: []const u8) voi
 }
 
 pub fn generateVariableNameAlloc(allocator: Allocator, key: []const u8, content: []const u8) ![]const u8 {
-    const sanitized_key = try sanitizeKeyForIdentifier(allocator, key);
+    const sanitized_key = try sanitizeKeyForZigIdentifier(allocator, key);
     defer allocator.free(sanitized_key);
 
     const buf = try allocator.alloc(u8, sanitized_key.len + 1 + 16); // key + "_" + 16 hex chars

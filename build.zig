@@ -4,6 +4,7 @@ const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 const builtin = @import("builtin");
+const Decoder = std.base64.standard.Decoder;
 const Encoder = std.base64.standard.Encoder;
 const Data = @import("src/zmpl.zig").Data;
 pub fn build(b: *std.Build) !void {
@@ -76,6 +77,11 @@ pub fn build(b: *std.Build) !void {
         ) orelse true,
     );
 
+    const zmd = b.dependency("zmd", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("zmd");
+
     const zmpl_options = b.addModule("zmpl_options", .{
         .root_source_file = options_files.add(
             "zmpl_options.zig",
@@ -87,38 +93,33 @@ pub fn build(b: *std.Build) !void {
                 zmpl_manifest_header_option,
             ),
         ),
+        .imports = &.{
+            .{ .name = "zmd", .module = zmd },
+        },
     });
-
-    const zmd = b.dependency("zmd", .{
-        .target = target,
-        .optimize = optimize,
-    }).module("zmd");
 
     const jetcommon = b.dependency("jetcommon", .{
         .target = target,
         .optimize = optimize,
     }).module("jetcommon");
 
-    const entry = b.createModule(.{
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = b.path("src/main.zig"),
-    });
-
-    const manifest_m = b.createModule(.{
-        .root_source_file = b.path("src/manifest/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const manifest_exe = b.addExecutable(.{
-        .name = "manifest",
-        .use_llvm = use_llvm,
-        .root_module = manifest_m,
-    });
-
     const zmpl = b.addModule("zmpl", .{
         .root_source_file = b.path("src/zmpl.zig"),
+        .imports = &.{
+            .{ .name = "zmd", .module = zmd },
+            .{ .name = "jetcommon", .module = jetcommon },
+            .{ .name = "zmpl_options", .module = build_options.createModule() },
+        },
+    });
+
+    const manifest = b.addModule("zmpl.manifest", .{
+        // adding root_source_file later
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zmd", .module = zmd },
+            .{ .name = "zmpl", .module = zmpl },
+        },
     });
 
     const dummy_manifest = b.createModule(.{
@@ -129,113 +130,207 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/manifest/dummy_zmpl_options.zig"),
     });
 
-    const tests = b.createModule(.{
-        .root_source_file = b.path("src/tests.zig"),
-        .target = target,
-        .optimize = optimize,
+    const template_tests = b.addTest(.{
+        .filters = test_filters,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zmpl", .module = zmpl },
+                .{ .name = "jetcommon", .module = jetcommon },
+                .{ .name = "zmpl.manifest", .module = manifest },
+            },
+        }),
     });
 
-    const zmpl_m = b.createModule(.{
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = b.path("src/zmpl.zig"),
+    const zmpl_tests = b.addTest(.{
+        .filters = test_filters,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/zmpl.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zmd", .module = zmd },
+                .{ .name = "jetcommon", .module = jetcommon },
+                .{ .name = "zmpl.manifest", .module = dummy_manifest },
+            },
+        }),
+    });
+
+    const manifest_tests = b.addTest(.{
+        .filters = test_filters,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/manifest/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zmpl_options", .module = dummy_zmpl_options },
+                .{ .name = "zmd", .module = zmd },
+            },
+        }),
     });
 
     const lib = b.addLibrary(.{
         .name = "zmpl",
         .linkage = .static,
         .use_llvm = use_llvm,
-        .root_module = zmpl_m,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/zmpl.zig"),
+            .imports = &.{
+                .{ .name = "zmd", .module = zmd },
+                .{ .name = "zmpl", .module = zmpl },
+                .{ .name = "jetcommon", .module = jetcommon },
+                .{ .name = "zmpl.manifest", .module = manifest },
+            },
+        }),
     });
 
-    const exe = b.addExecutable(.{
+    const benchmark = b.addExecutable(.{
         .name = "zmpl",
         .use_llvm = use_llvm,
-        .root_module = entry,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/main.zig"),
+            .imports = &.{
+                .{ .name = "zmpl", .module = zmpl },
+                .{ .name = "zmd", .module = zmd },
+            },
+        }),
     });
 
-    const run_artifact = b.addRunArtifact(exe);
+    const run_artifact = b.addRunArtifact(benchmark);
     const run_step = b.step("run", "Run benchmarking");
     run_step.dependOn(&run_artifact.step);
 
-    lib.root_module.addImport("zmpl", zmpl);
-    exe.root_module.addImport("zmpl", zmpl);
-
-    zmpl.addOptions("build_options", build_options);
-
-    lib.root_module.addImport("zmd", zmd);
-    zmpl.addImport("zmd", zmd);
-
-    lib.root_module.addImport("jetcommon", jetcommon);
-    zmpl.addImport("jetcommon", jetcommon);
-
     const auto_build = if (zmpl_auto_build_option) |opt| opt else true;
 
-    zmpl_options.addImport("zmd", zmd);
-    manifest_exe.root_module.addImport("zmpl_options", zmpl_options);
-    manifest_exe.root_module.addImport("zmd", zmd);
-    manifest_exe.root_module.addImport("jetcommon", jetcommon);
-
-    const manifest_exe_run = b.addRunArtifact(manifest_exe);
-    b.getInstallStep().dependOn(&manifest_exe_run.step);
-    const manifest_lazy_path = manifest_exe_run.addOutputFileArg("zmpl.manifest.zig");
-
-    manifest_exe_run.setCwd(.{
-        .cwd_relative = try std.fs.cwd().realpathAlloc(b.allocator, "."),
+    // Standalone template compiler executable
+    const compiler_module = b.createModule(.{
+        .root_source_file = b.path("src/compiler.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zmpl_options", .module = zmpl_options },
+            .{ .name = "zmd", .module = zmd },
+            .{ .name = "jetcommon", .module = jetcommon },
+        },
     });
-    manifest_exe_run.expectExitCode(0);
-    manifest_exe_run.addArg(try std.mem.join(b.allocator, ";", templates_paths));
 
-    lib.step.dependOn(&manifest_exe_run.step);
+    const template_compiler = b.addExecutable(.{
+        .name = "template-compiler",
+        .use_llvm = use_llvm,
+        .root_module = compiler_module,
+    });
+    b.installArtifact(template_compiler);
 
-    for (try findTemplates(b, templates_paths)) |path|
-        manifest_exe_run.addFileArg(.{ .cwd_relative = path });
+    // Collect metadata for all templates
+    var template_metadata: ArrayList(TemplateMetadata) = .empty;
+    defer template_metadata.deinit(b.allocator);
+
+    // Build prefix -> root_path map for lookups
+    var prefix_to_root = std.StringHashMap([]const u8).init(b.allocator);
+    defer prefix_to_root.deinit();
+    for (templates_paths) |syntax| {
+        try prefix_to_root.put(extractPrefix(syntax), extractPath(syntax));
+    }
 
     const compile_step = b.step("compile", "Compile Zmpl templates");
-    compile_step.dependOn(&manifest_exe_run.step);
 
-    const manifest = b.addModule("zmpl.manifest", .{
-        .root_source_file = manifest_lazy_path,
-    });
+    // Process each template file
+    for (try findTemplates(b, templates_paths)) |template_path| {
+        // Find which prefix/root this template belongs to
+        var found_prefix: ?[]const u8 = null;
+        var found_root: ?[]const u8 = null;
 
-    manifest.addImport("zmpl", zmpl);
-    manifest.addImport("zmd", zmd);
+        for (templates_paths) |syntax| {
+            const root = extractPath(syntax);
+            if (std.mem.startsWith(u8, template_path, root)) {
+                found_prefix = extractPrefix(syntax);
+                found_root = root;
+                break;
+            }
+        }
+
+        if (found_prefix == null or found_root == null) {
+            std.log.warn("[zmpl] Could not determine prefix for template: {s}", .{template_path});
+            continue;
+        }
+
+        const template_prefix = found_prefix.?;
+        const root_path = found_root.?;
+
+        const key = try templatePathStore(b.allocator, root_path, template_path);
+        const name = try sanitizeKeyForZigIdentifier(b.allocator, key);
+
+        const basename = std.fs.path.basename(template_path);
+        const is_partial = std.mem.startsWith(u8, basename, "_");
+
+        try template_metadata.append(b.allocator, .{
+            .absolute_path = template_path,
+            .key = key,
+            .name = name,
+            .prefix = template_prefix,
+            .partial = is_partial,
+        });
+    }
+
+    const manifest_files = b.addWriteFiles();
+
+    for (template_metadata.items) |meta| {
+        // Find root path for this template's prefix
+        const root_path = prefix_to_root.get(meta.prefix).?;
+
+        const compile_template = b.addRunArtifact(template_compiler);
+        compile_template.addFileArg(.{ .cwd_relative = meta.absolute_path });
+        compile_template.addArg(meta.prefix);
+        compile_template.addArg(root_path);
+
+        for (template_metadata.items) |other_meta| {
+            // Only include templates from the same prefix
+            if (std.mem.eql(u8, other_meta.prefix, meta.prefix)) {
+                compile_template.addArg(other_meta.absolute_path);
+            }
+        }
+
+        const name = try std.fmt.allocPrint(
+            b.allocator,
+            "{s}.zig",
+            .{meta.name},
+        );
+        _ = manifest_files.addCopyFile(compile_template.captureStdOut(), name);
+        // const template_module = b.createModule(.{
+        //     .root_source_file = file,
+        //     .target = target,
+        //     .optimize = optimize,
+        //     .imports = &.{
+        //         .{ .name = "zmpl.manifest", .module = manifest },
+        //         .{ .name = "zmpl", .module = zmpl },
+        //         .{ .name = "zmd", .module = zmd },
+        //     },
+        // });
+        // manifest.addImport(meta.name, template_module);
+        // template_tests.root_module.addImport(meta.name, template_module);
+        // try template_modules.put(meta.name, template_module);
+    }
+
+    const manifest_content = try generateManifestContent(
+        b.allocator,
+        template_metadata.items,
+        zmpl_manifest_header_option,
+    );
+
+    manifest.root_source_file = manifest_files.add("zmpl.manifest.zig", manifest_content);
+
+    compile_step.dependOn(&manifest_files.step);
+
     zmpl.addImport("zmpl.manifest", manifest);
 
     if (auto_build) {
-        const template_tests = b.addTest(.{
-            .filters = test_filters,
-            .root_module = tests,
-        });
-
-        const zmpl_tests = b.addTest(.{
-            .filters = test_filters,
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/zmpl.zig"),
-                .target = target,
-                .optimize = optimize,
-            }),
-        });
-
-        const manifest_tests = b.addTest(.{
-            .filters = test_filters,
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/manifest/main.zig"),
-                .target = target,
-                .optimize = optimize,
-            }),
-        });
-
-        template_tests.root_module.addImport("zmpl", zmpl);
-        template_tests.root_module.addImport("zmpl.manifest", manifest);
-        template_tests.root_module.addImport("jetcommon", jetcommon);
-
-        zmpl_tests.root_module.addImport("jetcommon", jetcommon);
-        zmpl_tests.root_module.addImport("zmpl.manifest", dummy_manifest);
-        zmpl_tests.root_module.addImport("zmd", zmd);
-
-        manifest_tests.root_module.addImport("zmpl_options", dummy_zmpl_options);
-        manifest_tests.root_module.addImport("zmd", zmd);
+        template_tests.step.dependOn(&manifest_files.step);
 
         const run_template_tests = b.addRunArtifact(template_tests);
         const run_zmpl_tests = b.addRunArtifact(zmpl_tests);
@@ -246,6 +341,9 @@ pub fn build(b: *std.Build) !void {
         test_step.dependOn(&run_zmpl_tests.step);
         test_step.dependOn(&run_manifest_tests.step);
     }
+
+    // lib depends on manifest generation
+    lib.step.dependOn(&manifest_files.step);
 
     b.installArtifact(lib);
 
@@ -262,6 +360,14 @@ pub fn build(b: *std.Build) !void {
 const TemplatesPath = struct {
     prefix: []const u8,
     path: []const []const u8,
+};
+
+const TemplateMetadata = struct {
+    absolute_path: []const u8,
+    key: []const u8,
+    name: []const u8,
+    prefix: []const u8,
+    partial: bool,
 };
 
 pub fn templatesPaths(allocator: Allocator, paths: []const TemplatesPath) ![]const []const u8 {
@@ -355,6 +461,144 @@ fn findTemplates(b: *Build, templates_paths: []const []const u8) ![][]const u8 {
     return templates.toOwnedSlice(b.allocator);
 }
 
+/// Strips root path, converts to POSIX separators, removes .zmpl extension
+fn templatePathStore(allocator: Allocator, root: []const u8, path: []const u8) ![]const u8 {
+    const relative = try std.fs.path.relative(allocator, root, path);
+    defer allocator.free(relative);
+
+    const normalized = try std.mem.replaceOwned(u8, allocator, relative, "\\", "/");
+
+    const extension = if (std.mem.endsWith(u8, normalized, ".md.zmpl"))
+        ".md.zmpl"
+    else if (std.mem.endsWith(u8, normalized, ".html.zmpl"))
+        ".html.zmpl"
+    else
+        std.fs.path.extension(normalized);
+
+    return normalized[0 .. normalized.len - extension.len];
+}
+
+fn sanitizeKeyForZigIdentifier(allocator: Allocator, key: []const u8) ![]const u8 {
+    const result = try allocator.alloc(u8, key.len);
+    for (key, 0..) |c, i| {
+        result[i] = switch (c) {
+            'a'...'z', 'A'...'Z', '0'...'9' => c,
+            else => '_',
+        };
+    }
+    return result;
+}
+
+fn extractPrefix(syntax: []const u8) []const u8 {
+    const prefix_start = "prefix=".len;
+    const prefix_end = std.mem.indexOf(u8, syntax, ",path=").?;
+    return syntax[prefix_start..prefix_end];
+}
+
+fn extractPath(syntax: []const u8) []const u8 {
+    const path_start = std.mem.indexOf(u8, syntax, ",path=").? + ",path=".len;
+    return syntax[path_start..];
+}
+
+fn generateManifestContent(
+    allocator: Allocator,
+    templates: []const TemplateMetadata,
+    manifest_header_b64: []const u8,
+) ![]const u8 {
+    var buf: Writer.Allocating = .init(allocator);
+    const writer = &buf.writer;
+
+    try writer.writeAll(
+        \\// Zmpl template manifest.
+        \\// This file is automatically generated in build.zig and should not be manually modified.
+        \\const std = @import("std");
+        \\const __zmpl = @import("zmpl");
+        \\
+        \\
+    );
+
+    if (manifest_header_b64.len > 0) {
+        const required_size = try Decoder.calcSizeForSlice(manifest_header_b64);
+        const decoded = try allocator.alloc(u8, required_size);
+        defer allocator.free(decoded);
+        try Decoder.decode(decoded, manifest_header_b64);
+        try writer.writeAll(decoded);
+        try writer.writeAll("\n");
+    }
+
+    try writer.writeAll(
+        \\pub const ZmplValue = __zmpl.Data.Value;
+        \\pub const __Manifest = struct {
+        \\    const TemplateType = enum { zmpl, markdown };
+        \\    pub const Template = __zmpl.Template;
+        \\
+        \\
+    );
+
+    for (templates) |template| try writer.print(
+        \\    pub const {[name]s} = @import("{[name]s}.zig");
+        \\
+    ,
+        .{ .name = template.name },
+    );
+
+    // Lookup functions using reflection on __Manifest fields
+    try writer.writeAll(
+        \\
+        \\    /// Find any template matching a given name. Uses all template paths in order.
+        \\    pub fn find(name: []const u8) ?Template {
+        \\        const type_info = @typeInfo(@This());
+        \\        inline for (type_info.@"struct".decls) |decl| {
+        \\            const field = @field(@This(), decl.name);
+        \\            const field_type = @TypeOf(field);
+        \\            if (@typeInfo(field_type) == .@"type") {
+        \\                if (@hasDecl(field, "__template_metadata")) {
+        \\                    const metadata = field.__template_metadata;
+        \\                    if (std.mem.eql(u8, metadata.key, name)) {
+        \\                        return .{
+        \\                            .key = metadata.key,
+        \\                            .name = metadata.name,
+        \\                            .prefix = metadata.prefix,
+        \\                            .blocks = metadata.blocks,
+        \\                        };
+        \\                    }
+        \\                }
+        \\            }
+        \\        }
+        \\        return null;
+        \\    }
+        \\
+        \\    /// Find a template in a given prefix, i.e. a template located within a specific
+        \\    /// template path.
+        \\    pub fn findPrefixed(prefix: []const u8, name: []const u8) ?Template {
+        \\        const type_info = @typeInfo(@This());
+        \\        inline for (type_info.@"struct".decls) |decl| {
+        \\            const field = @field(@This(), decl.name);
+        \\            const field_type = @TypeOf(field);
+        \\            if (@typeInfo(field_type) == .@"type") {
+        \\                if (@hasDecl(field, "__template_metadata")) {
+        \\                    const metadata = field.__template_metadata;
+        \\                    if (std.mem.eql(u8, metadata.prefix, prefix) and
+        \\                        std.mem.eql(u8, metadata.key, name)) {
+        \\                        return .{
+        \\                            .key = metadata.key,
+        \\                            .name = metadata.name,
+        \\                            .prefix = metadata.prefix,
+        \\                            .blocks = metadata.blocks,
+        \\                        };
+        \\                    }
+        \\                }
+        \\            }
+        \\        }
+        \\        return null;
+        \\    }
+        \\};
+        \\
+    );
+
+    return buf.toOwnedSlice();
+}
+
 fn generateZmplOptions(
     allocator: Allocator,
     options_header_option: []const u8,
@@ -369,18 +613,18 @@ fn generateZmplOptions(
         .{ .options = options_header_option },
     );
 
-    try parseZmplConstants(
-        &aw.writer,
-        constants,
-    );
+    try parseZmplConstants(&aw.writer, constants);
 
-    const encodedHeader: []u8 = try allocator.alloc(u8, Encoder.calcSize(manifest_header_option.len));
+    const encodedHeader: []u8 = try allocator.alloc(
+        u8,
+        Encoder.calcSize(manifest_header_option.len),
+    );
     defer allocator.free(encodedHeader);
     const base64Header = Encoder.encode(encodedHeader, manifest_header_option);
 
     try aw.writer.print(
-        "{s}\n\npub const manifest_header: []const u8 = \"{s}\";\n",
-        .{ markdown_fragments, base64Header },
+        "{[fragments]s}\n\npub const manifest_header: []const u8 = \"{[header]s}\";\n",
+        .{ .fragments = markdown_fragments, .header = base64Header },
     );
 
     return aw.toOwnedSlice();
@@ -394,12 +638,18 @@ fn parseZmplConstants(writer: *Writer, constants_string: []const u8) !void {
         var arg_it = std.mem.splitScalar(u8, pair, '#');
         const const_name = arg_it.first();
         const const_type = arg_it.next() orelse {
-            std.log.err("Incomplete Zmpl constants argument: {s}", .{constants_string});
+            std.log.err(
+                "Incomplete Zmpl constants argument: {s}",
+                .{constants_string},
+            );
             return error.ZmplConstantsOptionError;
         };
         // this should be null
         if (arg_it.next()) |_| {
-            std.log.err("Incoherent Zmpl constants argument: {s}", .{constants_string});
+            std.log.err(
+                "Incoherent Zmpl constants argument: {s}",
+                .{constants_string},
+            );
             return error.ZmplConstantsOptionError;
         }
         try writer.print("    {s}: {s},\n", .{ const_name, const_type });

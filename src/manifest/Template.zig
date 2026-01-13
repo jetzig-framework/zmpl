@@ -28,7 +28,7 @@ args: ?[]const u8 = null,
 partial: bool,
 template_map: StringHashMap(TemplateMap),
 templates_paths_map: StringHashMap([]const u8),
-block_buf: ArrayList(u8),
+block_buf: *Writer.Allocating,
 block_map: StringHashMap(ArrayList(Node.Block)),
 
 const end_token = "@end";
@@ -81,6 +81,8 @@ pub fn init(
     input: []const u8,
     template_map: StringHashMap(TemplateMap),
 ) Template {
+    const aw = allocator.create(Writer.Allocating) catch @panic("OOM");
+    aw.* = .init(allocator);
     return .{
         .allocator = allocator,
         .templates_path = templates_path,
@@ -93,7 +95,7 @@ pub fn init(
         .partial = std.mem.startsWith(u8, std.fs.path.basename(path), "_"),
         .template_map = template_map,
         .templates_paths_map = templates_paths_map,
-        .block_buf = .empty,
+        .block_buf = aw,
         .block_map = .empty,
     };
 }
@@ -110,10 +112,10 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
     try self.tokenize();
     try self.parse();
 
-    var buf: ArrayList(u8) = .empty;
-    defer buf.deinit(self.allocator);
+    var buf: Writer.Allocating = .init(self.allocator);
+    defer buf.deinit();
+    const writer = &buf.writer;
 
-    const writer = Node.Writer{ .allocator = self.allocator, .buf = &buf, .token = self.tokens.items[0] };
     try self.renderHeader(writer, options);
     try self.root_node.compile(self.input, writer, options);
 
@@ -121,10 +123,15 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
 
     self.state = .compiled;
 
-    const with_sentinel = try std.mem.concatWithSentinel(self.allocator, u8, &.{buf.items}, 0);
+    const with_sentinel = try std.mem.concatWithSentinel(
+        self.allocator,
+        u8,
+        &.{buf.writer.buffered()},
+        0,
+    );
     var ast = try std.zig.Ast.parse(self.allocator, with_sentinel, .zig);
     return if (ast.errors.len > 0)
-        try buf.toOwnedSlice(self.allocator)
+        try buf.toOwnedSlice()
     else
         ast.renderAlloc(self.allocator);
 }
@@ -334,7 +341,7 @@ fn createNode(self: *Template, token: Token, parent: ?*const Node) !*Node {
         .templates_path = self.templates_path,
         .template_prefix = self.prefix,
         .templates_paths_map = self.templates_paths_map,
-        .block_writer = Node.Writer{ .allocator = self.allocator, .buf = &self.block_buf, .token = self.tokens.items[0] },
+        .block_writer = &self.block_buf.*.writer,
         .block_map = &self.block_map,
     };
     return node;
@@ -603,31 +610,40 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
         self.args = try args_buf.toOwnedSlice();
     }
 
+    // Write imports for individual template file
+    try writer.writeAll(
+        \\const std = @import("std");
+        \\const __zmpl = @import("zmpl");
+        \\const __Manifest = @import("zmpl.manifest.zig").__Manifest;
+        \\const ZmplValue = __zmpl.Data.Value;
+        \\
+        \\
+    );
+
     const header = try std.fmt.allocPrint(
         self.allocator,
-        \\pub fn {0s}_render{1s}(
+        \\pub fn {0s}(
         \\    zmpl: *__zmpl.Data,
         \\    Context: type,
         \\    context: Context,
-        \\    {5s}
+        \\    {4s}
         \\    comptime __blocks: []const __zmpl.Template.Block,
-        \\    {2s}
+        \\    {1s}
         \\) anyerror![]const u8 {{
-        \\{3s}
+        \\{2s}
         \\    var data = zmpl;
         \\    zmpl.noop(**__zmpl.Data, &data);
         \\    zmpl.noop(Context, context);
         \\    zmpl.noop([]const __zmpl.Template.Block, __blocks);
         \\    const allocator = zmpl.allocator;
-        \\    var __extend: ?__Manifest.Template = null;
-        \\    if (__extend) |*__capture| zmpl.noop(*__Manifest.Template, __capture);
+        \\    var __extend: ?__zmpl.Manifest.Template = null;
+        \\    if (__extend) |*__capture| zmpl.noop(*__zmpl.Manifest.Template, __capture);
         \\    zmpl.noop(std.mem.Allocator, allocator);
-        \\    {4s}
+        \\    {3s}
         \\
     ,
         .{
-            self.name,
-            if (self.partial) "Partial" else "",
+            if (self.partial) "renderPartial" else "render",
             if (self.partial) (self.args orelse "") else "",
             decls_buf.items,
             if (self.partial) "zmpl.noop([]const __zmpl.Data.Slot, slots);" else "",
@@ -640,74 +656,63 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
 }
 
 // Render the final component of the template function.
-fn renderFooter(self: Template, writer: anytype) !void {
-    try writer.print(
+fn renderFooter(self: Template, writer: *Writer) !void {
+    try writer.writeAll(
         \\
-        \\    if (__extend) |__capture| {{
+        \\    if (__extend) |__capture| {
         \\        const __inner_content = try allocator.dupe(u8, try zmpl.output_buf.toOwnedSlice());
-        \\        zmpl.content = .{{ .data = zmpl.strip(__inner_content) }};
+        \\        zmpl.content = .{ .data = zmpl.strip(__inner_content) };
         \\        zmpl.output_buf.clearRetainingCapacity();
-        \\        const __content = try __capture.render(zmpl, Context, context, {s}{s}, .{{}});
+        \\        const __content = try __capture.render(zmpl, Context, context, &.{}, .{});
         \\        return __content;
-        \\    }} else {{
+        \\    } else {
         \\        const output = try zmpl.output_buf.toOwnedSlice();
         \\        defer zmpl.allocator.free(output);
         \\        return zmpl.chomp(try zmpl.allocator.dupe(u8, output));
-        \\    }}
-        \\}}
+        \\    }
+        \\}
         \\
-    ,
-        .{
-            if (self.partial) "" else self.name,
-            if (self.partial) "&.{}" else ".blocks",
-        },
     );
     if (self.partial) {
-        try writer.writeAll(try std.fmt.allocPrint(
-            self.allocator,
-            \\pub fn {0s}_renderWithLayout(
+        try writer.writeAll(
+            \\pub fn renderWithLayout(
             \\    layout: __zmpl.Manifest.Template,
             \\    zmpl: *__zmpl.Data,
             \\    Context: type,
             \\    context: Context,
             \\    comptime blocks: []const __zmpl.Template.Block,
-            \\) anyerror![]const u8 {{
+            \\) anyerror![]const u8 {
             \\    _ = layout;
             \\    _ = zmpl;
             \\    _ = context;
             \\    _ = blocks;
-            \\    std.debug.print("Rendering a partial with a layout is not supported.\n", .{{}});
+            \\    std.debug.print("Rendering a partial with a layout is not supported.\n", .{});
             \\    return error.ZmplError;
-            \\}}
+            \\}
             \\
-        ,
-            .{self.name},
-        ));
+        );
     } else {
-        try writer.writeAll(try std.fmt.allocPrint(
-            self.allocator,
-            \\pub fn {0s}_renderWithLayout(
+        try writer.writeAll(
+            \\pub fn renderWithLayout(
             \\    layout: __zmpl.Manifest.Template,
             \\    zmpl: *__zmpl.Data,
             \\    Context: type,
             \\    context: Context,
             \\    comptime blocks: []const __zmpl.Template.Block,
-            \\) anyerror![]const u8 {{
+            \\) anyerror![]const u8 {
             \\    const inner_content = try zmpl.allocator.dupe(
-            \\        u8, try {0s}_render(zmpl, Context, context, blocks)
+            \\        u8, try render(zmpl, Context, context, blocks)
             \\    );
-            \\    zmpl.content = .{{ .data = zmpl.strip(inner_content) }};
+            \\    zmpl.content = .{ .data = zmpl.strip(inner_content) };
             \\    zmpl.output_buf.clearRetainingCapacity();
-            \\    const content = try layout.render(zmpl, Context, context, blocks, .{{}});
+            \\    const content = try layout.render(zmpl, Context, context, blocks, .{});
             \\    return zmpl.strip(content);
-            \\}}
+            \\}
             \\
-        ,
-            .{self.name},
-        ));
+        );
     }
 
-    try writer.writeAll(self.block_buf.items);
+    try writer.writeAll(try self.block_buf.*.toOwnedSlice());
 }
 
 // Identify the token with the widest span. This token should start at zero and end at
