@@ -885,7 +885,7 @@ fn writeBlocks(self: Node, writer: anytype) !void {
     try writer.print(
         \\inline for (__blocks) |__block| {{
         \\  if (std.mem.eql(u8, __block.name, {s})) {{
-        \\      try @field(__zmpl.Manifest, __block.func)(zmpl, Context, context);
+        \\      try @field(@field(__Manifest, __block.template_name), __block.func)(zmpl, Context, context);
         \\  }}
         \\}}
     ,

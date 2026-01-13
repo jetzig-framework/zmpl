@@ -18,6 +18,7 @@ const Template = @This();
 pub const Block = struct {
     name: []const u8,
     func: []const u8,
+    template_name: []const u8,
 };
 
 /// Options to control specific render behaviour.
@@ -47,6 +48,8 @@ pub fn render(
             if (@typeInfo(field_type) == .@"type") {
                 if (@hasDecl(field, "__template_metadata")) {
                     const metadata = field.__template_metadata;
+                    // Skip partials - they don't have render/renderWithLayout
+                    if (metadata.partial) continue;
                     if (std.mem.eql(u8, metadata.name, self.name)) {
                         const renderFn = field.renderWithLayout;
                         break :blk renderFn(layout, data, C, c, metadata.blocks) catch |err| {
@@ -68,6 +71,8 @@ pub fn render(
             if (@typeInfo(field_type) == .@"type") {
                 if (@hasDecl(field, "__template_metadata")) {
                     const metadata = field.__template_metadata;
+                    // Skip partials - they don't have render/renderWithLayout
+                    if (metadata.partial) continue;
                     if (std.mem.eql(u8, metadata.name, self.name)) {
                         const renderFn = field.render;
                         break :blk renderFn(data, C, c, blocks) catch |err| {

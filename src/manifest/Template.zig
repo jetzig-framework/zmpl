@@ -614,7 +614,7 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
     try writer.writeAll(
         \\const std = @import("std");
         \\const __zmpl = @import("zmpl");
-        \\const __Manifest = @import("zmpl.manifest.zig").__Manifest;
+        \\const __Manifest = @import("zmpl.manifest").__Manifest;
         \\const ZmplValue = __zmpl.Data.Value;
         \\
         \\

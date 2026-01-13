@@ -3,10 +3,12 @@ const Build = std.Build;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
-const builtin = @import("builtin");
 const Decoder = std.base64.standard.Decoder;
 const Encoder = std.base64.standard.Encoder;
+const StringHashMap = std.StringHashMapUnmanaged;
+const builtin = @import("builtin");
 const Data = @import("src/zmpl.zig").Data;
+
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -108,7 +110,7 @@ pub fn build(b: *std.Build) !void {
         .imports = &.{
             .{ .name = "zmd", .module = zmd },
             .{ .name = "jetcommon", .module = jetcommon },
-            .{ .name = "zmpl_options", .module = build_options.createModule() },
+            .{ .name = "build_options", .module = build_options.createModule() },
         },
     });
 
@@ -208,7 +210,6 @@ pub fn build(b: *std.Build) !void {
 
     const auto_build = if (zmpl_auto_build_option) |opt| opt else true;
 
-    // Standalone template compiler executable
     const compiler_module = b.createModule(.{
         .root_source_file = b.path("src/compiler.zig"),
         .target = target,
@@ -227,11 +228,9 @@ pub fn build(b: *std.Build) !void {
     });
     b.installArtifact(template_compiler);
 
-    // Collect metadata for all templates
     var template_metadata: ArrayList(TemplateMetadata) = .empty;
     defer template_metadata.deinit(b.allocator);
 
-    // Build prefix -> root_path map for lookups
     var prefix_to_root = std.StringHashMap([]const u8).init(b.allocator);
     defer prefix_to_root.deinit();
     for (templates_paths) |syntax| {
@@ -240,7 +239,6 @@ pub fn build(b: *std.Build) !void {
 
     const compile_step = b.step("compile", "Compile Zmpl templates");
 
-    // Process each template file
     for (try findTemplates(b, templates_paths)) |template_path| {
         // Find which prefix/root this template belongs to
         var found_prefix: ?[]const u8 = null;
@@ -278,43 +276,169 @@ pub fn build(b: *std.Build) !void {
         });
     }
 
+    // Build a map of all templates by prefix for dependency resolution
+    var template_map_by_prefix: StringHashMap(ArrayList(struct {
+        key: []const u8,
+        name: []const u8,
+    })) = .empty;
+
+    defer {
+        var iter = template_map_by_prefix.iterator();
+        while (iter.next()) |entry| {
+            entry.value_ptr.deinit(b.allocator);
+        }
+        template_map_by_prefix.deinit(b.allocator);
+    }
+
+    for (template_metadata.items) |meta| {
+        const result = try template_map_by_prefix.getOrPut(b.allocator, meta.prefix);
+        if (!result.found_existing) result.value_ptr.* = .{};
+        try result.value_ptr.append(b.allocator, .{ .key = meta.key, .name = meta.name });
+    }
+
+    // Parse each template to find dependencies (@partial and @extends)
+    var template_dependencies = std.StringHashMap(std.ArrayList([]const u8)).init(b.allocator);
+    defer {
+        var iter = template_dependencies.iterator();
+        while (iter.next()) |entry| {
+            entry.value_ptr.deinit(b.allocator);
+        }
+        template_dependencies.deinit();
+    }
+
+    for (template_metadata.items) |meta| {
+        const file = std.fs.cwd().openFile(meta.absolute_path, .{}) catch continue;
+        defer file.close();
+        const content = file.readToEndAlloc(b.allocator, 10 * 1024 * 1024) catch continue;
+        defer b.allocator.free(content);
+
+        var deps: std.ArrayList([]const u8) = .{};
+
+        // Find @partial references
+        var pos: usize = 0;
+        while (std.mem.indexOfPos(u8, content, pos, "@partial")) |idx| {
+            pos = idx + "@partial".len;
+            // Skip whitespace
+            while (pos < content.len and std.ascii.isWhitespace(content[pos])) : (pos += 1) {}
+
+            // Extract partial name (until space, ( or newline)
+            const name_start = pos;
+            while (pos < content.len and content[pos] != ' ' and content[pos] != '(' and
+                content[pos] != '\n' and content[pos] != '\r' and content[pos] != '{') : (pos += 1)
+            {}
+
+            if (pos > name_start) {
+                const partial_name = content[name_start..pos];
+                // Partials are referenced without leading underscore
+                const full_name = try std.fmt.allocPrint(b.allocator, "_{s}", .{partial_name});
+                try deps.append(b.allocator, full_name);
+            }
+        }
+
+        // Find @extends references
+        pos = 0;
+        while (std.mem.indexOfPos(u8, content, pos, "@extends")) |idx| {
+            pos = idx + "@extends".len;
+            // Skip whitespace
+            while (pos < content.len and std.ascii.isWhitespace(content[pos])) : (pos += 1) {}
+
+            // Extract parent name
+            const name_start = pos;
+            while (pos < content.len and content[pos] != ' ' and content[pos] != '\n' and
+                content[pos] != '\r' and content[pos] != '{') : (pos += 1)
+            {}
+
+            if (pos > name_start) {
+                const parent_name = content[name_start..pos];
+                try deps.append(b.allocator, try b.allocator.dupe(u8, parent_name));
+            }
+        }
+
+        try template_dependencies.put(meta.absolute_path, deps);
+    }
+
     const manifest_files = b.addWriteFiles();
+
+    // Create a map file for each template containing only its dependencies
+    var template_map_files: StringHashMap(Build.LazyPath) = .empty;
+    defer template_map_files.deinit(b.allocator);
+
+    for (template_metadata.items) |meta| {
+        // ensure we have an entry for this template
+        if (!template_dependencies.contains(meta.absolute_path)) {
+            const empty_deps: ArrayList([]const u8) = .empty;
+            try template_dependencies.put(meta.absolute_path, empty_deps);
+        }
+
+        const prefix_templates = template_map_by_prefix.get(meta.prefix).?;
+        const template_deps = template_dependencies.get(meta.absolute_path).?;
+
+        var json_buf: Writer.Allocating = .init(b.allocator);
+        defer json_buf.deinit();
+        const json_writer = &json_buf.writer;
+        try json_writer.writeAll("{\"");
+        try json_writer.writeAll(meta.prefix);
+        try json_writer.writeAll("\":{");
+
+        var first = true;
+        // Only include templates that this template depends on
+        // so we don't invalidate cache if we don't need to
+        for (prefix_templates.items) |tmpl| {
+            // check if this template is in dependencies
+            var is_dep = false;
+            for (template_deps.items) |dep| {
+                if (std.mem.eql(u8, dep, tmpl.key)) {
+                    is_dep = true;
+                    break;
+                }
+            }
+            if (!is_dep) continue;
+
+            if (!first) try json_writer.writeAll(",");
+            first = false;
+            try json_writer.print("\"{s}\":\"{s}\"", .{ tmpl.key, tmpl.name });
+        }
+        try json_writer.writeAll("}}");
+
+        const map_filename = try std.fmt.allocPrint(b.allocator, "{s}_map.json", .{meta.name});
+        const map_file = manifest_files.add(map_filename, try json_buf.toOwnedSlice());
+        try template_map_files.put(b.allocator, meta.absolute_path, map_file);
+    }
 
     for (template_metadata.items) |meta| {
         // Find root path for this template's prefix
         const root_path = prefix_to_root.get(meta.prefix).?;
-
-        const compile_template = b.addRunArtifact(template_compiler);
-        compile_template.addFileArg(.{ .cwd_relative = meta.absolute_path });
-        compile_template.addArg(meta.prefix);
-        compile_template.addArg(root_path);
-
-        for (template_metadata.items) |other_meta| {
-            // Only include templates from the same prefix
-            if (std.mem.eql(u8, other_meta.prefix, meta.prefix)) {
-                compile_template.addArg(other_meta.absolute_path);
-            }
-        }
 
         const name = try std.fmt.allocPrint(
             b.allocator,
             "{s}.zig",
             .{meta.name},
         );
-        _ = manifest_files.addCopyFile(compile_template.captureStdOut(), name);
-        // const template_module = b.createModule(.{
-        //     .root_source_file = file,
-        //     .target = target,
-        //     .optimize = optimize,
-        //     .imports = &.{
-        //         .{ .name = "zmpl.manifest", .module = manifest },
-        //         .{ .name = "zmpl", .module = zmpl },
-        //         .{ .name = "zmd", .module = zmd },
-        //     },
-        // });
-        // manifest.addImport(meta.name, template_module);
-        // template_tests.root_module.addImport(meta.name, template_module);
-        // try template_modules.put(meta.name, template_module);
+
+        const compile_template = b.addRunArtifact(template_compiler);
+        compile_template.addFileArg(.{ .cwd_relative = meta.absolute_path });
+        compile_template.addArg(meta.prefix);
+        compile_template.addArg(root_path);
+
+        const template_output = compile_template.addOutputFileArg(name);
+
+        // Pass this template's specific dependency map file
+        // This file only includes templates that this template uses, so changes to
+        // unrelated templates won't invalidate this template's cache
+        const map_file = template_map_files.get(meta.absolute_path).?;
+        compile_template.addFileArg(map_file);
+
+        const template_module = b.createModule(.{
+            .root_source_file = template_output,
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zmpl.manifest", .module = manifest },
+                .{ .name = "zmpl", .module = zmpl },
+                .{ .name = "zmd", .module = zmd },
+            },
+        });
+        manifest.addImport(meta.name, template_module);
     }
 
     const manifest_content = try generateManifestContent(
@@ -330,19 +454,18 @@ pub fn build(b: *std.Build) !void {
     zmpl.addImport("zmpl.manifest", manifest);
 
     if (auto_build) {
-        template_tests.step.dependOn(&manifest_files.step);
+        const test_step = b.step("test", "Run library tests");
 
         const run_template_tests = b.addRunArtifact(template_tests);
         const run_zmpl_tests = b.addRunArtifact(zmpl_tests);
         const run_manifest_tests = b.addRunArtifact(manifest_tests);
 
-        const test_step = b.step("test", "Run library tests");
+        template_tests.step.dependOn(&manifest_files.step);
         test_step.dependOn(&run_template_tests.step);
         test_step.dependOn(&run_zmpl_tests.step);
         test_step.dependOn(&run_manifest_tests.step);
     }
 
-    // lib depends on manifest generation
     lib.step.dependOn(&manifest_files.step);
 
     b.installArtifact(lib);
@@ -461,7 +584,6 @@ fn findTemplates(b: *Build, templates_paths: []const []const u8) ![][]const u8 {
     return templates.toOwnedSlice(b.allocator);
 }
 
-/// Strips root path, converts to POSIX separators, removes .zmpl extension
 fn templatePathStore(allocator: Allocator, root: []const u8, path: []const u8) ![]const u8 {
     const relative = try std.fs.path.relative(allocator, root, path);
     defer allocator.free(relative);
@@ -536,13 +658,12 @@ fn generateManifestContent(
     );
 
     for (templates) |template| try writer.print(
-        \\    pub const {[name]s} = @import("{[name]s}.zig");
+        \\    pub const {[name]s} = @import("{[name]s}");
         \\
     ,
         .{ .name = template.name },
     );
 
-    // Lookup functions using reflection on __Manifest fields
     try writer.writeAll(
         \\
         \\    /// Find any template matching a given name. Uses all template paths in order.
@@ -609,9 +730,11 @@ fn generateZmplOptions(
     var aw: Writer.Allocating = .init(allocator);
 
     try aw.writer.print(
-        "//Generated in build.zig\n{[options]s}\n\n",
-        .{ .options = options_header_option },
-    );
+        \\//Generated in build.zig
+        \\{[options]s}
+        \\
+        \\
+    , .{ .options = options_header_option });
 
     try parseZmplConstants(&aw.writer, constants);
 
@@ -623,9 +746,10 @@ fn generateZmplOptions(
     const base64Header = Encoder.encode(encodedHeader, manifest_header_option);
 
     try aw.writer.print(
-        "{[fragments]s}\n\npub const manifest_header: []const u8 = \"{[header]s}\";\n",
-        .{ .fragments = markdown_fragments, .header = base64Header },
-    );
+        \\{[fragments]s}
+        \\
+        \\pub const manifest_header: []const u8 = "{[header]s}";
+    , .{ .fragments = markdown_fragments, .header = base64Header });
 
     return aw.toOwnedSlice();
 }
