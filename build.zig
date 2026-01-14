@@ -279,7 +279,6 @@ pub fn build(b: *std.Build) !void {
         });
     }
 
-    // Build a map of all templates by prefix for dependency resolution
     var template_map_by_prefix: StringHashMap(ArrayList(struct {
         key: []const u8,
         name: []const u8,
@@ -298,7 +297,6 @@ pub fn build(b: *std.Build) !void {
         try result.value_ptr.append(b.allocator, .{ .key = meta.key, .name = meta.name });
     }
 
-    // Parse each template to find dependencies (@partial and @extends)
     var template_dependencies: StringHashMap(std.ArrayList([]const u8)) = .empty;
     defer {
         var iter = template_dependencies.iterator();
@@ -369,7 +367,6 @@ pub fn build(b: *std.Build) !void {
     defer template_map_files.deinit(b.allocator);
 
     for (template_metadata.items) |meta| {
-        // ensure we have an entry for this template
         if (!template_dependencies.contains(meta.absolute_path)) {
             const empty_deps: ArrayList([]const u8) = .empty;
             try template_dependencies.put(b.allocator, meta.absolute_path, empty_deps);
@@ -405,15 +402,16 @@ pub fn build(b: *std.Build) !void {
         }
         try json_writer.writeAll("}}");
 
+        // Create a separate WriteFile step for this template's map
+        // This ensures changes to one template's map don't invalidate other templates
         const map_filename = try std.fmt.allocPrint(b.allocator, "{s}_map.json", .{meta.name});
-        const map_file = manifest_files.add(map_filename, try json_buf.toOwnedSlice());
+        const template_map_write = b.addWriteFiles();
+        const map_file = template_map_write.add(map_filename, try json_buf.toOwnedSlice());
         try template_map_files.put(b.allocator, meta.absolute_path, map_file);
     }
 
     for (template_metadata.items) |meta| {
-        // Find root path for this template's prefix
         const root_path = prefix_to_root.get(meta.prefix).?;
-
         const name = try std.fmt.allocPrint(
             b.allocator,
             "{s}.zig",
@@ -428,8 +426,8 @@ pub fn build(b: *std.Build) !void {
         const template_output = compile_template.addOutputFileArg(name);
 
         // Pass this template's specific dependency map file
-        // This file only includes templates that this template uses, so changes to
-        // unrelated templates won't invalidate this template's cache
+        // This file only includes templates that this template uses for name resolution
+        // The map only changes when templates are added/removed/renamed, not when content changes
         const map_file = template_map_files.get(meta.absolute_path).?;
         compile_template.addFileArg(map_file);
 
