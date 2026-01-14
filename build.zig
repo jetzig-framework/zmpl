@@ -32,10 +32,10 @@ pub fn build(b: *std.Build) !void {
         "Automatically compile Zmpl templates (default: true)",
     );
 
-    const zmpl_markdown_fragments_option = b.option(
+    const zmpl_markdown_formatters_option = b.option(
         []const u8,
-        "zmpl_markdown_fragments",
-        "Custom markdown fragments",
+        "zmpl_markdown_formatters",
+        "Custom markdown formatters",
     ) orelse "";
 
     const zmpl_options_header_option = b.option(
@@ -90,7 +90,7 @@ pub fn build(b: *std.Build) !void {
             try generateZmplOptions(
                 b.allocator,
                 zmpl_options_header_option,
-                zmpl_markdown_fragments_option,
+                zmpl_markdown_formatters_option,
                 zmpl_constants_option,
                 zmpl_manifest_header_option,
             ),
@@ -133,6 +133,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     const template_tests = b.addTest(.{
+        .name = "templates",
         .filters = test_filters,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tests.zig"),
@@ -147,6 +148,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     const zmpl_tests = b.addTest(.{
+        .name = "zmpl",
         .filters = test_filters,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/zmpl.zig"),
@@ -161,6 +163,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     const manifest_tests = b.addTest(.{
+        .name = "manifest",
         .filters = test_filters,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/manifest/main.zig"),
@@ -231,10 +234,10 @@ pub fn build(b: *std.Build) !void {
     var template_metadata: ArrayList(TemplateMetadata) = .empty;
     defer template_metadata.deinit(b.allocator);
 
-    var prefix_to_root = std.StringHashMap([]const u8).init(b.allocator);
-    defer prefix_to_root.deinit();
+    var prefix_to_root: StringHashMap([]const u8) = .empty;
+    defer prefix_to_root.deinit(b.allocator);
     for (templates_paths) |syntax| {
-        try prefix_to_root.put(extractPrefix(syntax), extractPath(syntax));
+        try prefix_to_root.put(b.allocator, extractPrefix(syntax), extractPath(syntax));
     }
 
     const compile_step = b.step("compile", "Compile Zmpl templates");
@@ -284,9 +287,8 @@ pub fn build(b: *std.Build) !void {
 
     defer {
         var iter = template_map_by_prefix.iterator();
-        while (iter.next()) |entry| {
+        while (iter.next()) |entry|
             entry.value_ptr.deinit(b.allocator);
-        }
         template_map_by_prefix.deinit(b.allocator);
     }
 
@@ -297,69 +299,72 @@ pub fn build(b: *std.Build) !void {
     }
 
     // Parse each template to find dependencies (@partial and @extends)
-    var template_dependencies = std.StringHashMap(std.ArrayList([]const u8)).init(b.allocator);
+    var template_dependencies: StringHashMap(std.ArrayList([]const u8)) = .empty;
     defer {
         var iter = template_dependencies.iterator();
         while (iter.next()) |entry| {
             entry.value_ptr.deinit(b.allocator);
         }
-        template_dependencies.deinit();
+        template_dependencies.deinit(b.allocator);
     }
 
+    var pos: usize = 0;
+    var name_start: usize = 0;
+    var name_end: usize = 0;
     for (template_metadata.items) |meta| {
-        const file = std.fs.cwd().openFile(meta.absolute_path, .{}) catch continue;
+        const file = std.fs.cwd().openFile(
+            meta.absolute_path,
+            .{ .mode = .read_only },
+        ) catch continue;
         defer file.close();
-        const content = file.readToEndAlloc(b.allocator, 10 * 1024 * 1024) catch continue;
+        const stats = try file.stat();
+        const content = file.readToEndAlloc(
+            b.allocator,
+            stats.size,
+        ) catch continue;
         defer b.allocator.free(content);
 
-        var deps: std.ArrayList([]const u8) = .{};
-
-        // Find @partial references
-        var pos: usize = 0;
-        while (std.mem.indexOfPos(u8, content, pos, "@partial")) |idx| {
-            pos = idx + "@partial".len;
-            // Skip whitespace
-            while (pos < content.len and std.ascii.isWhitespace(content[pos])) : (pos += 1) {}
-
-            // Extract partial name (until space, ( or newline)
-            const name_start = pos;
-            while (pos < content.len and content[pos] != ' ' and content[pos] != '(' and
-                content[pos] != '\n' and content[pos] != '\r' and content[pos] != '{') : (pos += 1)
-            {}
-
-            if (pos > name_start) {
-                const partial_name = content[name_start..pos];
-                // Partials are referenced without leading underscore
-                const full_name = try std.fmt.allocPrint(b.allocator, "_{s}", .{partial_name});
-                try deps.append(b.allocator, full_name);
-            }
-        }
-
-        // Find @extends references
         pos = 0;
-        while (std.mem.indexOfPos(u8, content, pos, "@extends")) |idx| {
-            pos = idx + "@extends".len;
-            // Skip whitespace
-            while (pos < content.len and std.ascii.isWhitespace(content[pos])) : (pos += 1) {}
+        var deps: ArrayList([]const u8) = .empty;
+        while (std.mem.indexOfScalarPos(u8, content, pos, '@')) |index| {
+            pos = index + 1;
+            const tag_end = std.mem.indexOfNonePos(
+                u8,
+                content,
+                pos,
+                std.ascii.lowercase,
+            ) orelse continue;
+            const tag = content[pos..tag_end];
+            if (!std.mem.eql(u8, tag, "partial") and
+                !std.mem.eql(u8, tag, "extends")) continue;
 
-            // Extract parent name
-            const name_start = pos;
-            while (pos < content.len and content[pos] != ' ' and content[pos] != '\n' and
-                content[pos] != '\r' and content[pos] != '{') : (pos += 1)
-            {}
+            pos = tag_end;
 
-            if (pos > name_start) {
-                const parent_name = content[name_start..pos];
-                try deps.append(b.allocator, try b.allocator.dupe(u8, parent_name));
-            }
+            name_start = std.mem.indexOfNonePos(
+                u8,
+                content,
+                pos,
+                &std.ascii.whitespace,
+            ) orelse continue;
+            name_end = std.mem.indexOfAnyPos(
+                u8,
+                content,
+                name_start,
+                " ({\r\n",
+            ) orelse continue;
+            pos = name_end;
+            const name = content[name_start..name_end];
+            const full_name = if (std.mem.eql(u8, tag, "extends"))
+                name
+            else
+                try std.fmt.allocPrint(b.allocator, "_{s}", .{name});
+            try deps.append(b.allocator, full_name);
         }
-
-        try template_dependencies.put(meta.absolute_path, deps);
+        try template_dependencies.put(b.allocator, meta.absolute_path, deps);
     }
 
     const manifest_files = b.addWriteFiles();
 
-    // Create a map file for each template containing only its dependencies
     var template_map_files: StringHashMap(Build.LazyPath) = .empty;
     defer template_map_files.deinit(b.allocator);
 
@@ -367,7 +372,7 @@ pub fn build(b: *std.Build) !void {
         // ensure we have an entry for this template
         if (!template_dependencies.contains(meta.absolute_path)) {
             const empty_deps: ArrayList([]const u8) = .empty;
-            try template_dependencies.put(meta.absolute_path, empty_deps);
+            try template_dependencies.put(b.allocator, meta.absolute_path, empty_deps);
         }
 
         const prefix_templates = template_map_by_prefix.get(meta.prefix).?;
@@ -660,9 +665,9 @@ fn generateManifestContent(
     for (templates) |template| try writer.print(
         \\    pub const {[name]s} = @import("{[name]s}");
         \\
-    ,
-        .{ .name = template.name },
-    );
+    , .{
+        .name = template.name,
+    });
 
     try writer.writeAll(
         \\
@@ -723,18 +728,21 @@ fn generateManifestContent(
 fn generateZmplOptions(
     allocator: Allocator,
     options_header_option: []const u8,
-    markdown_fragments: []const u8,
+    markdown_formatters: []const u8,
     constants: []const u8,
     manifest_header_option: []const u8,
 ) ![]const u8 {
     var aw: Writer.Allocating = .init(allocator);
+    defer aw.deinit();
 
     try aw.writer.print(
         \\//Generated in build.zig
         \\{[options]s}
         \\
         \\
-    , .{ .options = options_header_option });
+    , .{
+        .options = options_header_option,
+    });
 
     try parseZmplConstants(&aw.writer, constants);
 
@@ -746,10 +754,13 @@ fn generateZmplOptions(
     const base64Header = Encoder.encode(encodedHeader, manifest_header_option);
 
     try aw.writer.print(
-        \\{[fragments]s}
+        \\{[formatters]s}
         \\
         \\pub const manifest_header: []const u8 = "{[header]s}";
-    , .{ .fragments = markdown_fragments, .header = base64Header });
+    , .{
+        .formatters = markdown_formatters,
+        .header = base64Header,
+    });
 
     return aw.toOwnedSlice();
 }

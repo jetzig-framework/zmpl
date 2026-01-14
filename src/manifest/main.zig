@@ -1,6 +1,6 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
-const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
+const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{});
 const ArenaAllocator = std.heap.ArenaAllocator;
 const assert = std.debug.assert;
 
@@ -15,7 +15,11 @@ pub fn main() !void {
             @typeName(zmpl_options)),
     };
 
-    const permitted_fields = .{ "template_constants", "markdown_fragments", "manifest_header" };
+    const permitted_fields = .{
+        "template_constants",
+        "markdown_formatters",
+        "manifest_header",
+    };
 
     inline for (options_fields) |field| {
         inline for (permitted_fields) |permitted_field| {
@@ -29,7 +33,7 @@ pub fn main() !void {
         }
     }
 
-    var gpa: GeneralPurposeAllocator(.{}) = .init;
+    var gpa: GeneralPurposeAllocator = .init;
     defer assert(gpa.deinit() == .ok);
 
     const gpa_allocator = gpa.allocator();
@@ -78,12 +82,7 @@ pub fn main() !void {
     }
 
     var manifest: Manifest = .init(templates_paths.items, template_paths_buf.items);
-
-    try manifest.compile(
-        allocator,
-        output_dir,
-        zmpl_options,
-    );
+    try manifest.compile(allocator, output_dir, zmpl_options);
 }
 
 test {
