@@ -106,6 +106,8 @@ pub fn build(b: *std.Build) !void {
     }).module("jetcommon");
 
     const zmpl = b.addModule("zmpl", .{
+        .target = target,
+        .optimize = optimize,
         .root_source_file = b.path("src/zmpl.zig"),
         .imports = &.{
             .{ .name = "zmd", .module = zmd },
@@ -123,6 +125,7 @@ pub fn build(b: *std.Build) !void {
             .{ .name = "zmpl", .module = zmpl },
         },
     });
+    zmpl.addImport("zmpl.manifest", manifest);
 
     const dummy_manifest = b.createModule(.{
         .root_source_file = b.path("src/dummy_manifest.zig"),
@@ -180,17 +183,18 @@ pub fn build(b: *std.Build) !void {
         .name = "zmpl",
         .linkage = .static,
         .use_llvm = use_llvm,
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .root_source_file = b.path("src/zmpl.zig"),
-            .imports = &.{
-                .{ .name = "zmd", .module = zmd },
-                .{ .name = "zmpl", .module = zmpl },
-                .{ .name = "jetcommon", .module = jetcommon },
-                .{ .name = "zmpl.manifest", .module = manifest },
-            },
-        }),
+        .root_module = zmpl,
+        // .root_module = b.createModule(.{
+        //     .target = target,
+        //     .optimize = optimize,
+        //     .root_source_file = b.path("src/zmpl.zig"),
+        //     .imports = &.{
+        //         .{ .name = "zmd", .module = zmd },
+        //         .{ .name = "zmpl", .module = zmpl },
+        //         .{ .name = "jetcommon", .module = jetcommon },
+        //         .{ .name = "zmpl.manifest", .module = manifest },
+        //     },
+        // }),
     });
 
     const benchmark = b.addExecutable(.{
