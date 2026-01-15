@@ -28,6 +28,14 @@ pub const RenderOptions = struct {
     layout: ?Manifest.Template = null,
 };
 
+pub const Metadata = struct {
+    key: []const u8,
+    name: []const u8,
+    prefix: []const u8,
+    partial: bool,
+    blocks: []const Block,
+};
+
 pub fn render(
     self: Template,
     data: *Data,
@@ -45,9 +53,9 @@ pub fn render(
         inline for (type_info.@"struct".decls) |decl| {
             const field = @field(Manifest, decl.name);
             const field_type = @TypeOf(field);
-            if (@typeInfo(field_type) == .@"type") {
-                if (@hasDecl(field, "__template_metadata")) {
-                    const metadata = field.__template_metadata;
+            if (@typeInfo(field_type) == .type) {
+                if (@hasDecl(field, "__metadata")) {
+                    const metadata: Metadata = field.__metadata;
                     // Skip partials - they don't have render/renderWithLayout
                     if (metadata.partial) continue;
                     if (std.mem.eql(u8, metadata.name, self.name)) {
@@ -68,9 +76,9 @@ pub fn render(
         inline for (type_info.@"struct".decls) |decl| {
             const field = @field(Manifest, decl.name);
             const field_type = @TypeOf(field);
-            if (@typeInfo(field_type) == .@"type") {
-                if (@hasDecl(field, "__template_metadata")) {
-                    const metadata = field.__template_metadata;
+            if (@typeInfo(field_type) == .type) {
+                if (@hasDecl(field, "__metadata")) {
+                    const metadata: Metadata = field.__metadata;
                     // Skip partials - they don't have render/renderWithLayout
                     if (metadata.partial) continue;
                     if (std.mem.eql(u8, metadata.name, self.name)) {

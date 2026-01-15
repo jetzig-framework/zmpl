@@ -47,7 +47,7 @@ pub fn main() !void {
     defer input_file.close();
 
     const size = (try input_file.stat()).size;
-    const content = try input_file.readToEndAlloc(allocator, @intCast(size));
+    const input_content = try input_file.readToEndAlloc(allocator, @intCast(size));
 
     const key = try util.templatePathStore(allocator, root_path, input_path);
     const simple_name = try util.sanitizeKeyForZigIdentifier(allocator, key);
@@ -98,52 +98,51 @@ pub fn main() !void {
         prefix,
         input_path,
         templates_paths_map,
-        content,
+        input_content,
         template_map,
     );
-
-    const output = try template.compile(zmpl_options);
 
     const basename = std.fs.path.basename(input_path);
     const is_partial = std.mem.startsWith(u8, basename, "_");
 
-    // Extract blocks from the compiled template
-    var blocks_buf: Writer.Allocating = .init(allocator);
-    defer blocks_buf.deinit();
-    const blocks_writer = &blocks_buf.writer;
-
-    try blocks_writer.writeAll("&[_]__zmpl.Template.Block{");
-    var block_iter = template.block_map.iterator();
-    var first = true;
-    while (block_iter.next()) |entry| {
-        const block_list = entry.value_ptr.*;
-        for (block_list.items) |block| {
-            if (!first) try blocks_writer.writeAll(", ");
-            first = false;
-            try blocks_writer.print(".{{ .name = \"{s}\", .func = \"{s}\", .template_name = \"{s}\" }}", .{
-                block.name,
-                block.func,
-                simple_name,
-            });
-        }
-    }
-    try blocks_writer.writeAll("}");
-
-    const metadata = try std.fmt.allocPrint(allocator,
+    const output_file = try std.fs.cwd().createFile(output_path, .{});
+    defer output_file.close();
+    var file_writer = output_file.writer(&.{});
+    const writer = &file_writer.interface;
+    try writer.writeAll(try template.compile(zmpl_options));
+    try writer.print(
         \\
-        \\pub const __template_metadata = .{{
+        \\pub const __metadata: __zmpl.Template.Metadata = .{{
         \\    .key = "{s}",
         \\    .name = "{s}",
         \\    .prefix = "{s}",
         \\    .partial = {any},
-        \\    .blocks = {s},
-        \\}};
-        \\
-    , .{ key, simple_name, prefix, is_partial, blocks_buf.writer.buffered() });
+        \\    .blocks = &.{{
+    , .{
+        key,
+        simple_name,
+        prefix,
+        is_partial,
+    });
 
-    // Write to output file
-    const output_file = try std.fs.cwd().createFile(output_path, .{});
-    defer output_file.close();
-    try output_file.writeAll(output);
-    try output_file.writeAll(metadata);
+    var block_iter = template.block_map.iterator();
+    while (block_iter.next()) |entry| {
+        const block_list = entry.value_ptr.*;
+        for (block_list.items) |block| {
+            try writer.print(
+                \\
+                \\        .{{ .name = "{[name]s}", .func = "{[func]s}", .template_name = "{[template]s}" }},
+                \\
+            , .{
+                .name = block.name,
+                .func = block.func,
+                .template = simple_name,
+            });
+        }
+    }
+    try writer.writeAll(
+        \\    },
+        \\};
+        \\
+    );
 }

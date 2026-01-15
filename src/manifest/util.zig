@@ -23,11 +23,9 @@ pub fn startsWithIgnoringWhitespace(haystack: []const u8, needle: []const u8) bo
 pub fn indexOfIgnoringWhitespace(haystack: []const u8, needle: []const u8) ?usize {
     // FIXME: This function makes no sense.
     const trimmed = std.mem.trimLeft(u8, haystack, &std.ascii.whitespace);
-    if (std.mem.indexOf(u8, trimmed, needle)) |index| {
+    if (std.mem.indexOf(u8, trimmed, needle)) |index|
         return (haystack.len - trimmed.len) + index;
-    } else {
-        return null;
-    }
+    return null;
 }
 
 /// Detect index of `needle` in `haystack` where `haystack` must be surrounded by non-word
@@ -117,22 +115,22 @@ pub fn tokenizeRetainToken(input: []const u8, token: []const u8) RetainTokenIter
 }
 
 /// Counter for generating unique temporary variable names
-var temp_var_counter: std.atomic.Value(u64) = std.atomic.Value(u64).init(0);
+var temp_var_counter: std.atomic.Value(u64) = .init(0);
 
 /// Generate a unique temporary variable name for internal use.
 /// This is used for temporary variables in generated code, not for template names.
 /// Returns a slice of the buffer containing the generated name.
 pub fn generateTempVariableName(buf: []u8) []u8 {
     const counter = temp_var_counter.fetchAdd(1, .monotonic);
-    buf[0] = 't';
+    buf[0] = 'v';
     buf[1] = '_';
-    _ = std.fmt.bufPrint(buf[2..], "{x:0>16}", .{counter}) catch unreachable;
-    return buf[0..18]; // Return only the valid portion
+    _ = std.fmt.bufPrint(buf[2..], "{x:0>4}", .{counter}) catch unreachable;
+    return buf[0..6]; // Return only the valid portion
 }
 
 /// Same as `generateTempVariableName` but allocates memory.
 pub fn generateTempVariableNameAlloc(allocator: Allocator) ![]const u8 {
-    const buf = try allocator.alloc(u8, 18); // "t_" + 16 hex chars
+    const buf = try allocator.alloc(u8, 6); // "t_" + 4 hex chars
     _ = generateTempVariableName(buf);
     return buf;
 }

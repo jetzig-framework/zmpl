@@ -676,8 +676,8 @@ fn generateManifestContent(
         \\            const field = @field(@This(), decl.name);
         \\            const field_type = @TypeOf(field);
         \\            if (@typeInfo(field_type) == .@"type") {
-        \\                if (@hasDecl(field, "__template_metadata")) {
-        \\                    const metadata = field.__template_metadata;
+        \\                if (@hasDecl(field, "__metadata")) {
+        \\                    const metadata: __zmpl.Template.Metadata = field.__metadata;
         \\                    if (std.mem.eql(u8, metadata.key, name)) {
         \\                        return .{
         \\                            .key = metadata.key,
@@ -700,8 +700,8 @@ fn generateManifestContent(
         \\            const field = @field(@This(), decl.name);
         \\            const field_type = @TypeOf(field);
         \\            if (@typeInfo(field_type) == .@"type") {
-        \\                if (@hasDecl(field, "__template_metadata")) {
-        \\                    const metadata = field.__template_metadata;
+        \\                if (@hasDecl(field, "__metadata")) {
+        \\                    const metadata: __zmpl.Template.Metadata = field.__metadata;
         \\                    if (std.mem.eql(u8, metadata.prefix, prefix) and
         \\                        std.mem.eql(u8, metadata.key, name)) {
         \\                        return .{

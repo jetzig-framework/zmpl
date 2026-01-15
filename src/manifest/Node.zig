@@ -41,8 +41,6 @@ pub const Block = struct {
 };
 
 pub fn compile(self: Node, input: []const u8, writer: *Writer, options: type) !void {
-    const compile_writer = writer;
-
     if (self.token.mode == .partial and self.children.items.len > 0) {
         std.log.err(
             "Partial slots cannot contain mode blocks:\n{s}",
@@ -58,25 +56,30 @@ pub fn compile(self: Node, input: []const u8, writer: *Writer, options: type) !v
     for (self.children.items) |child_node| {
         if (start < child_node.token.start) {
             const content = input[start .. child_node.token.start - 1];
-            try self.render(if (initial) .initial else .secondary, content, options, compile_writer);
+            try self.render(
+                if (initial) .initial else .secondary,
+                content,
+                options,
+                writer,
+            );
             initial = false;
         }
 
         start = child_node.token.end + 1;
-        try child_node.compile(input, compile_writer, options);
+        try child_node.compile(input, writer, options);
     }
 
     if (self.children.items.len == 0) {
         const content = input[self.token.startOfContent()..self.token.endOfContent()];
-        try self.render(.initial, content, options, compile_writer);
+        try self.render(.initial, content, options, writer);
     } else {
         const last_child = self.children.items[self.children.items.len - 1];
         if (last_child.token.end + 1 < self.token.endOfContent()) {
             const content = input[last_child.token.end + 1 .. self.token.endOfContent()];
-            try self.render(.secondary, content, options, compile_writer);
+            try self.render(.secondary, content, options, writer);
         }
     }
-    try self.renderClose(compile_writer);
+    try self.renderClose(writer);
 }
 
 const Context = enum { initial, secondary };
@@ -1002,7 +1005,9 @@ fn renderRef(
     writer: anytype,
 ) !void {
     const stripped = util.strip(input);
-    if (std.mem.startsWith(u8, stripped, ".") or std.mem.startsWith(u8, stripped, "$.")) {
+    if (std.mem.startsWith(u8, stripped, ".") or
+        std.mem.startsWith(u8, stripped, "$."))
+    {
         try self.renderDataRef(stripped[1..], writer_options, writer);
     } else if (std.mem.indexOfAny(u8, stripped, " \"+-/*{}!?()")) |_| {
         try self.renderZigLiteral(stripped, writer_options, writer);
@@ -1015,22 +1020,20 @@ fn renderDataRef(
     self: Node,
     input: []const u8,
     writer_options: WriterOptions,
-    writer: anytype,
+    writer: *Writer,
 ) !void {
     _ = self;
     try writer.print(
         \\try __zmpl.sanitize({s}, try zmpl.getValueString("{s}"));
         \\
-    ,
-        .{ writer_options.zmpl_writer, input },
-    );
+    , .{ writer_options.zmpl_writer, input });
 }
 
 fn renderValueRef(
     self: Node,
     input: []const u8,
     writer_options: WriterOptions,
-    writer: anytype,
+    writer: *Writer,
 ) !void {
     var arg_name_buf: [32]u8 = undefined;
     const arg_name = util.generateTempVariableName(&arg_name_buf);
@@ -1051,14 +1054,12 @@ fn renderValueRef(
             \\         else
             \\             try __zmpl.sanitize({0s}, try zmpl.coerceString({3s}));
             \\
-        ,
-            .{
-                writer_options.zmpl_writer,
-                input[0..start],
-                try util.zigStringEscape(self.allocator, input[start + 1 ..]),
-                input,
-            },
-        );
+        , .{
+            writer_options.zmpl_writer,
+            input[0..start],
+            try util.zigStringEscape(self.allocator, input[start + 1 ..]),
+            input,
+        });
     } else try writer.print(
         \\const {0s} = {1s};
         \\_ = if (comptime @TypeOf({0s}) == __zmpl.Data.Slot)
@@ -1071,24 +1072,27 @@ fn renderValueRef(
         \\        break :{4s} "";
         \\    }} else try __zmpl.sanitize({2s}, try zmpl.coerceString({0s}));
         \\
-    ,
-        .{ arg_name, input, writer_options.zmpl_writer, blk_label, blk_arg, index_arg },
-    );
+    , .{
+        arg_name,
+        input,
+        writer_options.zmpl_writer,
+        blk_label,
+        blk_arg,
+        index_arg,
+    });
 }
 
 fn renderZigLiteral(
     self: Node,
     input: []const u8,
     writer_options: WriterOptions,
-    writer: anytype,
+    writer: *Writer,
 ) !void {
     _ = self;
     try writer.print(
         \\_ = try {s}.write({s});
         \\
-    ,
-        .{ writer_options.zmpl_writer, input },
-    );
+    , .{ writer_options.zmpl_writer, input });
 }
 
 // Parse a target partial's `@args` pragma in order to re-order keyword args if needed.
@@ -1126,11 +1130,9 @@ fn getPartialArgsSignature(self: Node, prefix: []const u8, partial_name: []const
         }
     }
 
-    if (args) |capture| {
+    if (args) |capture|
         return capture;
-    } else {
-        return &.{};
-    }
+    return &.{};
 }
 
 const ContentRenderMode = enum { html, zig, markdown };
