@@ -20,6 +20,12 @@
   expected: `missing` is not here
 @end
 
+@if ($.foo.captured) |captured|
+  expected: captured {{captured}}
+@else
+  unexpected: missing captured value
+@end
+
 @if ($.foo.corge == "I am corge")
   corge says "{{$.foo.corge}}"
 @end

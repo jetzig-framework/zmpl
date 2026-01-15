@@ -702,6 +702,7 @@ test "if/else" {
     var foo = try root.put("foo", .object);
     try foo.put("bar", 1);
     try foo.put("baz", 3);
+    try foo.put("captured", "value");
 
     var qux = try foo.put("qux", .object);
     try qux.put("quux", 4);
@@ -724,6 +725,9 @@ test "if/else" {
         \\
         \\
         \\  expected: `missing` is not here
+        \\
+        \\  expected: captured value
+        \\
         \\
         \\  corge says "I am corge"
         \\
