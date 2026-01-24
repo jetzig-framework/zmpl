@@ -358,8 +358,15 @@ pub fn build(b: *std.Build) !void {
             const name = content[name_start..name_end];
             const full_name = if (std.mem.eql(u8, tag, "extends"))
                 name
-            else
-                try std.fmt.allocPrint(b.allocator, "_{s}", .{name});
+            else blk: {
+                const dirname = std.fs.path.dirnamePosix(name);
+                const basename = std.fs.path.basenamePosix(name);
+                if (dirname) |d| {
+                    break :blk try std.fmt.allocPrint(b.allocator, "{s}/_{s}", .{ d, basename });
+                } else {
+                    break :blk try std.fmt.allocPrint(b.allocator, "_{s}", .{basename});
+                }
+            };
             try deps.append(b.allocator, full_name);
         }
         try template_dependencies.put(b.allocator, meta.absolute_path, deps);
