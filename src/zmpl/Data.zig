@@ -1896,7 +1896,7 @@ pub const Object = struct {
         const keys = self.hashmap.keys();
 
         for (keys, 0..) |key, index| {
-            if (options.pretty) try writer.writeBytesNTimes(indent, level + 1);
+            if (options.pretty) for (0..level + 1) |_| try writer.writeAll(indent);
             var field = Field{ .allocator = self.allocator, .value = key };
             try field.toJson(writer, options);
             try writer.writeAll(":");
@@ -1906,7 +1906,7 @@ pub const Object = struct {
             if (index + 1 < keys.len) try writer.writeAll(",");
             if (options.pretty) try writer.writeByte('\n');
         }
-        if (options.pretty) try writer.writeBytesNTimes(indent, level);
+        if (options.pretty) for (0..level) |_| try writer.writeAll(indent);
         try highlight(writer, .close_object, .{}, options.color);
     }
 
