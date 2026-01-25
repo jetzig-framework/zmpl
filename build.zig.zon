@@ -20,6 +20,7 @@
         "src/zmpl.zig",
         "src/zmpl",
         "src/manifest",
+        "src/compiler.zig",
         "LICENSE",
         "README.md",
     },
