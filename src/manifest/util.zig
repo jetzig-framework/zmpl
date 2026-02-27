@@ -136,10 +136,13 @@ pub fn generateTempVariableNameAlloc(allocator: Allocator) ![]const u8 {
 }
 
 /// Sanitize a key to create a valid Zig identifier.
-/// Replaces invalid characters with underscores.
+/// Replaces invalid characters with underscores. Prepends `_` if the key starts with a digit.
 pub fn sanitizeKeyForZigIdentifier(allocator: Allocator, key: []const u8) ![]const u8 {
-    const result = try allocator.alloc(u8, key.len);
-    for (key, 0..) |c, i| {
+    const starts_with_digit = key.len > 0 and std.ascii.isDigit(key[0]);
+    const prefix_len: usize = if (starts_with_digit) 1 else 0;
+    const result = try allocator.alloc(u8, key.len + prefix_len);
+    if (starts_with_digit) result[0] = '_';
+    for (key, prefix_len..) |c, i| {
         result[i] = switch (c) {
             'a'...'z', 'A'...'Z', '0'...'9' => c,
             else => '_',
