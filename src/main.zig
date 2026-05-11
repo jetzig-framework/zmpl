@@ -1,32 +1,26 @@
 const std = @import("std");
-const ArenaAllocator = std.heap.ArenaAllocator;
-const Writer = std.Io.Writer;
-const Allocator = std.mem.Allocator;
 
 const zmpl = @import("zmpl");
 
-pub fn main() !void {
-    const gpa: Allocator = .{ .vtable = &std.heap.SmpAllocator.vtable, .context = undefined };
-    var arena: ArenaAllocator = .init(gpa);
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.arena.allocator();
+    const io = init.io;
 
-    var data = zmpl.Data.init(arena.allocator());
+    var data = zmpl.Data.init(io, std.heap.smp_allocator);
     // https://github.com/json-iterator/test-data/blob/master/large-file.json
-    const stat = try std.fs.cwd().statFile("large-file.json");
-    const json = try std.fs.cwd().readFileAlloc(allocator, "large-file.json", stat.size);
+    const stat = try std.Io.Dir.cwd().statFile(io, "large-file.json", .{});
+    const json = try std.Io.Dir.cwd().readFileAlloc(io, "large-file.json", allocator, .limited(stat.size + 1));
 
     // Time to beat: Duration: 1.28s
-    try benchmark(allocator, zmpl.Data.fromJson, .{ &data, json });
+    try benchmark(io, zmpl.Data.fromJson, .{ &data, json });
 
     // Time to beat: Duration: 946.734ms
-    _ = try benchmark(allocator, zmpl.Data.toJson, .{&data});
+    _ = try benchmark(io, zmpl.Data.toJson, .{&data});
 }
 
-fn benchmark(allocator: Allocator, func: anytype, args: anytype) !void {
-    const start = std.time.microTimestamp();
+fn benchmark(io: std.Io, func: anytype, args: anytype) !void {
+    const start = std.Io.Clock.Timestamp.now(io, .awake);
     _ = try @call(.auto, func, args);
-    const end = std.time.microTimestamp();
-    var buf: Writer.Allocating = .init(allocator);
-    defer buf.deinit();
-    try buf.writer.printDuration((end - start) * 1000, .{});
-    std.debug.print("Duration: {s}\n", .{try buf.toOwnedSlice()});
+    const elapsed = start.untilNow(io);
+    std.debug.print("Duration: {}ms\n", .{elapsed.raw.toMilliseconds()});
 }
