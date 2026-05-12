@@ -114,7 +114,7 @@ pub fn build(b: *std.Build) !void {
 
     const manifest_m = b.createModule(.{
         .root_source_file = b.path("src/manifest/main.zig"),
-        .target = target,
+        .target = b.graph.host,
         .optimize = optimize,
     });
 
