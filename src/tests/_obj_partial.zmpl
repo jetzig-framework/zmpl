@@ -1,3 +1,3 @@
-@args user: *ZmplValue
+@args user: anytype
 <div>User email: {{user.email}}</div>
 <div>User name: {{user.name}}</div>

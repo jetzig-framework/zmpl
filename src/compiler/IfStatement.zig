@@ -8,9 +8,8 @@ if_ast: Ast.full.If,
 
 const IfStatement = @This();
 
-const wrap_eql_open = "try zmpl.compare(.equal, ";
-const wrap_eql_close_true = ", true)";
-const wrap_eql_close_false = ", false)";
+const present_open = "try __core.isPresent(";
+const present_close = ")";
 
 pub fn parse(allocator: Allocator, input: []const u8) !Ast {
     const source = try std.mem.concatWithSentinel(
@@ -35,7 +34,7 @@ pub fn init(ast: Ast) IfStatement {
     unreachable;
 }
 
-pub fn render(self: IfStatement, writer: anytype) !void {
+pub fn render(self: IfStatement, writer: *Writer) !void {
     const tags = self.ast.nodes.items(.tag);
 
     for (tags, 0..) |tag, index| {
@@ -46,9 +45,9 @@ pub fn render(self: IfStatement, writer: anytype) !void {
 
             const wrap_true = self.isWrapTrue(if_full.payload_token != null, if_full.ast.cond_expr);
             if (wrap_true) {
-                try writer.writeAll(wrap_eql_open);
+                try writer.writeAll(present_open);
                 try self.writeNode(if_full.ast.cond_expr, writer);
-                try writer.writeAll(wrap_eql_close_true);
+                try writer.writeAll(present_close);
             } else {
                 try self.writeNode(if_full.ast.cond_expr, writer);
             }
@@ -63,7 +62,7 @@ pub fn render(self: IfStatement, writer: anytype) !void {
     unreachable;
 }
 
-fn writeNode(self: IfStatement, node: Ast.Node.Index, writer: anytype) !void {
+fn writeNode(self: IfStatement, node: Ast.Node.Index, writer: *Writer) !void {
     const main_tokens = self.ast.nodes.items(.main_token);
     const node_data = self.ast.nodeData(node);
     switch (self.ast.nodeTag(node)) {
@@ -73,20 +72,22 @@ fn writeNode(self: IfStatement, node: Ast.Node.Index, writer: anytype) !void {
             const wrap_lhs = self.isWrapTrue(false, lhs);
             const wrap_rhs = self.isWrapTrue(false, rhs);
 
-            if (wrap_lhs) try writer.writeAll(wrap_eql_open);
+            if (wrap_lhs) try writer.writeAll(present_open);
             try self.writeNode(lhs, writer);
-            if (wrap_lhs) try writer.writeAll(wrap_eql_close_true);
+            if (wrap_lhs) try writer.writeAll(present_close);
 
             try writer.print(" {s} ", .{self.ast.tokenSlice(main_tokens[@intFromEnum(node)])});
 
-            if (wrap_rhs) try writer.writeAll(wrap_eql_open);
+            if (wrap_rhs) try writer.writeAll(present_open);
             try self.writeNode(rhs, writer);
-            if (wrap_rhs) try writer.writeAll(wrap_eql_close_true);
+            if (wrap_rhs) try writer.writeAll(present_close);
         },
         .bool_not => {
-            try writer.writeAll(wrap_eql_open);
+            try writer.writeAll("!(");
+            try writer.writeAll(present_open);
             try self.writeNode(node_data.node, writer);
-            try writer.writeAll(wrap_eql_close_false);
+            try writer.writeAll(present_close);
+            try writer.writeAll(")");
         },
         .equal_equal,
         .bang_equal,
@@ -104,7 +105,7 @@ fn writeNode(self: IfStatement, node: Ast.Node.Index, writer: anytype) !void {
             };
 
             try writer.print(
-                "{s}try zmpl.compare(.{s}, ",
+                "{s}try __core.compare(.{s}, ",
                 .{
                     if (tag == .bang_equal) "!" else "",
                     operator,
@@ -120,9 +121,9 @@ fn writeNode(self: IfStatement, node: Ast.Node.Index, writer: anytype) !void {
 
             const sub_expression = self.ast.nodeData(node).node_and_token[0];
             const wrap_true = self.isWrapTrue(false, sub_expression);
-            if (wrap_true) try writer.writeAll(wrap_eql_open);
+            if (wrap_true) try writer.writeAll(present_open);
             try self.writeNode(sub_expression, writer);
-            if (wrap_true) try writer.writeAll(wrap_eql_close_true);
+            if (wrap_true) try writer.writeAll(present_close);
 
             try writer.writeByte(')');
         },
@@ -132,9 +133,9 @@ fn writeNode(self: IfStatement, node: Ast.Node.Index, writer: anytype) !void {
             try writer.writeAll("if (");
 
             const wrap_true = self.isWrapTrue(full_if.payload_token == null, full_if.ast.cond_expr);
-            if (wrap_true) try writer.writeAll(wrap_eql_open);
+            if (wrap_true) try writer.writeAll(present_open);
             try self.writeNode(full_if.ast.cond_expr, writer);
-            if (wrap_true) try writer.writeAll(wrap_eql_close_true);
+            if (wrap_true) try writer.writeAll(present_close);
 
             try writer.writeByte(')');
             try writer.writeByte(' ');
@@ -175,77 +176,75 @@ inline fn isOperator(tag: Ast.Node.Tag) bool {
 // This allows (e.g.) a `ZmplValue` boolean to evaluate to a Zig boolean for use in a regular Zig
 // `if` statement.
 fn isWrapTrue(self: IfStatement, has_payload: bool, node: Ast.Node.Index) bool {
-    if (has_payload or isOperator(self.ast.nodeTag(node))) return false;
-
-    return true;
+    return !has_payload and !isOperator(self.ast.nodeTag(node));
 }
 
 test "simple" {
     try expectIfStatement(
-        "if (try zmpl.compare(.equal, try zmpl.compare(.equal, foo, true) and try zmpl.compare(.equal, bar, true), true))",
+        "if (try __core.isPresent(try __core.isPresent(foo) and try __core.isPresent(bar)))",
         "_ = if (foo and bar) {}",
     );
 }
 
 test "equal" {
     try expectIfStatement(
-        "if (try zmpl.compare(.equal, foo, bar))",
+        "if (try __core.compare(.equal, foo, bar))",
         "_ = if (foo == bar) {}",
     );
 }
 
 test "not equal" {
     try expectIfStatement(
-        "if (!try zmpl.compare(.equal, foo, bar))",
+        "if (!try __core.compare(.equal, foo, bar))",
         "_ = if (foo != bar) {}",
     );
 }
 
 test "greater than" {
     try expectIfStatement(
-        "if (try zmpl.compare(.greater_than, foo, bar))",
+        "if (try __core.compare(.greater_than, foo, bar))",
         "_ = if (foo > bar) {}",
     );
 }
 
 test "greater than or equal" {
     try expectIfStatement(
-        "if (try zmpl.compare(.greater_or_equal, foo, bar))",
+        "if (try __core.compare(.greater_or_equal, foo, bar))",
         "_ = if (foo >= bar) {}",
     );
 }
 
 test "less than" {
     try expectIfStatement(
-        "if (try zmpl.compare(.less_than, foo, bar))",
+        "if (try __core.compare(.less_than, foo, bar))",
         "_ = if (foo < bar) {}",
     );
 }
 
 test "less than or equal" {
     try expectIfStatement(
-        "if (try zmpl.compare(.less_or_equal, foo, bar))",
+        "if (try __core.compare(.less_or_equal, foo, bar))",
         "_ = if (foo <= bar) {}",
     );
 }
 
 test "and with equal" {
     try expectIfStatement(
-        "if (try zmpl.compare(.equal, try zmpl.compare(.equal, foo, 1) and try zmpl.compare(.equal, bar, 2), true))",
+        "if (try __core.isPresent(try __core.compare(.equal, foo, 1) and try __core.compare(.equal, bar, 2)))",
         "_ = if (foo == 1 and bar == 2) {}",
     );
 }
 
 test "or with equal" {
     try expectIfStatement(
-        "if (try zmpl.compare(.equal, try zmpl.compare(.equal, foo, 1) or try zmpl.compare(.equal, bar, 2), true))",
+        "if (try __core.isPresent(try __core.compare(.equal, foo, 1) or try __core.compare(.equal, bar, 2)))",
         "_ = if (foo == 1 or bar == 2) {}",
     );
 }
 
 test "nested if" {
     try expectIfStatement(
-        "if (try zmpl.compare(.equal, try zmpl.compare(.equal, (try zmpl.compare(.equal, foo, )), true) or try zmpl.compare(.equal, bar, 2), true))",
+        "if (try __core.isPresent(try __core.isPresent((try __core.compare(.equal, foo, ))) or try __core.compare(.equal, bar, 2)))",
         "_ = if ((foo == if (true) 1 else 0) or bar == 2) {}",
     );
 }
@@ -259,7 +258,7 @@ test "if with capture" {
 
 test "simple if without capture" {
     try expectIfStatement(
-        "if (try zmpl.compare(.equal, foo, true))",
+        "if (try __core.isPresent(foo))",
         "_ = if (foo) {}",
     );
 }

@@ -4,7 +4,8 @@ const ArrayList = std.ArrayList;
 const Writer = std.Io.Writer;
 const StringHashMap = std.StringHashMapUnmanaged;
 
-const jetcommon = @import("jetcommon");
+const core = @import("core");
+const Config = core.Config;
 
 const Node = @import("Node.zig");
 const util = @import("util.zig");
@@ -28,6 +29,7 @@ args: ?[]const u8 = null,
 partial: bool,
 template_map: StringHashMap(TemplateMap),
 templates_paths_map: StringHashMap([]const u8),
+io: std.Io,
 block_buf: *Writer.Allocating,
 block_map: StringHashMap(ArrayList(Node.Block)),
 
@@ -73,6 +75,7 @@ pub const Token = struct {
 /// Initialize a new template.
 pub fn init(
     allocator: Allocator,
+    io: std.Io,
     name: []const u8,
     templates_path: []const u8,
     prefix: []const u8,
@@ -85,6 +88,7 @@ pub fn init(
     aw.* = .init(allocator);
     return .{
         .allocator = allocator,
+        .io = io,
         .templates_path = templates_path,
         .prefix = prefix,
         .name = name,
@@ -105,8 +109,14 @@ pub fn deinit(self: *Template) void {
     self.tokens.deinit();
 }
 
+pub fn compileWriter(self: *Template, writer: *Writer, comptime config: Config) !void {
+    _ = writer;
+    _ = config;
+    try self.tokenize();
+}
+
 /// Compile a template into a Zig code which can then be written out and compiled by Zig.
-pub fn compile(self: *Template, comptime options: type) ![]const u8 {
+pub fn compile(self: *Template, comptime config: Config) ![]const u8 {
     if (self.state != .initial) unreachable;
 
     try self.tokenize();
@@ -116,8 +126,8 @@ pub fn compile(self: *Template, comptime options: type) ![]const u8 {
     defer buf.deinit();
     const writer = &buf.writer;
 
-    try self.renderHeader(writer, options);
-    try self.root_node.compile(self.input, writer, options);
+    try self.renderHeader(writer, config);
+    try self.root_node.compile(self.input, writer, config);
 
     try self.renderFooter(writer);
 
@@ -143,7 +153,7 @@ pub fn identifier(self: *Template) ![]const u8 {
     return "";
 }
 
-pub const Mode = enum { html, zig, partial, args, markdown, extend, @"for", @"if", block, blocks };
+pub const Mode = enum { html, zig, partial, args, markdown, extend, @"for", @"if", block, blocks, define };
 const Delimiter = union(enum) {
     string: []const u8,
     eof: void,
@@ -242,9 +252,8 @@ fn tokenize(self: *Template) !void {
             if (depth == 0) {
                 self.debugError(line, line_index);
                 return error.ZmplSyntaxError;
-            } else {
-                depth -= 1;
             }
+            depth -= 1;
         }
     }
 
@@ -254,20 +263,16 @@ fn tokenize(self: *Template) !void {
     }
     try self.appendRootToken();
 
-    // for (self.tokens.items) |token| self.debugToken(token, false);
-
     self.state = .tokenized;
 }
 
-// Append a new token. Note that tokens are not ordered in any meaningful way - use
-// `TokensIterator` to iterate through tokens in an appropriate order.
 fn appendToken(self: *Template, context: Context, end: usize, depth: usize) !void {
     if (context.mode_line) |mode_line| {
         var args = std.mem.trim(u8, mode_line, &std.ascii.whitespace);
         args = switch (context.delimiter) {
             .none, .eof => args,
-            .string => |delimiter_string| std.mem.trimRight(u8, args, delimiter_string),
-            .brace => std.mem.trimRight(u8, args, "}"),
+            .string => |delimiter_string| std.mem.trimEnd(u8, args, delimiter_string),
+            .brace => std.mem.trimEnd(u8, args, "}"),
         };
         const args_start = @tagName(context.mode).len + 1;
         args = if (args_start <= args.len)
@@ -288,7 +293,6 @@ fn appendToken(self: *Template, context: Context, end: usize, depth: usize) !voi
     } else unreachable;
 }
 
-// Append a root token with the default mode that covers the entire input.
 fn appendRootToken(self: *Template) !void {
     try self.tokens.append(self.allocator, .{
         .mode = self.defaultMode(),
@@ -303,7 +307,6 @@ fn appendRootToken(self: *Template) !void {
     });
 }
 
-// Recursively parse tokens into an AST.
 fn parse(self: *Template) !void {
     if (self.state != .tokenized) unreachable;
 
@@ -312,12 +315,9 @@ fn parse(self: *Template) !void {
 
     try self.parseChildren(self.root_node);
 
-    // debugTree(self.root_node, 0, self.path);
-
     self.state = .parsed;
 }
 
-// Parse tokenized input by offloading to the relevant parser for each token's assigned mode.
 fn parseChildren(self: *Template, node: *Node) !void {
     var tokens_it = self.tokensIterator(node.token);
     while (tokens_it.next()) |token| {
@@ -327,11 +327,11 @@ fn parseChildren(self: *Template, node: *Node) !void {
     }
 }
 
-// Create an AST node.
 fn createNode(self: *Template, token: Token, parent: ?*const Node) !*Node {
     const node = try self.allocator.create(Node);
     node.* = .{
         .allocator = self.allocator,
+        .io = self.io,
         .token = token,
         .parent = parent,
         .children = .empty,
@@ -347,7 +347,6 @@ fn createNode(self: *Template, token: Token, parent: ?*const Node) !*Node {
     return node;
 }
 
-// Iterates through tokens in an appropriate order for parsing.
 const TokensIterator = struct {
     index: usize,
     tokens: []Token,
@@ -429,6 +428,7 @@ fn getDelimitedMode(line: []const u8) ?DelimitedMode {
                 .markdown,
                 .@"for",
                 .block,
+                .define,
                 => getBlockDelimiter(mode, first_word, stripped[end_of_first_word.?..]),
                 .@"if" => .{ .string = end_token },
             };
@@ -483,7 +483,7 @@ fn getBlockDelimiter(mode: Mode, first_word: []const u8, line: []const u8) ?Deli
     } else {
         return switch (mode) {
             .partial, .args, .extend, .blocks => .none,
-            .html, .zig, .markdown, .@"for", .block => delimiterFromString(stripped),
+            .html, .zig, .markdown, .@"for", .block, .define => delimiterFromString(stripped),
             .@"if" => .{ .string = end_token },
         };
     }
@@ -515,7 +515,7 @@ fn resolveNesting(line: []const u8, stack: ArrayList(Context)) void {
             stack.items[stack.items.len - 1].depth = current_depth + brace_depth;
         },
         .string => |delimiter_string| {
-            if (util.startsWithIgnoringWhitespace(line, delimiter_string)) {
+            if (util.ignore_whitespace.startsWith(line, delimiter_string)) {
                 stack.items[stack.items.len - 1].depth = 0;
             }
         },
@@ -551,36 +551,33 @@ fn getBraceDepth(mode: Mode, line: []const u8) isize {
             }
             break :blk depth;
         },
-        .html, .partial, .markdown, .args, .extend, .@"for", .block, .blocks => blk: {
-            if (util.firstMeaningfulChar(line)) |char| {
+        .html, .partial, .markdown, .args, .extend, .@"for", .block, .blocks, .define => blk: {
+            if (util.ignore_whitespace.firstChar(line)) |char| {
                 if (char == '}') break :blk -1;
             }
             break :blk 0;
         },
-        .@"if" => if (util.indexOfIgnoringWhitespace(line, end_token)) |index|
+        .@"if" => if (util.ignore_whitespace.indexOf(line, end_token)) |index|
             @intCast(index)
         else
             0,
     };
 }
 
-// Render the function definiton and inject any provided constants.
-fn renderHeader(self: *Template, writer: anytype, options: type) !void {
+// Render the function definiton and inject any configured constants. Each constant is bound to the
+// matching field on the comptime-known render `context` and exposed as a bare local in every
+// template.
+fn renderHeader(self: *Template, writer: anytype, comptime config: Config) !void {
     var decls_buf: ArrayList(u8) = .empty;
     defer decls_buf.deinit(self.allocator);
 
-    if (@hasDecl(options, "template_constants")) {
-        inline for (std.meta.fields(options.template_constants)) |field| {
-            const type_str = switch (field.type) {
-                []const u8, i128, f128, bool => @typeName(field.type),
-                else => @compileError("Unsupported template constant type: " ++ @typeName(field.type)),
-            };
+    inline for (config.constants) |constant| {
+        const type_str = @typeName(constant.type);
 
-            const decl_string = "const " ++ field.name ++ ": " ++ type_str ++ " = try zmpl.getConst(" ++ type_str ++ ", \"" ++ field.name ++ "\");\n"; // :(
+        const decl_string = "const " ++ constant.name ++ ": " ++ type_str ++ " = data_struct.context." ++ constant.name ++ ";\n";
 
-            try decls_buf.appendSlice(self.allocator, "    " ++ decl_string);
-            try decls_buf.appendSlice(self.allocator, "    zmpl.noop(" ++ type_str ++ ", " ++ field.name ++ ");\n");
-        }
+        try decls_buf.appendSlice(self.allocator, "    " ++ decl_string);
+        try decls_buf.appendSlice(self.allocator, "    data_struct.interface.noop(" ++ type_str ++ ", " ++ constant.name ++ ");\n");
     }
 
     for (self.tokens.items) |token| {
@@ -613,9 +610,7 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
     // Write imports for individual template file
     try writer.writeAll(
         \\const std = @import("std");
-        \\const __zmpl = @import("zmpl");
-        \\const __Manifest = @import("zmpl.manifest").__Manifest;
-        \\const ZmplValue = __zmpl.Data.Value;
+        \\const __core = @import("core");
         \\
         \\
     );
@@ -623,22 +618,17 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
     const header = try std.fmt.allocPrint(
         self.allocator,
         \\pub fn {0s}(
-        \\    zmpl: *__zmpl.Data,
-        \\    Context: type,
-        \\    context: Context,
+        \\    data_struct: anytype,
         \\    {4s}
-        \\    comptime __blocks: []const __zmpl.Template.Block,
         \\    {1s}
         \\) anyerror![]const u8 {{
         \\{2s}
-        \\    var data = zmpl;
-        \\    zmpl.noop(**__zmpl.Data, &data);
-        \\    zmpl.noop(Context, context);
-        \\    zmpl.noop([]const __zmpl.Template.Block, __blocks);
-        \\    const allocator = zmpl.allocator;
-        \\    var __extend: ?__zmpl.Manifest.Template = null;
-        \\    if (__extend) |*__capture| zmpl.noop(*__zmpl.Manifest.Template, __capture);
-        \\    zmpl.noop(std.mem.Allocator, allocator);
+        \\    const data = data_struct.context;
+        \\    _ = &data;
+        \\    const zmpl = &data_struct.interface;
+        \\    _ = &zmpl;
+        \\    const allocator = data_struct.interface.allocator;
+        \\    data_struct.interface.noop(std.mem.Allocator, allocator);
         \\    {3s}
         \\
     ,
@@ -646,8 +636,8 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
             if (self.partial) "renderPartial" else "render",
             if (self.partial) (self.args orelse "") else "",
             decls_buf.items,
-            if (self.partial) "zmpl.noop([]const __zmpl.Data.Slot, slots);" else "",
-            if (self.partial) "slots: []const __zmpl.Data.Slot," else "",
+            if (self.partial) "data_struct.interface.noop([]const __core.Slot, slots);" else "",
+            if (self.partial) "slots: []const __core.Slot," else "",
         },
     );
     defer self.allocator.free(header);
@@ -656,36 +646,50 @@ fn renderHeader(self: *Template, writer: anytype, options: type) !void {
 }
 
 // Render the final component of the template function.
+// If this template has an `@extend "<name>"` pragma, return the (comptime-known) parent template
+// name so the footer can render it directly. Returns null otherwise.
+fn extendTarget(self: Template) ?[]const u8 {
+    for (self.tokens.items) |token| {
+        if (token.mode != .extend) continue;
+        const raw = util.strip(token.mode_line["@extend".len..]);
+        return std.mem.trim(u8, raw, "\"");
+    }
+    return null;
+}
+
 fn renderFooter(self: Template, writer: *Writer) !void {
-    try writer.writeAll(
-        \\
-        \\    if (__extend) |__capture| {
-        \\        const __inner_content = try allocator.dupe(u8, try zmpl.output_buf.toOwnedSlice());
-        \\        zmpl.content = .{ .data = zmpl.strip(__inner_content) };
-        \\        zmpl.output_buf.clearRetainingCapacity();
-        \\        const __content = try __capture.render(zmpl, Context, context, &.{}, .{});
-        \\        return __content;
-        \\    } else {
-        \\        const output = try zmpl.output_buf.toOwnedSlice();
-        \\        defer zmpl.allocator.free(output);
-        \\        return zmpl.chomp(try zmpl.allocator.dupe(u8, output));
-        \\    }
-        \\}
-        \\
-    );
+    if (self.extendTarget()) |__parent| {
+        // The template extends a parent: capture the rendered inner content, expose it to the
+        // parent as `zmpl.content`, then render the parent directly. The parent is a comptime-known
+        // module, so this avoids the runtime manifest dispatcher (which cannot be instantiated with
+        // a per-template typed context).
+        try writer.print(
+            \\
+            \\    const __inner_content = try allocator.dupe(u8, try data_struct.interface.output_buf.toOwnedSlice());
+            \\    data_struct.interface.content = .{{ .data = data_struct.interface.strip(__inner_content) }};
+            \\    data_struct.interface.output_buf.clearRetainingCapacity();
+            \\    return try @import("{[prefix]s}/{[parent]s}").render(data_struct);
+            \\}}
+            \\
+        , .{ .prefix = self.prefix, .parent = __parent });
+    } else {
+        try writer.writeAll(
+            \\
+            \\    const output = try data_struct.interface.output_buf.toOwnedSlice();
+            \\    defer data_struct.interface.allocator.free(output);
+            \\    return data_struct.interface.chomp(try data_struct.interface.allocator.dupe(u8, output));
+            \\}
+            \\
+        );
+    }
     if (self.partial) {
         try writer.writeAll(
             \\pub fn renderWithLayout(
-            \\    layout: __zmpl.Manifest.Template,
-            \\    zmpl: *__zmpl.Data,
-            \\    Context: type,
-            \\    context: Context,
-            \\    comptime blocks: []const __zmpl.Template.Block,
+            \\    comptime layout: type,
+            \\    data_struct: anytype,
             \\) anyerror![]const u8 {
             \\    _ = layout;
-            \\    _ = zmpl;
-            \\    _ = context;
-            \\    _ = blocks;
+            \\    _ = data_struct;
             \\    std.debug.print("Rendering a partial with a layout is not supported.\n", .{});
             \\    return error.ZmplError;
             \\}
@@ -694,19 +698,16 @@ fn renderFooter(self: Template, writer: *Writer) !void {
     } else {
         try writer.writeAll(
             \\pub fn renderWithLayout(
-            \\    layout: __zmpl.Manifest.Template,
-            \\    zmpl: *__zmpl.Data,
-            \\    Context: type,
-            \\    context: Context,
-            \\    comptime blocks: []const __zmpl.Template.Block,
+            \\    comptime layout: type,
+            \\    data_struct: anytype,
             \\) anyerror![]const u8 {
-            \\    const inner_content = try zmpl.allocator.dupe(
-            \\        u8, try render(zmpl, Context, context, blocks)
+            \\    const inner_content = try data_struct.interface.allocator.dupe(
+            \\        u8, try render(data_struct)
             \\    );
-            \\    zmpl.content = .{ .data = zmpl.strip(inner_content) };
-            \\    zmpl.output_buf.clearRetainingCapacity();
-            \\    const content = try layout.render(zmpl, Context, context, blocks, .{});
-            \\    return zmpl.strip(content);
+            \\    data_struct.interface.content = .{ .data = data_struct.interface.strip(inner_content) };
+            \\    data_struct.interface.output_buf.clearRetainingCapacity();
+            \\    const content = try layout.render(data_struct);
+            \\    return data_struct.interface.strip(content);
             \\}
             \\
         );

@@ -7,5 +7,5 @@
     * {{thing.bar}}
     }
     * last item
-    * {{$.things.0.bar}}
+    * {{$.things[0].bar}}
 MARKDOWN

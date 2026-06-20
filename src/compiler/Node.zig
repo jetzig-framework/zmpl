@@ -7,7 +7,10 @@ const StringHashMap = std.StringHashMapUnmanaged;
 
 const zmd = @import("zmd");
 const ZmdNode = zmd.Node;
-const Formatters = zmd.Formatters;
+const ZmdConfig = zmd.Config;
+
+const core = @import("core");
+const Config = core.Config;
 
 const Template = @import("Template.zig");
 const Token = Template.Token;
@@ -21,6 +24,7 @@ children: ArrayList(*Node),
 parent: ?*const Node,
 generated_template_name: []const u8,
 allocator: Allocator,
+io: std.Io,
 template_map: StringHashMap(TemplateMap),
 templates_paths_map: StringHashMap([]const u8),
 templates_path: []const u8,
@@ -33,14 +37,14 @@ const else_token = "@else";
 
 const Node = @This();
 
-const WriterOptions = struct { zmpl_writer: []const u8 = "zmpl" };
+const WriterOptions = struct { zmpl_writer: []const u8 = "data_struct.interface.output_writer" };
 
 pub const Block = struct {
     name: []const u8,
     func: []const u8,
 };
 
-pub fn compile(self: Node, input: []const u8, writer: *Writer, options: type) !void {
+pub fn compile(self: Node, input: []const u8, writer: *Writer, comptime config: Config) !void {
     if (self.token.mode == .partial and self.children.items.len > 0) {
         std.log.err(
             "Partial slots cannot contain mode blocks:\n{s}",
@@ -59,106 +63,100 @@ pub fn compile(self: Node, input: []const u8, writer: *Writer, options: type) !v
             try self.render(
                 if (initial) .initial else .secondary,
                 content,
-                options,
+                config,
                 writer,
             );
             initial = false;
         }
 
         start = child_node.token.end + 1;
-        try child_node.compile(input, writer, options);
+        try child_node.compile(input, writer, config);
     }
 
     if (self.children.items.len == 0) {
-        const content = input[self.token.startOfContent()..self.token.endOfContent()];
-        try self.render(.initial, content, options, writer);
+        const content = input[self.token.startOfContent()..self.contentEnd(input)];
+        try self.render(.initial, content, config, writer);
     } else {
         const last_child = self.children.items[self.children.items.len - 1];
-        if (last_child.token.end + 1 < self.token.endOfContent()) {
-            const content = input[last_child.token.end + 1 .. self.token.endOfContent()];
-            try self.render(.secondary, content, options, writer);
+        if (last_child.token.end + 1 < self.contentEnd(input)) {
+            const content = input[last_child.token.end + 1 .. self.contentEnd(input)];
+            try self.render(.secondary, content, config, writer);
         }
     }
     try self.renderClose(writer);
 }
 
-const Context = enum { initial, secondary };
-
-fn divFormatter(allocator: Allocator, node: ZmdNode) ![]const u8 {
-    return std.fmt.allocPrint(
-        allocator,
-        \\<div>{s}</div>
-    ,
-        .{node.content},
-    );
+// End offset of this node's content. For block modes the closing delimiter (`@end` / `}`) sits on
+// its own line; `endOfContent` lands inside that line's leading indentation, so back up over the
+// trailing horizontal whitespace to exclude the closing line from the rendered content.
+fn contentEnd(self: Node, input: []const u8) usize {
+    var end = self.token.endOfContent();
+    switch (self.token.delimiter) {
+        // A `.string` (`@end` / custom delimiter) or `.brace` (`}`) close sits on its own line;
+        // back up over its leading indentation so it isn't emitted as trailing content whitespace.
+        .string, .brace => {
+            const start = self.token.startOfContent();
+            while (end > start and (input[end - 1] == ' ' or input[end - 1] == '\t')) : (end -= 1) {}
+        },
+        .none, .eof => {},
+    }
+    return end;
 }
+
+const Context = enum { initial, secondary };
 
 fn render(
     self: Node,
     context: Context,
     content: []const u8,
-    options: type,
-    writer: anytype,
+    comptime config: Config,
+    writer: *Writer,
 ) !void {
-    const formatters = if (@hasDecl(options, "formatters"))
-        options.formatters
-    else
-        zmd.Formatters{ .root = divFormatter };
-
-    const stripped_content = try self.stripComments(content);
+    // `@//` comment lines are stripped from the whole source up front (see
+    // `main.zig`), so `content` is already comment-free here.
     try self.renderMode(
         self.token.mode,
         context,
-        stripped_content,
-        formatters,
+        content,
+        config.zmd,
         if (self.hasBlockParent()) self.block_writer else writer,
     );
 }
 
-fn renderMode(self: Node, mode: Mode, context: Context, content: []const u8, formatters: Formatters, writer: anytype) !void {
+fn renderMode(self: Node, mode: Mode, context: Context, content: []const u8, config: ZmdConfig, writer: *Writer) !void {
     switch (mode) {
         .zig => try self.renderZig(content, writer),
         .html => try self.renderHtml(content, .{}, writer),
         .markdown => try self.renderHtml(
-            try self.renderMarkdown(content, formatters),
+            try self.renderMarkdown(content, config),
             .{},
             writer,
         ),
         .partial => try self.renderPartial(content, writer),
         .args => try self.renderArgs(writer),
         .extend => try self.renderExtend(writer),
-        .@"for" => try self.renderFor(context, content, writer, formatters),
-        .@"if" => try self.renderIf(context, content, writer, formatters),
-        .block => try self.writeBlock(context, content, formatters),
-        .blocks => try self.writeBlocks(writer),
+        .@"for" => try self.renderFor(context, content, writer, config),
+        .@"if" => try self.renderIf(context, content, writer, config),
+        .block => try self.writeBlock(context, content, config, writer),
+        .define => try self.writeDefine(context, content, config),
+        .blocks => {},
     }
 }
 
-fn stripComments(self: Node, content: []const u8) ![]const u8 {
-    const comment_token = "@//";
-
-    var buf: ArrayList(u8) = .empty;
-    defer buf.deinit(self.allocator);
-    var it = util.tokenizeRetainToken(content, "\n");
-    while (it.next()) |line| {
-        if (util.startsWithIgnoringWhitespace(line, comment_token)) continue;
-        try buf.appendSlice(self.allocator, line);
-    }
-    return buf.toOwnedSlice(self.allocator);
-}
-
-fn renderClose(self: Node, writer: anytype) !void {
+fn renderClose(self: Node, writer: *Writer) !void {
     const close_writer = switch (self.token.mode) {
-        .block => self.block_writer,
+        .block, .define => self.block_writer,
         else => writer,
     };
     switch (self.token.mode) {
-        .@"for", .@"if", .block => try close_writer.writeAll("\n}\n"),
+        .@"for", .@"if", .define => try close_writer.writeAll("\n}\n"),
+        // `.none` is the `@block name(args)` call form — no `{` body, so nothing to close.
+        .block => if (self.token.delimiter != .none) try close_writer.writeAll("\n}\n"),
         .zig, .html, .markdown, .partial, .args, .extend, .blocks => {},
     }
 }
 
-fn renderZig(self: Node, content: []const u8, writer: anytype) !void {
+fn renderZig(self: Node, content: []const u8, writer: *Writer) !void {
     var html_it = self.htmlIterator(content);
 
     while (html_it.next()) |line| {
@@ -173,7 +171,7 @@ fn renderZig(self: Node, content: []const u8, writer: anytype) !void {
 fn hasBlockParent(self: Node) bool {
     const parent = self.parent orelse return false;
     return switch (parent.token.mode) {
-        .block => true,
+        .block, .define => true,
         else => parent.hasBlockParent(),
     };
 }
@@ -192,7 +190,7 @@ const HtmlIterator = struct {
 
         const start = self.index;
 
-        if (util.firstMeaningfulChar(self.content[start..])) |char| {
+        if (util.ignore_whitespace.firstChar(self.content[start..])) |char| {
             // If an HTML tag is opened, treat all content up to the line with a the relevant
             // closing `>` (including the rest of the line) as a single line to allow breaking
             // tag definitions across multiple lines.
@@ -261,17 +259,17 @@ fn htmlIterator(self: Node, content: []const u8) HtmlIterator {
     return .init(self.allocator, content);
 }
 fn getHtmlLineMode(line: []const u8) enum { html, zig } {
-    return if (util.startsWithIgnoringWhitespace(line, Syntax.tag_open))
+    return if (util.ignore_whitespace.startsWith(line, Syntax.tag_open))
         .html
-    else if (util.startsWithIgnoringWhitespace(line, Syntax.ref_open))
+    else if (util.ignore_whitespace.startsWith(line, Syntax.ref_open))
         .html
     else
         .zig;
 }
 
 // returns allocated string
-fn renderMarkdown(self: Node, content: []const u8, formatters: Formatters) ![]const u8 {
-    return zmd.parse(self.allocator, content, formatters);
+fn renderMarkdown(self: Node, content: []const u8, config: ZmdConfig) ![]const u8 {
+    return zmd.parseAlloc(self.allocator, content, config);
 }
 
 const Syntax = struct {
@@ -285,7 +283,7 @@ fn renderHtml(
     self: *const Node,
     content: []const u8,
     writer_options: WriterOptions,
-    writer: anytype,
+    writer: *Writer,
 ) !void {
     var index: usize = 0;
 
@@ -327,7 +325,7 @@ fn renderHtml(
     }
 }
 
-fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
+fn renderPartial(self: Node, content: []const u8, writer: *Writer) !void {
     if (self.token.args == null) {
         std.log.err(
             "Expected `@partial` with name, no name was given [{}->{}]: '{s}'",
@@ -434,80 +432,42 @@ fn renderPartial(self: Node, content: []const u8, writer: anytype) !void {
     var args_buf: ArrayList([]const u8) = .empty;
     defer args_buf.deinit(self.allocator);
 
-    for (reordered_args.items, expected_partial_args, 0..) |arg, expected_arg, index| {
-        if (std.mem.startsWith(u8, arg.value, ".") or std.mem.startsWith(u8, arg.value, "$.")) {
-            // Pass a *Zmpl.Value to partial using regular data lookup syntax.
-            const value = try std.fmt.allocPrint(
+    for (reordered_args.items) |arg| {
+        // Partial args are plain Zig expressions; `$.`/`.` are shorthand for the render `context`.
+        if (std.mem.startsWith(u8, arg.value, "$.")) {
+            try args_buf.append(
                 self.allocator,
-                \\(try zmpl.getCoerce({s}, "{s}"))
-            ,
-                .{ expected_arg.value, arg.value[1..] },
+                try std.fmt.allocPrint(self.allocator, "data{s}", .{arg.value[1..]}),
             );
-            try args_buf.append(self.allocator, value);
+        } else if (std.mem.startsWith(u8, arg.value, ".")) {
+            try args_buf.append(
+                self.allocator,
+                try std.fmt.allocPrint(self.allocator, "data{s}", .{arg.value}),
+            );
         } else {
-            var it = std.mem.tokenizeScalar(u8, arg.value, '.');
-            const maybe_root = it.next();
-            if (maybe_root) |root| {
-                if (isIdentifier(root) and it.rest().len > 0) {
-                    const chain = try std.fmt.allocPrint(
-                        self.allocator,
-                        \\if (comptime __zmpl.isZmplValue(@TypeOf({[root]s})))
-                        \\    try {[root]s}.chainRefT(@typeInfo(@TypeOf(@field(__Manifest, "{[name]s}").renderPartial)).@"fn".params[{[index]}].type.?, "{[remainder]s}",)
-                        \\else
-                        \\    {[root]s}{[separator]s}{[remainder2]s}
-                    ,
-                        .{
-                            .root = root,
-                            .remainder = it.rest(),
-                            .name = generated_partial_name.?,
-                            // index + 4 to offset `data`, `Context`, `context`, `slots`, and
-                            // `blocks` args:
-                            .index = index + 5,
-                            .separator = if (it.rest().len == 0) "" else ".",
-                            .remainder2 = it.rest(),
-                        },
-                    );
-                    try args_buf.append(self.allocator, chain);
-                } else if (isIdentifier(root)) {
-                    try args_buf.append(
-                        self.allocator,
-                        try std.fmt.allocPrint(self.allocator,
-                            \\if (comptime __zmpl.isZmplValue(@TypeOf({[root]s})))
-                            \\    try {0s}.coerce(@typeInfo(@TypeOf(@field(__Manifest, "{[name]s}").renderPartial)).@"fn".params[{[index]}].type.?)
-                            \\else
-                            \\   {[root]s}
-                        , .{
-                            .root = root,
-                            .name = generated_partial_name.?,
-                            // index + 5 to offset `data`, `Context`, `context`, and `slots` args:
-                            .index = index + 5,
-                        }),
-                    );
-                } else try args_buf.append(self.allocator, arg.value);
-            } else try args_buf.append(self.allocator, arg.value);
+            try args_buf.append(self.allocator, arg.value);
         }
     }
 
     const template =
         \\{{
         \\{[generators]s}
-        \\        const __slots = [_]__zmpl.Data.Slot{{
+        \\        const __slots = [_]__core.Slot{{
         \\{[items]s}
         \\        }};
-        \\        var __partial_data: __zmpl.Data = .init(allocator);
-        \\        __partial_data.template_decls = zmpl.template_decls;
+        \\        var __partial_data = @TypeOf(data_struct.*).init(data_struct.interface.io, allocator, data_struct.context);
         \\        defer __partial_data.deinit();
         \\
-        \\    const __partial_output = try @field(__Manifest, "{[name]s}").renderPartial(&__partial_data, Context, context, &__slots, &.{{}}, {[content]s});
+        \\    const __partial_output = try @import("partial/{[name]s}").renderPartial(&__partial_data, &__slots, {[content]s});
         \\    defer allocator.free(__partial_output);
-        \\    try zmpl.write(__partial_output);
+        \\    try data_struct.interface.write(__partial_output);
         \\}}
         \\
     ;
     try writer.print(template, .{
         .generators = slots.content_generators,
         .items = slots.items,
-        .name = generated_partial_name.?,
+        .name = partial_name,
         .content = try std.mem.join(self.allocator, ", ", args_buf.items),
     });
 }
@@ -553,7 +513,7 @@ fn generateSlots(self: Node, content: []const u8) !Slots {
 
         try slots_buf.appendSlice(self.allocator, try std.fmt.allocPrint(
             self.allocator,
-            \\    __zmpl.Data.Slot{{ .data = try {s}_buf.toOwnedSlice() }},
+            \\    __core.Slot{{ .data = try {s}_buf.toOwnedSlice() }},
             \\
         ,
             .{slot_name},
@@ -566,7 +526,7 @@ fn generateSlots(self: Node, content: []const u8) !Slots {
     };
 }
 
-fn renderArgs(self: Node, writer: anytype) !void {
+fn renderArgs(self: Node, writer: *Writer) !void {
     _ = self;
     try writer.print(
         \\
@@ -575,18 +535,14 @@ fn renderArgs(self: Node, writer: anytype) !void {
     );
 }
 
-fn renderExtend(self: Node, writer: anytype) !void {
-    const extend = self.token.mode_line["@extend".len..];
-    try writer.print(
-        \\__extend = __zmpl.find({s});
-        \\
-    , .{try util.zigStringEscape(
-        self.allocator,
-        std.mem.trim(u8, util.strip(extend), "\""),
-    )});
+fn renderExtend(self: Node, writer: *Writer) !void {
+    // `@extend` is resolved at compile time by `Template.renderFooter`, which renders the parent
+    // template module directly. Nothing needs to be emitted at the pragma's position.
+    _ = self;
+    _ = writer;
 }
 
-fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype, formatters: Formatters) !void {
+fn renderFor(self: Node, context: Context, content: []const u8, writer: *Writer, config: ZmdConfig) !void {
     // If we have already rendered once, re-rendering the for loop makes no sense so we can just
     // write the remaining content directly. This can happen when a child node of the for loop
     // contains whitespace etc.
@@ -596,7 +552,7 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
                 .zig => try self.renderZig(content, writer),
                 .html => try self.renderHtml(content, .{}, writer),
                 .markdown => try self.renderHtml(
-                    try self.renderMarkdown(content, formatters),
+                    try self.renderMarkdown(content, config),
                     .{},
                     writer,
                 ),
@@ -637,19 +593,14 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
     var for_args_joined: std.Io.Writer.Allocating = .init(self.allocator);
     var for_args_writer = &for_args_joined.writer;
     var for_args_it = std.mem.tokenizeScalar(u8, for_args, ',');
-    while (for_args_it.next()) |arg| {
-        if (std.mem.startsWith(u8, arg, ".") or std.mem.startsWith(u8, arg, "$.")) {
-            try for_args_writer.print(
-                "try zmpl.coerceArray({s}), ",
-                .{try util.zigStringEscape(self.allocator, arg[1..])},
-            );
-        } else if (std.mem.containsAtLeast(u8, arg, 1, "..")) {
-            try for_args_writer.print("{0s}, ", .{arg});
+    while (for_args_it.next()) |raw_arg| {
+        const arg = util.strip(raw_arg);
+        if (std.mem.startsWith(u8, arg, "$.")) {
+            try for_args_writer.print("data{s}, ", .{arg[1..]});
+        } else if (std.mem.startsWith(u8, arg, ".")) {
+            try for_args_writer.print("data{s}, ", .{arg});
         } else {
-            try for_args_writer.print(
-                "if (comptime __zmpl.isZmplValue(@TypeOf({0s}))) {0s}.items(.array) else {0s}, ",
-                .{arg},
-            );
+            try for_args_writer.print("{s}, ", .{arg});
         }
     }
 
@@ -665,7 +616,7 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
             .zig => try self.renderZig(content, writer),
             .html => try self.renderHtml(content, .{}, writer),
             .markdown => try self.renderHtml(
-                try self.renderMarkdown(content, formatters),
+                try self.renderMarkdown(content, config),
                 .{},
                 writer,
             ),
@@ -679,7 +630,6 @@ fn parseZmpl(self: Node, content: []const u8) ![]const u8 {
     const writer = &buf.writer;
     var single_quoted = false;
     var double_quoted = false;
-    var zmpl = false;
     for (content) |char| {
         switch (char) {
             '"' => {
@@ -698,36 +648,17 @@ fn parseZmpl(self: Node, content: []const u8) ![]const u8 {
                 if (double_quoted or single_quoted) {
                     try writer.writeByte(char);
                 } else {
-                    zmpl = true;
-                    try writer.writeAll(
-                        \\zmpl.ref("
-                    );
+                    // `$` is shorthand for the render data root, e.g. `$.foo` => `data.foo`.
+                    try writer.writeAll("data");
                 }
             },
-            else => {
-                if (zmpl) {
-                    switch (char) {
-                        ' ', '(', ')' => |chr| {
-                            zmpl = false;
-                            try writer.writeAll(
-                                \\")
-                            );
-                            try writer.writeByte(chr);
-                        },
-                        else => {
-                            try writer.writeByte(char);
-                        },
-                    }
-                } else {
-                    try writer.writeByte(char);
-                }
-            },
+            else => try writer.writeByte(char),
         }
     }
     return buf.toOwnedSlice();
 }
 
-fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype, formatters: Formatters) !void {
+fn renderIf(self: Node, context: Context, content: []const u8, writer: *Writer, config: ZmdConfig) !void {
     if (context == .initial) {
         // When we render nodes, we render child nodes that exist within their bounds as we work
         // through each node. We only want to render the initial `if` statement defined by this
@@ -746,7 +677,7 @@ fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype, 
         .html => try self.renderHtml(content[0..content_end], .{}, writer),
         .zig => try self.renderZig(content[0..content_end], writer),
         .markdown => try self.renderHtml(
-            try self.renderMarkdown(content[0..content_end], formatters),
+            try self.renderMarkdown(content[0..content_end], config),
             .{},
             writer,
         ),
@@ -766,7 +697,7 @@ fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype, 
             .html => try self.renderHtml(token.content, .{}, writer),
             .zig => try self.renderZig(token.content, writer),
             .markdown => try self.renderHtml(
-                try self.renderMarkdown(token.content, formatters),
+                try self.renderMarkdown(token.content, config),
                 .{},
                 writer,
             ),
@@ -829,32 +760,39 @@ fn ifStatement(self: Node, input: []const u8) !IfStatement {
 
 // Write a `@block` definition - note that we write to a different output buffer here - each
 // block is compiled into a separate function which is written after the main manifest body.
-fn writeBlock(self: Node, context: Context, content: []const u8, formatters: Formatters) !void {
+fn writeBlock(self: Node, context: Context, content: []const u8, config: ZmdConfig, out_writer: *Writer) !void {
     if (context == .initial) {
         const args = self.token.args orelse {
             std.log.err("Missing argument to `@block` mode: `{s}`", .{self.token.mode_line});
             return error.ZmplSyntaxError;
         };
+        // `@block name(args)` (no `{` body) is a CALL to a `@define`d block: render it in place.
+        if (self.token.delimiter == .none) return self.writeBlockCall(args, out_writer);
         const name_end = std.mem.indexOf(u8, args, self.token.delimiter.toString(.open)) orelse {
             std.log.err("Missing delimiter `@block` mode: `{s}`", .{self.token.mode_line});
             return error.ZmplSyntaxError;
         };
-        const block_name = std.mem.trim(
+        const raw_name = std.mem.trim(
             u8,
             args[0..name_end],
             &std.ascii.whitespace,
         );
 
-        const function_name = try util.generateTempVariableNameAlloc(self.allocator);
-        try self.block_writer.print(
-            \\pub fn {s}(zmpl: *__zmpl.Data, Context: type, context: Context) !void {{
-            \\  _ = zmpl.noop(Context, context);
+        try self.block_writer.writeAll(
+            \\ pub fn 
+        );
+        try util.sanitizeKey(raw_name, self.block_writer);
+        try self.block_writer.writeAll(
+            \\(data_struct: anytype) !void {
+            \\  const data = data_struct.context;
+            \\  _ = &data;
+            \\  const zmpl = &data_struct.interface;
+            \\  _ = &zmpl;
             \\
-        , .{function_name});
-
-        const result = try self.block_map.getOrPut(self.allocator, block_name);
-        if (!result.found_existing) result.value_ptr.* = .empty;
-        try result.value_ptr.append(self.allocator, .{ .func = function_name, .name = block_name });
+        );
+        try out_writer.writeAll("try ");
+        try util.sanitizeKey(raw_name, out_writer);
+        try out_writer.writeAll("(data_struct);\n");
     }
 
     const writer = self.block_writer;
@@ -863,37 +801,95 @@ fn writeBlock(self: Node, context: Context, content: []const u8, formatters: For
             .zig => try self.renderZig(content, writer),
             .html => try self.renderHtml(content, .{}, writer),
             .markdown => try self.renderHtml(
-                try self.renderMarkdown(content, formatters),
+                try self.renderMarkdown(content, config),
                 .{},
                 writer,
             ),
             .partial => try self.renderPartial(content, writer),
             .args => try self.renderArgs(writer),
             .extend => try self.renderExtend(writer),
-            .@"for" => try self.renderFor(context, content, writer, formatters),
-            .@"if" => try self.renderIf(context, content, writer, formatters),
-            .block => try self.writeBlock(context, content, formatters),
-            .blocks => try self.writeBlocks(writer),
+            .@"for" => try self.renderFor(context, content, writer, config),
+            .@"if" => try self.renderIf(context, content, writer, config),
+            .block => try self.writeBlock(context, content, config, writer),
+            .define => try self.writeDefine(context, content, config),
+            .blocks => {},
         }
     } else {
         try self.renderHtml(content, .{}, writer);
     }
 }
 
-fn writeBlocks(self: Node, writer: anytype) !void {
-    const args = self.token.args orelse {
-        std.log.err("Missing argument to `@blocks` mode: `{s}`", .{self.token.mode_line});
-        return error.ZmplSyntaxError;
-    };
-    try writer.print(
-        \\inline for (__blocks) |__block| {{
-        \\  if (std.mem.eql(u8, __block.name, {s})) {{
-        \\      try @field(@field(__Manifest, __block.template_name), __block.func)(zmpl, Context, context);
-        \\  }}
-        \\}}
-    ,
-        .{try util.zigStringEscape(self.allocator, std.mem.trim(u8, args, &std.ascii.whitespace))},
-    );
+// `@define name(arg: T, ...) { body }` — define a reusable `pub fn name(data_struct, arg: T, ...)` on the
+// template module. Unlike `@block`, it is NOT rendered in place; invoke with `@block name(args)` or
+// directly in a `@zig` block via `try name(data_struct, args)`.
+fn writeDefine(self: Node, context: Context, content: []const u8, config: ZmdConfig) anyerror!void {
+    if (context == .initial) {
+        const args = self.token.args orelse {
+            std.log.err("Missing argument to `@define` mode: `{s}`", .{self.token.mode_line});
+            return error.ZmplSyntaxError;
+        };
+        const body_at = std.mem.indexOf(u8, args, self.token.delimiter.toString(.open)) orelse args.len;
+        const paren_at = std.mem.indexOfScalar(u8, args[0..body_at], '(') orelse body_at;
+        const raw_name = std.mem.trim(u8, args[0..paren_at], &std.ascii.whitespace);
+
+        // Build the typed parameter list from the `(name: type, ...)` signature.
+        try self.block_writer.writeAll(
+            \\pub fn 
+        );
+        try util.sanitizeKey(raw_name, self.block_writer);
+        try self.block_writer.writeAll("(data_struct: anytype");
+        if (paren_at < body_at) {
+            for (try self.parsePartialArgs(args[paren_at..body_at])) |arg| {
+                if (arg.name == null) {
+                    std.log.err("`@define {s}` params must be `name: type`: `{s}`", .{ raw_name, self.token.mode_line });
+                    return error.ZmplSyntaxError;
+                }
+                try self.block_writer.print(", {s}: {s}", .{ arg.name.?, arg.value });
+            }
+        }
+        try self.block_writer.writeAll(
+            \\) !void {
+            \\  const data = data_struct.context;
+            \\  _ = &data;
+            \\  const zmpl = &data_struct.interface;
+            \\  _ = &zmpl;
+            \\
+        );
+    }
+
+    const writer = self.block_writer;
+    if (self.parent) |parent| {
+        switch (parent.token.mode) {
+            .zig => try self.renderZig(content, writer),
+            .html => try self.renderHtml(content, .{}, writer),
+            .markdown => try self.renderHtml(try self.renderMarkdown(content, config), .{}, writer),
+            .partial => try self.renderPartial(content, writer),
+            .args => try self.renderArgs(writer),
+            .extend => try self.renderExtend(writer),
+            .@"for" => try self.renderFor(context, content, writer, config),
+            .@"if" => try self.renderIf(context, content, writer, config),
+            .block => try self.writeBlock(context, content, config, writer),
+            .define => try self.writeDefine(context, content, config),
+            .blocks => {},
+        }
+    } else {
+        try self.renderHtml(content, .{}, writer);
+    }
+}
+
+// `@block name(args)` — call a `@define`d block and render its output in place.
+fn writeBlockCall(self: Node, args: []const u8, writer: *Writer) !void {
+    const paren_at = std.mem.indexOfScalar(u8, args, '(') orelse args.len;
+    const raw_name = std.mem.trim(u8, args[0..paren_at], &std.ascii.whitespace);
+
+    try writer.writeAll("try ");
+    try util.sanitizeKey(raw_name, writer);
+    try writer.writeAll("(data_struct");
+    if (paren_at < args.len) {
+        for (try self.parsePartialArgs(args[paren_at..])) |arg|
+            try writer.print(", {s}", .{arg.value});
+    }
+    try writer.writeAll(");\n");
 }
 
 // Represents a name/value keypair OR a name/type keypair.
@@ -988,10 +984,10 @@ fn renderWrite(
     self: Node,
     input: []const u8,
     writer_options: WriterOptions,
-    writer: anytype,
+    writer: *Writer,
 ) !void {
     return writer.print(
-        \\_ = try {s}.write(zmpl.chomp({s}));
+        \\try {s}.writeAll(data_struct.interface.chomp({s}));
         \\
     ,
         .{ writer_options.zmpl_writer, try util.zigStringEscape(self.allocator, input) },
@@ -1002,31 +998,22 @@ fn renderRef(
     self: Node,
     input: []const u8,
     writer_options: WriterOptions,
-    writer: anytype,
+    writer: *Writer,
 ) !void {
     const stripped = util.strip(input);
-    if (std.mem.startsWith(u8, stripped, ".") or
-        std.mem.startsWith(u8, stripped, "$."))
-    {
-        try self.renderDataRef(stripped[1..], writer_options, writer);
+    if (std.mem.startsWith(u8, stripped, "$.")) {
+        // `$.foo` shorthand => `context.foo`
+        const expr = try std.fmt.allocPrint(self.allocator, "data{s}", .{stripped[1..]});
+        try self.renderValueRef(expr, writer_options, writer);
+    } else if (std.mem.startsWith(u8, stripped, ".")) {
+        // `.foo` shorthand => `context.foo`
+        const expr = try std.fmt.allocPrint(self.allocator, "data{s}", .{stripped});
+        try self.renderValueRef(expr, writer_options, writer);
     } else if (std.mem.indexOfAny(u8, stripped, " \"+-/*{}!?()")) |_| {
         try self.renderZigLiteral(stripped, writer_options, writer);
     } else {
         try self.renderValueRef(stripped, writer_options, writer);
     }
-}
-
-fn renderDataRef(
-    self: Node,
-    input: []const u8,
-    writer_options: WriterOptions,
-    writer: *Writer,
-) !void {
-    _ = self;
-    try writer.print(
-        \\try __zmpl.sanitize({s}, try zmpl.getValueString("{s}"));
-        \\
-    , .{ writer_options.zmpl_writer, input });
 }
 
 fn renderValueRef(
@@ -1035,50 +1022,37 @@ fn renderValueRef(
     writer_options: WriterOptions,
     writer: *Writer,
 ) !void {
-    var arg_name_buf: [32]u8 = undefined;
-    const arg_name = util.generateTempVariableName(&arg_name_buf);
-    var blk_label_buf: [32]u8 = undefined;
-    const blk_label = util.generateTempVariableName(&blk_label_buf);
-    var blk_arg_buf: [32]u8 = undefined;
-    const blk_arg = util.generateTempVariableName(&blk_arg_buf);
-    var index_arg_buf: [32]u8 = undefined;
-    const index_arg = util.generateTempVariableName(&index_arg_buf);
+    _ = self;
+    var value_buf: [32]u8 = undefined;
+    const value = util.generateTempVariableName(&value_buf);
+    var item_buf: [32]u8 = undefined;
+    const item = util.generateTempVariableName(&item_buf);
+    var index_buf: [32]u8 = undefined;
+    const index = util.generateTempVariableName(&index_buf);
 
-    if (std.mem.containsAtLeast(u8, input, 1, ".")) {
-        const start = std.mem.indexOfScalar(u8, input, '.').?;
-        try writer.print(
-            \\_ = if (comptime __zmpl.isZmplValue(@TypeOf({1s})))
-            \\       try __zmpl.sanitize({0s}, try zmpl.maybeRef({1s}, {2s}))
-            \\    else if (comptime @TypeOf({3s}) == __zmpl.Data.LayoutContent)
-            \\             try {0s}.write({3s}.data)
-            \\         else
-            \\             try __zmpl.sanitize({0s}, try zmpl.coerceString({3s}));
-            \\
-        , .{
-            writer_options.zmpl_writer,
-            input[0..start],
-            try util.zigStringEscape(self.allocator, input[start + 1 ..]),
-            input,
-        });
-    } else try writer.print(
-        \\const {0s} = {1s};
-        \\_ = if (comptime @TypeOf({0s}) == __zmpl.Data.Slot)
-        \\        try {2s}.write({0s}.data)
-        \\    else if (@TypeOf({0s}) == []const __zmpl.Data.Slot) {4s}: {{
-        \\        for ({0s}, 0..) |{3s}, {5s}| {{
-        \\          try {2s}.write({3s}.data);
-        \\          if ({5s} + 1 < {0s}.len) try {2s}.write("\n");
-        \\        }}
-        \\        break :{4s} "";
-        \\    }} else try __zmpl.sanitize({2s}, try zmpl.coerceString({0s}));
+    // `input` is a Zig expression (e.g. `context.foo`). Render a slot, a list of slots, layout
+    // content, or coerce the value to a string.
+    try writer.print(
+        \\const {[value]s} = {[input]s};
+        \\if (comptime @TypeOf({[value]s}) == __core.Slot) {{
+        \\    try {[writer]s}.writeAll({[value]s}.data);
+        \\}} else if (@TypeOf({[value]s}) == []const __core.Slot) {{
+        \\    for ({[value]s}, 0..) |{[item]s}, {[index]s}| {{
+        \\        try {[writer]s}.writeAll({[item]s}.data);
+        \\        if ({[index]s} + 1 < {[value]s}.len) try {[writer]s}.writeAll("\n");
+        \\    }}
+        \\}} else if (comptime @TypeOf({[value]s}) == __core.LayoutContent) {{
+        \\    try {[writer]s}.writeAll({[value]s}.data);
+        \\}} else {{
+        \\    try __core.sanitize({[writer]s}, try data_struct.interface.coerceString({[value]s}));
+        \\}}
         \\
     , .{
-        arg_name,
-        input,
-        writer_options.zmpl_writer,
-        blk_label,
-        blk_arg,
-        index_arg,
+        .value = value,
+        .input = input,
+        .writer = writer_options.zmpl_writer,
+        .item = item,
+        .index = index,
     });
 }
 
@@ -1089,10 +1063,20 @@ fn renderZigLiteral(
     writer: *Writer,
 ) !void {
     _ = self;
+    var value_buf: [32]u8 = undefined;
+    const value = util.generateTempVariableName(&value_buf);
+    // The expression may evaluate to a plain `[]const u8`, an error union (e.g.
+    // `zmpl.fmt.raw(...)`), or an optional. Resolve it before writing. The switch is
+    // comptime-pruned so only the matching prong is compiled.
     try writer.print(
-        \\_ = try {s}.write({s});
+        \\const {[value]s} = {[input]s};
+        \\try {[writer]s}.writeAll(switch (comptime @typeInfo(@TypeOf({[value]s}))) {{
+        \\    .error_union => try {[value]s},
+        \\    .optional => {[value]s} orelse "",
+        \\    else => {[value]s},
+        \\}});
         \\
-    , .{ writer_options.zmpl_writer, input });
+    , .{ .value = value, .input = input, .writer = writer_options.zmpl_writer });
 }
 
 // Parse a target partial's `@args` pragma in order to re-order keyword args if needed.
@@ -1112,14 +1096,14 @@ fn getPartialArgsSignature(self: Node, prefix: []const u8, partial_name: []const
     };
     const path = try std.fs.path.join(self.allocator, &[_][]const u8{ templates_path, with_extension });
     defer self.allocator.free(path);
-    const content = util.readFile(self.allocator, std.fs.cwd(), path) catch return &.{};
+    const content = util.readFile(self.allocator, self.io, std.Io.Dir.cwd(), path) catch return &.{};
     defer self.allocator.free(content);
     var it = std.mem.splitScalar(u8, content, '\n');
 
     var args: ?[]Arg = null;
 
     while (it.next()) |line| {
-        if (util.startsWithIgnoringWhitespace(line, "@args")) {
+        if (util.ignore_whitespace.startsWith(line, "@args")) {
             const normalized = try std.mem.concat(
                 self.allocator,
                 u8,

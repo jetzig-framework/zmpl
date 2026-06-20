@@ -44,8 +44,12 @@
   expected: else
 @end
 
-@if ($.foo.bar) |bar|
-  bar is {{bar}}
+@if ($.foo.bar)
+  bar is {{$.foo.bar}}
+@end
+
+@if ($.foo.optional) |optional|
+  optional is {{optional}}
 @end
 
 @if ($.foo.truthy)

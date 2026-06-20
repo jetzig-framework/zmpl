@@ -1,4 +1,4 @@
-@args email: *ZmplValue, subject: []const u8
+@args email: []const u8, subject: []const u8
 <a href="mailto:{{email}}?subject={{subject}}">{{email}}</a>
 
 @zig {
