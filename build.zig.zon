@@ -4,15 +4,17 @@
     .fingerprint = 0xef2931206468149,
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
-        .zmd = .{
-            .path = "git+https://github.com/jetzig-framework/zmd#3a23328a575357e6c55e2c50a4e41f11776e4f18",
-        },
-        .jetzig_datetime = .{
-            .path = "git+https://knot.poecoh.com/poecoh.com/jetzig-datetime#683b50a0f040e3d09fb168d8066c4cee861e1a24",
-        },
         .hex = .{
             .url = "git+https://tangled.org/poecoh.com/hex#98af026564c2c5cd430f4f081e998393f0fc3379",
             .hash = "hex-0.0.0-6HDeC-4XBwAGjpKWkCFHJXnsuZuUwFof3zMSyZQpF0IN",
+        },
+        .zmd = .{
+            .url = "git+https://github.com/jetzig-framework/zmd#3a23328a575357e6c55e2c50a4e41f11776e4f18",
+            .hash = "zmd-0.2.0-H8YV7VfEAACoEBk4Yy0feU3HmoIE-7oqjuiGadj3t1mv",
+        },
+        .jetzig_datetime = .{
+            .url = "git+https://knot.poecoh.com/poecoh.com/jetzig-datetime#683b50a0f040e3d09fb168d8066c4cee861e1a24",
+            .hash = "jetzig_datetime-0.0.0-KthfnrssAgAZddrHnofhl0ZYElAeH7Lg1zzZC49TSipW",
         },
     },
 

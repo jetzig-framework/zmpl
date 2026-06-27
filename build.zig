@@ -22,7 +22,7 @@ pub fn build(b: *Build) void {
         .optimize = optimize,
     }).module("zmd");
 
-    const datetime = b.dependency("datetime", .{
+    const datetime = b.dependency("jetzig_datetime", .{
         .target = target,
     }).module("jetzig_datetime");
 
