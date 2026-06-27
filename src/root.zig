@@ -5,7 +5,7 @@ const datetime = @import("datetime");
 const data = @import("core/data.zig");
 
 /// Compile-time Zmpl configuration (the replacement for the old generated `zmpl_options` module).
-pub const Config = @import("Config.zig");
+pub const Config = @import("Config");
 
 /// Factory that builds the per-render `Data` type carrying the comptime-known `context`. Templates
 /// read all render data from `context`.

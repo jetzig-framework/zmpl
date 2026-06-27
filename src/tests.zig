@@ -596,7 +596,7 @@ test "if/else" {
             nonexistent: ?[]const u8,
             optional: ?i64,
         },
-    }) = .initContext(t.io, t.allocator, .{
+    }) = .init(t.io, t.allocator, .{
         .foo = .{
             .bar = 1,
             .baz = 3,

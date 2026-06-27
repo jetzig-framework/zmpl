@@ -22,9 +22,16 @@ pub fn build(b: *Build) void {
         .optimize = optimize,
     }).module("zmd");
 
-    const datetime = b.dependency("jetzig_datetime", .{
+    const datetime = b.dependency("datetime", .{
         .target = target,
     }).module("jetzig_datetime");
+
+    const config = b.addModule("Config", .{
+        .root_source_file = b.path("src/Config.zig"),
+        .imports = &.{
+            import("zmd", zmd),
+        },
+    });
 
     const zmpl = b.addModule("zmpl", .{
         .target = target,
@@ -34,19 +41,22 @@ pub fn build(b: *Build) void {
             import("zmd", zmd),
             import("datetime", datetime),
             import("blush", blush),
+            import("Config", config),
         },
     });
 
     const dummy_options = b.createModule(.{
         .root_source_file = b.path("src/compiler/dummy_zmpl_options.zig"),
         .target = target,
+        .imports = &.{import("Config", config)},
     });
+
     const test_compiler = templateCompiler(
         b,
         target,
         optimize,
         b.path("src/compiler/main.zig"),
-        zmpl,
+        config,
         zmd,
         dummy_options,
     );
@@ -111,13 +121,18 @@ pub const SetupOptions = struct {
     ///   * `template_directories: []const []const u8` — names of the template
     ///     dirs, which are resolved relative to the config module's own directory
     ///     (so `"views"` next to `app/main.zig` means `app/views`).
-    /// `zmpl` is added to this module's import table as "zmpl", closing the
-    /// config <-> zmpl cycle.
+    /// Gets `zmpl_config` (the standalone Config module) imported — NOT `zmpl`,
+    /// and never the templates, so the compiler that consumes this module as
+    /// `zmpl_options` stays free of the template-generation cycle.
+    ///
+    /// MUST be a different `*Module` instance than `main` (it may be created from
+    /// the same source file). The compiler imports this module directly, so if it
+    /// also carried the templates the compiler would depend on its own output.
     config: *Module,
-    /// The main application module (the executable's root). `zmpl` and every
-    /// compiled template module are imported directly into it, so app code can
-    /// `@import("zmpl")` and `@import("views/home/index")` with no extra wiring.
-    /// May be the same module as `config`.
+    /// The main application module (the executable's root). `zmpl`, `zmpl_config`,
+    /// and every compiled template module are imported directly into it, so app
+    /// code can `@import("zmpl")` and `@import("views/home/index")` with no extra
+    /// wiring. Must be a distinct instance from `config` (see above).
     main: *Module,
     /// Default to the zmpl module's own target/optimize when null.
     target: ?ResolvedTarget = null,
@@ -145,16 +160,20 @@ pub const Setup = struct {
 /// Template directories come from the `config` module's own `template_directories`
 /// declaration, so the caller never lists them here. After `setup` returns, `main`
 /// already has `zmpl` and every template imported — just build the exe from it.
-/// `config` and `main` may be the same module.
+///
+/// `config` and `main` MUST be distinct `*Module` instances (they may point at the
+/// same source file). The compiler imports `config` directly, so it must never
+/// carry the templates.
 ///
 ///     const zmpl_build = @import("zmpl");
 ///     const dep = b.dependency("zmpl", .{ .target = target, .optimize = optimize });
-///     const app = b.createModule(.{
-///         .root_source_file = b.path("app/main.zig"),
-///         .target = target,
-///         .optimize = optimize,
+///     const config = b.createModule(.{
+///         .root_source_file = b.path("app/main.zig"), .target = target, .optimize = optimize,
 ///     });
-///     _ = try zmpl_build.setup(b, dep, .{ .config = app, .main = app });
+///     const app = b.createModule(.{
+///         .root_source_file = b.path("app/main.zig"), .target = target, .optimize = optimize,
+///     });
+///     _ = try zmpl_build.setup(b, dep, .{ .config = config, .main = app });
 ///     const exe = b.addExecutable(.{ .name = "app", .root_module = app });
 pub fn setup(b: *Build, dep: *Build.Dependency, options: SetupOptions) !Setup {
     const core = dep.module("zmpl");
@@ -165,19 +184,33 @@ pub fn setup(b: *Build, dep: *Build.Dependency, options: SetupOptions) !Setup {
     // the compiler and generated template modules share one instance of each.
     const zmd = core.import_table.get("zmd").?;
     const datetime = core.import_table.get("datetime").?;
+    // The standalone Config module — the *only* thing the compiler and the
+    // config role need from zmpl. Using the same instance everywhere keeps
+    // `zmpl_config`'s type identical to the compiler's expected `Config`.
+    const config_mod = core.import_table.get("Config").?;
 
-    // Close the cycle: `zmpl_config` can now resolve `@import("zmpl_config")`.
-    options.config.addImport("zmpl_config", core);
-    // App code uses zmpl directly too.
+    // The config role types `zmpl_config` via the tiny Config module ONLY — it
+    // must not import `core`, or the compiler (which consumes the config module
+    // as `zmpl_options`) would transitively pull in `core` and re-open the
+    // `core -> application -> templates -> compiler` build-graph cycle. The app
+    // role gets full `zmpl` plus Config (so it can both render and read config).
+    // `config` and `main` must be distinct *Module instances (may share a file).
+    options.config.addImport("zmpl_config", config_mod);
     options.main.addImport("zmpl", core);
+    options.main.addImport("zmpl_config", config_mod);
+    // Safe now: `core` is no longer in the compiler's import graph (the compiler
+    // imports the standalone Config module instead), so this back-edge for
+    // runtime app access can't create a cycle.
+    core.addImport("application", options.main);
 
     // A compiler bound to *this* consumer's config, not zmpl's dummy options.
+    // It imports the standalone Config module, never `core`.
     const compiler = templateCompiler(
         b,
         target,
         optimize,
         dep.path("src/compiler/main.zig"),
-        core,
+        config_mod,
         zmd,
         options.config,
     );
@@ -259,7 +292,7 @@ pub fn templateCompiler(
     target: ResolvedTarget,
     optimize: OptimizeMode,
     compiler_src: LazyPath,
-    core_mod: *Module,
+    config_mod: *Module,
     zmd_mod: *Module,
     options: *Module,
 ) *Build.Step.Compile {
@@ -270,7 +303,7 @@ pub fn templateCompiler(
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                import("core", core_mod),
+                import("Config", config_mod),
                 import("zmd", zmd_mod),
                 import("zmpl_options", options),
             },

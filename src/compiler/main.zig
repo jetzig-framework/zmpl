@@ -10,13 +10,13 @@ const debug = std.debug;
 
 const Template = @import("Template.zig");
 const util = @import("util.zig");
-const core = @import("core");
 const zmpl_options = @import("zmpl_options");
+const Config = @import("Config");
 
 /// Compile-time Zmpl configuration driving codegen. The app's `zmpl_options` module (app/main.zig)
 /// exports a `zmpl_config` value; the empty dummy used for test templates does not, so fall back to
 /// defaults.
-const config: core.Config = if (@hasDecl(zmpl_options, "zmpl_config")) zmpl_options.zmpl_config else .{};
+const config: Config = if (@hasDecl(zmpl_options, "zmpl_config")) zmpl_options.zmpl_config else .{};
 
 /// Single host executable that owns all Zmpl codegen. Dispatched on `argv[1]`:
 ///

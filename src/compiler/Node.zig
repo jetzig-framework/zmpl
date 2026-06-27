@@ -9,8 +9,7 @@ const zmd = @import("zmd");
 const ZmdNode = zmd.Node;
 const ZmdConfig = zmd.Config;
 
-const core = @import("core");
-const Config = core.Config;
+const Config = @import("Config");
 
 const Template = @import("Template.zig");
 const Token = Template.Token;

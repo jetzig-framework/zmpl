@@ -5,10 +5,10 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .zmd = .{
-            .path = "../zmd",
+            .path = "git+https://github.com/jetzig-framework/zmd#3a23328a575357e6c55e2c50a4e41f11776e4f18",
         },
         .jetzig_datetime = .{
-            .path = "../jetzig-datetime",
+            .path = "git+https://knot.poecoh.com/poecoh.com/jetzig-datetime#683b50a0f040e3d09fb168d8066c4cee861e1a24",
         },
         .hex = .{
             .url = "git+https://tangled.org/poecoh.com/hex#98af026564c2c5cd430f4f081e998393f0fc3379",

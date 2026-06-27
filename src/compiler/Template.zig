@@ -4,8 +4,7 @@ const ArrayList = std.ArrayList;
 const Writer = std.Io.Writer;
 const StringHashMap = std.StringHashMapUnmanaged;
 
-const core = @import("core");
-const Config = core.Config;
+const Config = @import("Config");
 
 const Node = @import("Node.zig");
 const util = @import("util.zig");
