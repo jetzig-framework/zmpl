@@ -19,14 +19,14 @@ pub fn parse(allocator: Allocator, input: []const u8) !Ast {
         &.{ "_ = if ", input, "{}" },
         0,
     );
-    return Ast.parse(allocator, source, .zig);
+    return Ast.parse(allocator, source, .{ .mode = .zig });
 }
 
 pub fn init(ast: Ast) IfStatement {
     const tags = ast.nodes.items(.tag);
 
     for (tags, 0..) |tag, index| {
-        const node: Ast.Node.Index = @enumFromInt(index);
+        const node: Ast.Node.Index = @fromBackingInt(@intCast(index));
         if (tag == .if_simple) {
             const if_simple = ast.ifSimple(node);
             return .{ .ast = ast, .if_ast = if_simple };
@@ -39,7 +39,7 @@ pub fn render(self: IfStatement, writer: anytype) !void {
     const tags = self.ast.nodes.items(.tag);
 
     for (tags, 0..) |tag, index| {
-        const node: Ast.Node.Index = @enumFromInt(index);
+        const node: Ast.Node.Index = @fromBackingInt(@intCast(index));
         if (tag == .if_simple) {
             try writer.writeAll("if (");
             const if_full = self.ast.ifSimple(node);
@@ -77,7 +77,7 @@ fn writeNode(self: IfStatement, node: Ast.Node.Index, writer: anytype) !void {
             try self.writeNode(lhs, writer);
             if (wrap_lhs) try writer.writeAll(wrap_eql_close_true);
 
-            try writer.print(" {s} ", .{self.ast.tokenSlice(main_tokens[@intFromEnum(node)])});
+            try writer.print(" {s} ", .{self.ast.tokenSlice(main_tokens[@backingInt(node)])});
 
             if (wrap_rhs) try writer.writeAll(wrap_eql_open);
             try self.writeNode(rhs, writer);
@@ -265,7 +265,7 @@ test "simple if without capture" {
 }
 
 fn expectIfStatement(expected: []const u8, input: [:0]const u8) !void {
-    var ast = try Ast.parse(std.testing.allocator, input, .zig);
+    var ast = try Ast.parse(std.testing.allocator, input, .{ .mode = .zig });
     defer ast.deinit(std.testing.allocator);
 
     const if_statement: IfStatement = .init(ast);
