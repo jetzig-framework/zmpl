@@ -122,7 +122,7 @@ pub fn compile(self: *Template, io: std.Io, comptime options: type) ![]const u8 
     self.state = .compiled;
 
     const with_sentinel = try std.mem.concatWithSentinel(self.allocator, u8, &.{buf.items}, 0);
-    var ast = try std.zig.Ast.parse(self.allocator, with_sentinel, .zig);
+    var ast = try std.zig.Ast.parse(self.allocator, with_sentinel, .{ .mode = .zig });
     return if (ast.errors.len > 0)
         try buf.toOwnedSlice(self.allocator)
     else
@@ -411,9 +411,9 @@ fn getDelimitedMode(line: []const u8) ?DelimitedMode {
 
     const first_word = stripped[1..end_of_first_word.?];
 
-    inline for (std.meta.fields(Mode)) |field| {
-        if (std.mem.eql(u8, field.name, first_word)) {
-            const mode: Mode = @enumFromInt(field.value);
+    inline for (@typeInfo(Mode).@"enum".field_names) |field_name| {
+        if (std.mem.eql(u8, field_name, first_word)) {
+            const mode: Mode = @field(Mode, field_name);
             const maybe_delimiter: ?Delimiter = switch (mode) {
                 .args, .extend, .blocks => .none,
                 .html,

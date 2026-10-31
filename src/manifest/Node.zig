@@ -6,7 +6,7 @@ const StringHashMap = std.StringHashMapUnmanaged;
 
 const zmd = @import("zmd");
 const ZmdNode = zmd.Node;
-const Formatters = zmd.Formatters;
+const ZmdConfig = zmd.Config;
 
 const Template = @import("Template.zig");
 const Token = Template.Token;
@@ -53,14 +53,14 @@ pub const Writer = struct {
         var buf: std.Io.Writer.Allocating = .fromArrayList(self.allocator, self.buf);
         defer buf.deinit();
         try buf.writer.print(input, args);
-        if (builtin.mode == .Debug) try self.writeDebug(&buf.writer);
+        if (builtin.mode == .debug) try self.writeDebug(&buf.writer);
         self.buf.* = buf.toArrayList();
     }
 
     pub fn writeAll(self: Writer, input: []const u8) !void {
         var buf: std.Io.Writer.Allocating = .fromArrayList(self.allocator, self.buf);
         defer buf.deinit();
-        if (builtin.mode == .Debug) {
+        if (builtin.mode == .debug) {
             var it = std.mem.tokenizeScalar(u8, input, '\n');
             while (it.next()) |line| {
                 try buf.writer.writeAll(line);
@@ -132,13 +132,9 @@ pub fn compile(self: Node, io: std.Io, input: []const u8, writer: Writer, option
 
 const Context = enum { initial, secondary };
 
-fn divFormatter(allocator: Allocator, node: ZmdNode) ![]const u8 {
-    return std.fmt.allocPrint(
-        allocator,
-        \\<div>{s}</div>
-    ,
-        .{node.content},
-    );
+fn divFormatter(writer: *std.Io.Writer, _: zmd.Node) ![]const u8 {
+    try writer.writeAll("<div>");
+    return "</div>";
 }
 
 fn render(
@@ -152,7 +148,7 @@ fn render(
     const formatters = if (@hasDecl(options, "formatters"))
         options.formatters
     else
-        zmd.Formatters{ .root = divFormatter };
+        zmd.Config{ .root = divFormatter };
 
     const stripped_content = try self.stripComments(content);
     try self.renderMode(
@@ -165,21 +161,21 @@ fn render(
     );
 }
 
-fn renderMode(self: Node, io: std.Io, mode: Mode, context: Context, content: []const u8, formatters: Formatters, writer: anytype) !void {
+fn renderMode(self: Node, io: std.Io, mode: Mode, context: Context, content: []const u8, zmd_config: ZmdConfig, writer: anytype) !void {
     switch (mode) {
         .zig => try self.renderZig(content, writer),
         .html => try self.renderHtml(content, .{}, writer),
         .markdown => try self.renderHtml(
-            try self.renderMarkdown(content, formatters),
+            try self.renderMarkdown(content, zmd_config),
             .{},
             writer,
         ),
         .partial => try self.renderPartial(io, content, writer),
         .args => try self.renderArgs(writer),
         .extend => try self.renderExtend(writer),
-        .@"for" => try self.renderFor(context, content, writer, formatters),
-        .@"if" => try self.renderIf(context, content, writer, formatters),
-        .block => try self.writeBlock(io, context, content, formatters),
+        .@"for" => try self.renderFor(context, content, writer, zmd_config),
+        .@"if" => try self.renderIf(context, content, writer, zmd_config),
+        .block => try self.writeBlock(io, context, content, zmd_config),
         .blocks => try self.writeBlocks(writer),
     }
 }
@@ -320,8 +316,8 @@ fn getHtmlLineMode(line: []const u8) enum { html, zig } {
 }
 
 // returns allocated string
-fn renderMarkdown(self: Node, content: []const u8, formatters: Formatters) ![]const u8 {
-    return zmd.parse(self.allocator, content, formatters);
+fn renderMarkdown(self: Node, content: []const u8, zmd_config: ZmdConfig) ![]const u8 {
+    return zmd.parseAlloc(self.allocator, content, zmd_config);
 }
 
 const Syntax = struct {
@@ -502,7 +498,7 @@ fn renderPartial(self: Node, io: std.Io, content: []const u8, writer: anytype) !
                     const chain = try std.fmt.allocPrint(
                         self.allocator,
                         \\if (comptime __zmpl.isZmplValue(@TypeOf({[root]s})))
-                        \\    try {[root]s}.chainRefT(@typeInfo(@TypeOf({[name]s}_renderPartial)).@"fn".params[{[index]}].type.?, "{[remainder]s}",)
+                        \\    try {[root]s}.chainRefT(@typeInfo(@TypeOf({[name]s}_renderPartial)).@"fn".param_types[{[index]}].?, "{[remainder]s}",)
                         \\else
                         \\    {[root]s}{[separator]s}{[remainder2]s}
                     ,
@@ -523,7 +519,7 @@ fn renderPartial(self: Node, io: std.Io, content: []const u8, writer: anytype) !
                         self.allocator,
                         try std.fmt.allocPrint(self.allocator,
                             \\if (comptime __zmpl.isZmplValue(@TypeOf({[root]s})))
-                            \\    try {0s}.coerce(@typeInfo(@TypeOf({[name]s}_renderPartial)).@"fn".params[{[index]}].type.?)
+                            \\    try {0s}.coerce(@typeInfo(@TypeOf({[name]s}_renderPartial)).@"fn".param_types[{[index]}].?)
                             \\else
                             \\   {[root]s}
                         , .{
@@ -636,7 +632,7 @@ fn renderExtend(self: Node, writer: anytype) !void {
     )});
 }
 
-fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype, formatters: Formatters) !void {
+fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype, zmd_config: ZmdConfig) !void {
     // If we have already rendered once, re-rendering the for loop makes no sense so we can just
     // write the remaining content directly. This can happen when a child node of the for loop
     // contains whitespace etc.
@@ -646,7 +642,7 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
                 .zig => try self.renderZig(content, writer),
                 .html => try self.renderHtml(content, .{}, writer),
                 .markdown => try self.renderHtml(
-                    try self.renderMarkdown(content, formatters),
+                    try self.renderMarkdown(content, zmd_config),
                     .{},
                     writer,
                 ),
@@ -715,7 +711,7 @@ fn renderFor(self: Node, context: Context, content: []const u8, writer: anytype,
             .zig => try self.renderZig(content, writer),
             .html => try self.renderHtml(content, .{}, writer),
             .markdown => try self.renderHtml(
-                try self.renderMarkdown(content, formatters),
+                try self.renderMarkdown(content, zmd_config),
                 .{},
                 writer,
             ),
@@ -777,7 +773,7 @@ fn parseZmpl(self: Node, content: []const u8) ![]const u8 {
     return buf.toOwnedSlice();
 }
 
-fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype, formatters: Formatters) !void {
+fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype, zmd_config: ZmdConfig) !void {
     if (context == .initial) {
         // When we render nodes, we render child nodes that exist within their bounds as we work
         // through each node. We only want to render the initial `if` statement defined by this
@@ -796,7 +792,7 @@ fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype, 
         .html => try self.renderHtml(content[0..content_end], .{}, writer),
         .zig => try self.renderZig(content[0..content_end], writer),
         .markdown => try self.renderHtml(
-            try self.renderMarkdown(content[0..content_end], formatters),
+            try self.renderMarkdown(content[0..content_end], zmd_config),
             .{},
             writer,
         ),
@@ -816,7 +812,7 @@ fn renderIf(self: Node, context: Context, content: []const u8, writer: anytype, 
             .html => try self.renderHtml(token.content, .{}, writer),
             .zig => try self.renderZig(token.content, writer),
             .markdown => try self.renderHtml(
-                try self.renderMarkdown(token.content, formatters),
+                try self.renderMarkdown(token.content, zmd_config),
                 .{},
                 writer,
             ),
@@ -879,7 +875,7 @@ fn ifStatement(self: Node, input: []const u8) !IfStatement {
 
 // Write a `@block` definition - note that we write to a different output buffer here - each
 // block is compiled into a separate function which is written after the main manifest body.
-fn writeBlock(self: Node, io: std.Io, context: Context, content: []const u8, formatters: Formatters) !void {
+fn writeBlock(self: Node, io: std.Io, context: Context, content: []const u8, zmd_config: ZmdConfig) !void {
     if (context == .initial) {
         const args = self.token.args orelse {
             std.log.err("Missing argument to `@block` mode: `{s}`", .{self.token.mode_line});
@@ -913,16 +909,16 @@ fn writeBlock(self: Node, io: std.Io, context: Context, content: []const u8, for
             .zig => try self.renderZig(content, writer),
             .html => try self.renderHtml(content, .{}, writer),
             .markdown => try self.renderHtml(
-                try self.renderMarkdown(content, formatters),
+                try self.renderMarkdown(content, zmd_config),
                 .{},
                 writer,
             ),
             .partial => try self.renderPartial(io, content, writer),
             .args => try self.renderArgs(writer),
             .extend => try self.renderExtend(writer),
-            .@"for" => try self.renderFor(context, content, writer, formatters),
-            .@"if" => try self.renderIf(context, content, writer, formatters),
-            .block => try self.writeBlock(io, context, content, formatters),
+            .@"for" => try self.renderFor(context, content, writer, zmd_config),
+            .@"if" => try self.renderIf(context, content, writer, zmd_config),
+            .block => try self.writeBlock(io, context, content, zmd_config),
             .blocks => try self.writeBlocks(writer),
         }
     } else {

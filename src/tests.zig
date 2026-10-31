@@ -49,7 +49,10 @@ test "readme example" {
         \\        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
         \\
         \\<div><h1>Built-in markdown support</h1>
-        \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
+        \\<ul>
+        \\  <li><a href="https://www.jetzig.dev/">jetzig.dev</a></li>
+        \\</ul>
+        \\</div>
         \\
     , output);
 }
@@ -139,7 +142,12 @@ test "complex example" {
         \\<div class="foo
         \\            bar
         \\            my-css-class
-        \\            baz"></div><div><ul><li>foo</li><li>bar</li><li>user@example.com</li></ul></div>      <span>hello</span>
+        \\            baz"></div><div><ul>
+        \\  <li>foo</li>
+        \\  <li>bar</li>
+        \\  <li>user@example.com</li>
+        \\</ul>
+        \\</div>      <span>hello</span>
         \\Bar partial content
         \\
         \\
@@ -204,7 +212,10 @@ test "custom delimiters" {
     const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\<div><h1>Built-in markdown support</h1>
-        \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
+        \\<ul>
+        \\  <li><a href="https://www.jetzig.dev/">jetzig.dev</a></li>
+        \\</ul>
+        \\</div>
         \\        <script>
         \\          const foo = () => {
         \\            console.log("hello");
@@ -246,9 +257,14 @@ test "escaping (HTML and backslash escaping" {
     const template = zmpl.find("escaping") orelse return expect(false);
     const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
-        \\<div><pre class="language-html" style="font-family: Monospace;"><code>&lt;div&gt;
+        \\<div><pre style="font-family: Monospace;" class="language-html">
+        \\<code>
+        \\&lt;div&gt;
         \\  @partial foo("bar")
-        \\&lt;/div&gt;</code></pre></div>
+        \\&lt;/div&gt;
+        \\</code>
+        \\</pre>
+        \\</div>
         \\
     , output);
 }
@@ -265,7 +281,6 @@ test "references combined with markdown" {
     const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\<div><h1>Test</h1>
-        \\
         \\<p>  <a href="https://jetzig.dev/">jetzig.dev</a></p>
         \\</div>
         \\
@@ -353,7 +368,10 @@ test "root init" {
         \\        <div class="slot-0"><a href="https://example.com/auth/abc123-456-def">Sign in</a></div>        <div class="slot-1"><a href="https://example.com/unsubscribe/abc123-456-def">Unsubscribe</a></div>
         \\
         \\<div><h1>Built-in markdown support</h1>
-        \\<ul><li><a href="https://www.jetzig.dev/">jetzig.dev</a></li></ul></div>
+        \\<ul>
+        \\  <li><a href="https://www.jetzig.dev/">jetzig.dev</a></li>
+        \\</ul>
+        \\</div>
         \\
     , output);
 }
@@ -839,7 +857,21 @@ test "mix mardown and zig" {
     const output = try template.render(io, &data, Context, .{}, &.{}, .{});
     try expectEqualStrings(
         \\<div><h1>Header</h1>
-        \\<ul><li>list item 1</li><li>list item 2</li></ul></div><div><ul><li>qux</li><li>   </li></ul></div><div><ul><li>corge</li><li>   </li></ul></div><div><ul><li>last item</li><li>qux</li></ul></div>
+        \\<ul>
+        \\  <li>list item 1</li>
+        \\  <li>list item 2</li>
+        \\</ul>
+        \\</div><div><ul>
+        \\  <li>qux</li>
+        \\</ul>
+        \\</div><div><ul>
+        \\  <li>corge</li>
+        \\</ul>
+        \\</div><div><ul>
+        \\  <li>last item</li>
+        \\  <li>qux</li>
+        \\</ul>
+        \\</div>
         \\
     , output);
 }

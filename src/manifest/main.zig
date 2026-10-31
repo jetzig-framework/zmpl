@@ -8,21 +8,21 @@ pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const io = init.io;
 
-    const options_fields = switch (@typeInfo(zmpl_options)) {
-        .@"struct" => |info| info.fields,
+    const options_info = switch (@typeInfo(zmpl_options)) {
+        .@"struct" => |info| info,
         else => @compileError("Invalid type for template constants, expected struct, found: " ++
             @typeName(zmpl_options)),
     };
 
     const permitted_fields = .{ "template_constants", "markdown_fragments", "manifest_header" };
 
-    inline for (options_fields) |field| {
+    inline for (options_info.field_names, options_info.field_types) |field_name, field_type| {
         inline for (permitted_fields) |permitted_field| {
-            if (std.mem.eql(u8, permitted_field, field.name)) break;
+            if (std.mem.eql(u8, permitted_field, field_name)) break;
         } else {
             std.debug.print(
                 "[zmpl] Unrecognized option: `{s}: {s}`\n",
-                .{ field.name, @typeName(field.type) },
+                .{ field_name, @typeName(field_type) },
             );
             std.process.exit(1);
         }
