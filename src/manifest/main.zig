@@ -78,6 +78,7 @@ pub fn main(init: std.process.Init) !void {
         &writer.interface,
         zmpl_options,
     );
+    try writer.interface.flush();
     file.close(io);
 }
 
